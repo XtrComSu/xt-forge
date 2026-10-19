@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+native/xtforge-rs/target/
+*.db-shm
+.DS_Store

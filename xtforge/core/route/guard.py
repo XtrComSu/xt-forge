@@ -1,0 +1,154 @@
+"""Safety guard (R10): read-only by default, allowlisted roots, realpath
+canonicalization, deny list, dry-run tokens for destructive ops.
+
+Nothing else in xt-forge touches the filesystem without going through here.
+"""
+from __future__ import annotations
+
+import fnmatch
+import os
+import re
+import secrets
+import time
+from pathlib import Path
+from typing import Any
+
+from ...version import cache_dir
+
+DEFAULT_ROOTS = ["$HOME", "$HOME/storage/shared", "$HOME/sample-app"]
+DENY_GLOBS = [
+    "*/.ssh/*", "*/.gnupg/*", "*.key", "*.pem", "*.pfx", "*.p12",
+    "*/.env", "*/.env.*", "*/.aws/credentials", "*/.netrc", "*.keystore",
+    "*/id_rsa*", "*/shadow", "*/.git-credentials",
+]
+DESTRUCTIVE = {"delete", "delete_all", "clear_scope", "sync_overwrite"}
+
+_TOKENS: dict[str, dict[str, Any]] = {}
+TOKEN_TTL = 300  # seconds
+
+
+class Denied(Exception):
+    def __init__(self, reason: str, code: str = "denied"):
+        super().__init__(reason)
+        self.reason = reason
+        self.code = code
+
+
+def _expand(p: str) -> Path:
+    return Path(os.path.expandvars(p)).expanduser()
+
+
+def roots() -> list[Path]:
+    env = os.environ.get("XT_ROOTS")
+    raw = env.split(",") if env else DEFAULT_ROOTS
+    out = []
+    for r in raw:
+        if r.strip():
+            out.append(_expand(r.strip()))
+    return out
+
+
+def is_denied_name(path: str) -> str | None:
+    """Return the deny glob that matched, or None."""
+    p = str(path)
+    for g in DENY_GLOBS:
+        if fnmatch.fnmatch(p, g) or fnmatch.fnmatch(os.path.basename(p), g):
+            return g
+    return None
+
+
+def canonical(path: str | Path) -> Path:
+    """Resolve symlinks and .. to defeat escapes. Nonexistent paths resolve
+    as far as possible, then the remainder is appended."""
+    p = _expand(str(path))
+    try:
+        return Path(os.path.realpath(str(p)))
+    except OSError:
+        return p
+
+
+def check_allowed(path: str | Path, write: bool = False) -> Path:
+    """Raise Denied unless path resolves inside an allowlisted root."""
+    canon = canonical(path)
+    allowed = False
+    for root in roots():
+        try:
+            canon.relative_to(root)
+            allowed = True
+            break
+        except ValueError:
+            continue
+    if not allowed:
+        raise Denied(f"path outside allowlisted roots: {canon}", "root_denied")
+    deny = is_denied_name(str(canon))
+    if deny and not write:
+        raise Denied(f"deny-listed path ({deny}): contents never exposed", "deny_listed")
+    if deny and write:
+        raise Denied(f"writing to deny-listed path ({deny}) is refused", "deny_listed")
+    return canon
+
+
+def read_guard(path: str | Path) -> Path:
+    """Guard for read paths: deny-listed entries are allowed but must be
+    listed only (name + size), never opened."""
+    return check_allowed(path, write=False)
+
+
+def write_guard(path: str | Path, write: bool, confirm_token: str | None = None,
+                dry_run: bool = False) -> dict[str, Any]:
+    """Guard for write paths (R10): needs write=true + token for destructive."""
+    canon = check_allowed(path, write=write)
+    if not write:
+        return {"path": str(canon), "write": False}
+    plan = {"path": str(canon), "write": True, "dry_run": True}
+    if dry_run:
+        return plan
+    if confirm_token:
+        rec = _TOKENS.get(confirm_token)
+        if not rec or rec["expires"] < time.time():
+            raise Denied("confirm_token missing, expired, or already used", "token_invalid")
+        if rec["path"] != str(canon):
+            raise Denied("confirm_token does not match this path", "token_mismatch")
+        del _TOKENS[confirm_token]
+        return {"path": str(canon), "write": True, "dry_run": False, "confirmed": True}
+    return plan
+
+
+# ---- confirm tokens ----
+
+def issue_token(action: str, path: str, scope: str = "global") -> dict[str, Any]:
+    tok = secrets.token_hex(12)
+    rec = {"action": action, "path": str(canonical(path)), "scope": scope,
+           "issued": time.time(), "expires": time.time() + TOKEN_TTL}
+    _TOKENS[tok] = rec
+    _persist()
+    return {"confirm_token": tok, "action": action, "path": rec["path"],
+            "expires_in": TOKEN_TTL,
+            "note": f"re-run with --confirm {tok} to execute {action}"}
+
+
+def _persist() -> None:
+    from ...atomicio import atomic_write_json
+    safe = {k: {**v, "confirm_token": None} for k, v in _TOKENS.items()}
+    try:
+        atomic_write_json(cache_dir() / "tokens.json", safe)
+    except OSError:
+        pass
+
+
+def check_command(cmd: str) -> str | None:
+    """Reject shell shapes that are never allowed. Returns reason or None."""
+    forbidden = [
+        (r"\brm\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*r", "recursive delete"),
+        (r"\bsudo\b|\bsu\b", "privilege escalation"),
+        (r"\bcurl\b[^|]*\|\s*(ba)?sh", "remote code execution"),
+        (r"\bwget\b[^|]*\|\s*(ba)?sh", "remote code execution"),
+        (r">\s*/(etc|usr|bin|sbin|system|boot)/", "write to system path"),
+        (r"\bchmod\s+777\b", "world-writable"),
+        (r"\bdd\s+.*of=/dev/", "raw device write"),
+        (r"\bmkfs\b|\bfdisk\b", "filesystem destruction"),
+    ]
+    for pat, reason in forbidden:
+        if re.search(pat, cmd, re.IGNORECASE):
+            return reason
+    return None

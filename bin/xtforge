@@ -1,0 +1,16 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# portable xt-forge launcher — native-first dispatch, python fallback.
+# XT_FORCE_PYTHON=1 forces the Python reference path.
+# Self-locating: resolves ROOT from this script's location (repo root above bin/).
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export XT_HOME="${XT_HOME:-$HOME/.xt-forge}"
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+NATIVE="$ROOT/native/xtforge-rs/target/release/xtforge-native"
+if [ "${XT_FORCE_PYTHON:-0}" != "1" ] && [ -x "$NATIVE" ]; then
+  exec "$NATIVE" "$@"
+fi
+cd "$ROOT"
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 -m xtforge.cli "$@"
+fi
+exec "/data/data/com.termux/files/usr/bin/python3" -m xtforge.cli "$@"
