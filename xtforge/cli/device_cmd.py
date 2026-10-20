@@ -30,6 +30,16 @@ def cmd_route(args):
                                                 min_size=args.min_size,
                                                 limit=args.limit))
     if verb == "grep":
+        if getattr(args, "rank", False):
+            from pathlib import Path
+            from ..core.route import pack as packmod
+            ranked = packmod.rank_lines(Path(args.path or "."),
+                                        args.pattern or "",
+                                        limit=args.limit, glob=args.glob)
+            return _out(args, {"root": args.path or ".", "pattern": args.pattern,
+                               "count": len(ranked), "matches": ranked},
+                        "\n".join(f"{m['score']:>5} {m['path']}:{m['line']} "
+                                  f"{m['text']}" for m in ranked))
         return _out(args, routetools.route_grep(args.path, args.pattern,
                                                 glob=args.glob,
                                                 context=args.context,
@@ -58,8 +68,17 @@ def cmd_route(args):
 
 def _cmd_route_shortcut(args, shortcuts):
     if args.route_verb == "context":
-        result = shortcuts.route_context(args.path or ".", args.token_budget,
-                                        args.file_limit)
+        query = (getattr(args, "query", None) or "").strip()
+        if query:
+            # Query-aware packing: spend the budget on the lines that answer.
+            from ..core.route import pack as packmod
+            result = packmod.pack(args.path or ".", query,
+                                  token_budget=args.token_budget,
+                                  file_limit=args.file_limit,
+                                  window=max(1, args.context))
+        else:
+            result = shortcuts.route_context(args.path or ".", args.token_budget,
+                                             args.file_limit)
     elif args.route_verb == "batch-peek":
         paths = args.paths or ([args.path] if args.path else [])
         result = shortcuts.route_batch_peek(paths, args.token_budget,
@@ -90,6 +109,46 @@ def cmd_phone(args):
     if verb == "adb":
         return _out(args, phonemod.phone_adb(args.text))
     return 1
+
+
+def cmd_code(args):
+    """`xtforge code` — structure extraction (real AST where we can parse)."""
+    from ..core.code import parse as codeparse
+    verb = args.code_verb
+    path = args.path or (args.value if verb != "refs" else None) or "."
+    if verb == "symbols":
+        info = codeparse.symbols(path)
+        human = "\n".join(
+            f"{s['line']:>5} {s['kind']:<10} {s['name']:<32} {s['signature']}"
+            for s in info["symbols"]) or "(no symbols found)"
+        if info.get("error"):
+            human += f"\nnote: {info['error']}"
+        return _out(args, info, human)
+    if verb == "outline":
+        info = codeparse.outline(path)
+
+        def render(nodes, depth=0):
+            lines = []
+            for node in nodes:
+                lines.append(f"{'  ' * depth}{node['kind']:<10} {node['name']} "
+                             f"(L{node['line']})")
+                lines.extend(render(node.get("children", []), depth + 1))
+            return lines
+
+        return _out(args, info,
+                    "\n".join(render(info.get("tree", []))) or "(empty)")
+    if verb == "refs":
+        name = args.name or args.value
+        if not name:
+            return _out(args, {"ok": False, "error": "code refs needs --name"},
+                        "error: code refs needs --name", code=2)
+        info = codeparse.refs(path, name, limit=args.limit)
+        human = "\n".join(f"{r['path']}:{r['line']}"
+                          f"{'  [def]' if r['definition'] else ''} {r['text']}"
+                          for r in info["refs"]) or "(no references)"
+        return _out(args, info, human)
+    return _out(args, {"ok": False, "error": f"unknown verb: {verb}"},
+                f"error: unknown verb {verb}", code=2)
 
 
 def cmd_compress(args):

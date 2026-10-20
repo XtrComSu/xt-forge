@@ -1,0 +1,11 @@
+{
+  "name": "xt-native",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "xt-forge native plugin for OpenCode: /taste, /goal, /loop",
+  "main": "index.ts",
+  "engines": {
+    "opencode": ">=2.0.0"
+  }
+}

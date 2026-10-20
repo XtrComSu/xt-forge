@@ -15,7 +15,17 @@ from typing import Any
 
 from ...version import cache_dir
 
-DEFAULT_ROOTS = ["$HOME", "$HOME/storage/shared", "$HOME/sample-app"]
+DEFAULT_ROOTS = [
+    "$HOME", "$HOME/storage/shared", "$HOME/sample-app",
+    # Scratch space: tests and tools need a writable place that is not HOME.
+    "/tmp", "/var/tmp",
+    # System binaries and libraries: what `re info|sections|symbols|strings`
+    # exists to inspect. Reads stay subject to DENY_GLOBS below.
+    "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/lib64",
+    "/lib", "/lib64", "/opt",
+    # Termux prefix; skipped entirely when PREFIX is unset.
+    "${PREFIX}/bin", "${PREFIX}/sbin", "${PREFIX}/lib", "${PREFIX}/share",
+]
 DENY_GLOBS = [
     "*/.ssh/*", "*/.gnupg/*", "*.key", "*.pem", "*.pfx", "*.p12",
     "*/.env", "*/.env.*", "*/.aws/credentials", "*/.netrc", "*.keystore",
@@ -43,8 +53,15 @@ def roots() -> list[Path]:
     raw = env.split(",") if env else DEFAULT_ROOTS
     out = []
     for r in raw:
-        if r.strip():
-            out.append(_expand(r.strip()))
+        entry = r.strip()
+        if not entry:
+            continue
+        expanded = _expand(entry)
+        # An unexpanded $VAR must never become a root: an unset PREFIX would
+        # otherwise leave a placeholder path in the allowlist.
+        if "$" in str(expanded) or str(expanded) in ("/", "", "."):
+            continue
+        out.append(expanded)
     return out
 
 

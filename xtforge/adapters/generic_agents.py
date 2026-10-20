@@ -22,11 +22,19 @@ def bin_path() -> Path:
 
 
 def render(target_root: Path | None = None) -> str:
+    """Render AGENTS.md for a harness.
+
+    `target_root` is where the file will be installed; `<root>` always points
+    at the tool root, which is what an agent needs to reach the sources.
+    """
+    if not TEMPLATE.is_file():
+        raise FileNotFoundError(f"AGENTS.md template is missing: {TEMPLATE}")
     text = TEMPLATE.read_text(encoding="utf-8")
     text = text.replace("<app>", app_name())
     text = text.replace("<version>", version_str())
-    text = text.replace("<root>", str(target_root or project_root()))
+    text = text.replace("<root>", str(project_root()))
     text = text.replace("<xt_home>", str(xt_home()))
+    text = text.replace("<home>", str(target_root or Path.home()))
     text = text.replace("<bin>", str(bin_path()))
     return text
 

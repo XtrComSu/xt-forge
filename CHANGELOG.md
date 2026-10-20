@@ -5,6 +5,61 @@ single source of truth. This repo is a consolidation snapshot of the xt-forge
 line (origin: `sample-app/xtforge` + `native/xtforge-rs`, plus the live
 `~/.xt-forge` store), created 2026-10-19 for portable backup and install.
 
+## 0.3.1-Damascus — 2026-10-20
+
+- plugin: the OpenCode taste plugin is source in this repo
+  (`plugins/xt-native/`) and ships with `xtforge plugin install|status|
+  uninstall`; `xtforge sync` installs it too. Installed byte-for-byte and
+  stamped with the paths the plugin needs, so the copy on a machine is not
+  pinned to one home directory
+- plugin: D2 acceptance — **10 scripted sessions -> 6 expected learnings, 0
+  invented keys, 1 enforced rule injected** (`plugins/xt-native/test/
+  taste.sessions.test.mjs`); near-miss prompts stay silent and a hint never
+  reaches the session
+- plugin: 11 contract tests drive the real plugin with a mock OpenCode
+  context (`plugins/xt-native/test/plugin.test.mjs`) — commands, hooks, the
+  injected block, a fabricated completion claim, loop scheduling, and
+  degradation when xt-forge is missing
+- doctor: reports the plugin as installed / registered / current, with the
+  drift list, instead of a single boolean that could not see it
+- sync: writes the OpenCode config in the shape OpenCode v2 reads
+  (`mcp.servers`, `plugins`), leaves a working MCP command alone, and backs
+  up the config it rewrites
+- sync: the AGENTS.md template ships again (`adapters/generic/AGENTS.md.tpl`)
+  and the generated launcher points at an interpreter and a shell that exist
+- cli: `xtforge plugin install|status|uninstall|manifest`
+
+## 0.3.1-Damascus — 2026-10-20
+
+- taste plugin: shipped from this repo. `plugins/xt-native/` is the canon;
+  `xtforge plugin install|status|uninstall|manifest` copies it to
+  `~/.config/opencode/plugins/xt-native/`, registers it in `opencode.json`
+  and reports drift between the repo copy and the installed one. `xtforge
+  sync` asks the same code to do the work — one writer, one set of rules
+- taste plugin: the installed copy is stamped with the xt-forge checkout and
+  the interpreter, so it no longer depends on one machine's home directory.
+  Without a stamp the plugin degrades to a no-op instead of guessing
+- taste: the extractor only creates a key from a preference word (always,
+  never, prefer, avoid, please use, "use X not Y"). A bare "use" is a work
+  order far more often than it is a durable preference — 19 of the 23 live
+  learnings were invented by the old, looser rules
+- taste: `taste prune` retires the learnings the current rules would no
+  longer invent, so a scheduled tidy can clean the profile without guesswork
+- taste: concurrent writes no longer lose evidence. Absorbing a signal is a
+  read-modify-write, and SQLite's deferred transaction did the read *outside*
+  the write lock — so two processes learning the same key both read the same
+  row and both wrote it back, and one piece of evidence was gone. Four
+  concurrent writers recorded **1** piece of evidence instead of 4, so the
+  rule never reached `enforced` and was never injected into a session. The
+  store now takes the write lock before the read (`BEGIN IMMEDIATE`): 4
+  writers record 4 pieces of evidence and the rule is `enforced`
+  (`scripts/repro_taste_lost_update.py`; regression test in
+  `tests/test_taste.py`)
+- taste plugin: prompt ingests are serialised, so a learning's statement is
+  decided by the order the preference was said, not by process timing
+- goal/loop: session-scoped goals, restart-safe loops, self-paced backoff
+- suite: 393 tests green, including the plugin's own runtime tests on Node
+
 ## 0.3.0-Damascus — 2026-10-06
 
 - build: type 2 (specbuild) pipeline

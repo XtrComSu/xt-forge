@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from . import scopes as sc
+from . import links as linkmod
 from .write_policy import body_hash, jaccard, redact, tokenize
 
 SCHEMA_VERSION = 1
@@ -66,6 +67,17 @@ LIKE_FALLBACK_SCHEMA = """
 CREATE TABLE IF NOT EXISTS mem_trgm(id TEXT PRIMARY KEY, trigrams TEXT NOT NULL);
 """
 
+# links() used to accept free-text relations and could store duplicates; this
+# normalizes the table before the unique index goes on. Idempotent.
+LINKS_MIGRATION = """
+UPDATE links SET rel='relates_to' WHERE rel IS NULL OR trim(lower(rel)) NOT IN (
+  'relates_to','supersedes','derived_from','part_of','caused_by','fixes',
+  'contradicts','see_also');
+DELETE FROM links WHERE rowid NOT IN (
+  SELECT MIN(rowid) FROM links GROUP BY src, dst, rel);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_links_unique ON links(src, dst, rel);
+"""
+
 
 def new_id() -> str:
     return uuid.uuid4().hex[:16]
@@ -104,6 +116,7 @@ class Store:
         self.conn.execute("PRAGMA synchronous=FULL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(MIGRATION_001)
+        self.conn.executescript(LINKS_MIGRATION)
         self.fts = has_fts5(self.conn) if use_fts is None else use_fts
         if self.fts:
             self.conn.executescript(FTS_SCHEMA)
@@ -182,6 +195,15 @@ class Store:
         near = next((n for n in notes if n.startswith("near_dup:")), None)
         if dedupe or near:
             target = (dedupe or near).split(":", 1)[1]
+            # A pending candidate must never rewrite promoted memory: report
+            # the collision and let review decide.
+            if pending:
+                row = self.conn.execute("SELECT pending FROM mem WHERE id=?",
+                                        (target,)).fetchone()
+                if row is not None and not row["pending"]:
+                    self.conn.commit()
+                    return {"id": target, "action": "dup_of_promoted",
+                            "notes": notes}
             self.conn.execute(
                 "UPDATE mem SET body=?, title=CASE WHEN ?='' THEN title ELSE ? END, updated=?, "
                 "confidence=MAX(confidence,?), supersedes=? WHERE id=?",
@@ -206,6 +228,7 @@ class Store:
 
     def forget(self, rec_id: str) -> bool:
         self._drop_index(rec_id)
+        self.conn.execute("DELETE FROM links WHERE src=? OR dst=?", (rec_id, rec_id))
         cur = self.conn.execute("DELETE FROM mem WHERE id=?", (rec_id,))
         self.conn.commit()
         return cur.rowcount > 0
@@ -265,9 +288,84 @@ class Store:
         self.conn.commit()
         return cur.rowcount
 
-    def link(self, src: str, dst: str, rel: str = "related") -> None:
-        self.conn.execute("INSERT INTO links(src,dst,rel) VALUES(?,?,?)", (src, dst, rel))
+    # ---------- typed links ----------
+
+    def link(self, src: str, dst: str, rel: str | None = None) -> dict[str, Any]:
+        """Typed, deduped edge between two records. Raises on bad input."""
+        if not src or not dst:
+            raise ValueError("link requires both src and dst ids")
+        if src == dst:
+            raise ValueError("cannot link a record to itself")
+        if not linkmod.is_valid_relation(rel or ""):
+            raise ValueError(f"invalid relation {rel!r}; expected one of "
+                             f"{sorted(linkmod.RELATIONS)}")
+        relation = linkmod.normalize_relation(rel)
+        for rec_id in (src, dst):
+            if self.conn.execute("SELECT 1 FROM mem WHERE id=?",
+                                 (rec_id,)).fetchone() is None:
+                raise ValueError(f"unknown record: {rec_id}")
+        cur = self.conn.execute("INSERT OR IGNORE INTO links(src,dst,rel) "
+                                "VALUES(?,?,?)", (src, dst, relation))
         self.conn.commit()
+        return {"src": src, "dst": dst, "rel": relation,
+                "meaning": linkmod.describe(relation),
+                "action": "linked" if cur.rowcount else "unchanged"}
+
+    def unlink(self, src: str, dst: str, rel: str | None = None) -> int:
+        if rel:
+            cur = self.conn.execute("DELETE FROM links WHERE src=? AND dst=? AND rel=?",
+                                    (src, dst, linkmod.normalize_relation(rel)))
+        else:
+            cur = self.conn.execute("DELETE FROM links WHERE src=? AND dst=?",
+                                    (src, dst))
+        self.conn.commit()
+        return cur.rowcount
+
+    def links(self, rec_id: str, include_titles: bool = True) -> dict[str, Any]:
+        """Outgoing and incoming edges for one record."""
+        def fetch(sql: str, arg: str) -> list[dict[str, Any]]:
+            rows = self.conn.execute(sql, (arg,)).fetchall()
+            out = []
+            for row in rows:
+                edge = dict(row)
+                if include_titles:
+                    title = self.conn.execute(
+                        "SELECT title FROM mem WHERE id=?",
+                        (edge.get("other"),)).fetchone()
+                    edge["title"] = title["title"] if title else ""
+                out.append(edge)
+            return out
+
+        out_rows = fetch(
+            "SELECT dst AS other, rel FROM links WHERE src=? ORDER BY rel, dst", rec_id)
+        in_rows = fetch(
+            "SELECT src AS other, rel FROM links WHERE dst=? ORDER BY rel, src", rec_id)
+        return {
+            "id": rec_id,
+            "out": linkmod.shape(out_rows, "out"),
+            "in": linkmod.shape(in_rows, "in"),
+            "count": len(out_rows) + len(in_rows),
+        }
+
+    def neighbors(self, rec_id: str, depth: int = 1) -> list[str]:
+        """Linked record ids, walking edges in both directions (deduped)."""
+        seen = {rec_id}
+        frontier = [rec_id]
+        for _ in range(max(1, depth)):
+            nxt: list[str] = []
+            for current in frontier:
+                rows = self.conn.execute(
+                    "SELECT dst AS other FROM links WHERE src=? "
+                    "UNION SELECT src AS other FROM links WHERE dst=?", (current, current))
+                for row in rows:
+                    other = row["other"]
+                    if other not in seen:
+                        seen.add(other)
+                        nxt.append(other)
+            if not nxt:
+                break
+            frontier = nxt
+        return sorted(seen - {rec_id})
 
     def close(self) -> None:
         try:

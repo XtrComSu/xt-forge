@@ -1,0 +1,26 @@
+{
+  "note": "20 packing tasks. Each query is an agent question; `evidence` is the exact line text that must survive packing for the answer to be recoverable from the context.",
+  "project": "mini_project",
+  "tasks": [
+    {"id": "t01", "query": "how is the retry delay calculated", "evidence": "delay = min(BASE_DELAY * 2 ** (attempt - 1), MAX_DELAY)"},
+    {"id": "t02", "query": "how many attempts before a job is abandoned", "evidence": "MAX_ATTEMPTS = 5"},
+    {"id": "t03", "query": "where is job latency recorded", "evidence": "self.metrics.observe(\"worker.latency\", self.clock() - started)"},
+    {"id": "t04", "query": "what limits how many jobs one drain processes", "evidence": "def drain(self, limit: int = 100) -> list[dict[str, Any]]:"},
+    {"id": "t05", "query": "which journal mode does the database use", "evidence": "conn.execute(\"PRAGMA journal_mode=WAL\")"},
+    {"id": "t06", "query": "how many database connections are opened", "evidence": "POOL_SIZE = 4"},
+    {"id": "t07", "query": "what happens when the stored schema is newer than the code", "evidence": "raise MigrationError(f\"schema {current} is newer than {SCHEMA_VERSION}\")"},
+    {"id": "t08", "query": "where are database rows turned into dicts", "evidence": "def fetch(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> list[dict[str, Any]]:"},
+    {"id": "t09", "query": "which directories may be written to", "evidence": "ALLOWED_ROOTS = (\"/tmp\", \"/var/tmp\", \"/home\")"},
+    {"id": "t10", "query": "what happens without a confirm token", "evidence": "raise Denied(\"missing or reused confirm token\", \"confirm_required\")"},
+    {"id": "t11", "query": "where are one shot tokens minted", "evidence": "def issue_token() -> str:"},
+    {"id": "t12", "query": "are dry run writes refused", "evidence": "return {\"allowed\": True, \"reason\": \"dry_run\"}"},
+    {"id": "t13", "query": "how are old cache entries evicted", "evidence": "self._items.popitem(last=False)"},
+    {"id": "t14", "query": "when do cache entries expire", "evidence": "if expires_at < time.time():"},
+    {"id": "t15", "query": "how is cache hit rate computed", "evidence": "return self.hits / total if total else 0.0"},
+    {"id": "t16", "query": "how are duplicate jobs detected", "evidence": "digest = hashlib.sha256(repr(sorted(payload.items())).encode()).hexdigest()[:16]"},
+    {"id": "t17", "query": "what order are jobs dequeued in", "evidence": "\"ORDER BY priority DESC, id LIMIT 1\""},
+    {"id": "t18", "query": "is the histogram sample count bounded", "evidence": "if len(samples) < 4096:"},
+    {"id": "t19", "query": "which latency buckets are defined", "evidence": "BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0)"},
+    {"id": "t20", "query": "what code does a timeout map to", "evidence": "if isinstance(exc, TimeoutError):"}
+  ]
+}

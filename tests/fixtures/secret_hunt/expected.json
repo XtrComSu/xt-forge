@@ -1,0 +1,41 @@
+{
+  "note": "Round-6 scan fixture. Every credential is fake and generated for this test. The gate is strict: zero false negatives on leak.py and zero findings on decoy.py.",
+  "leak_file": "leak.py",
+  "decoy_file": "decoy.py",
+  "pattern_file": "risky.py",
+  "manifest_file": "requirements.txt",
+  "must_find_rules": [
+    "aws_access_key",
+    "aws_secret_key",
+    "github_token",
+    "slack_token",
+    "stripe_key",
+    "google_api_key",
+    "bearer_token",
+    "url_credentials",
+    "generic_assignment",
+    "jwt",
+    "private_key_block",
+    "high_entropy"
+  ],
+  "decoy_expect_findings": 0,
+  "pattern_must_find_rules": [
+    "eval",
+    "shell_true",
+    "os_system",
+    "weak_hash",
+    "pickle_load",
+    "yaml_unsafe_load",
+    "unverified_context",
+    "tls_verify_off",
+    "insecure_random",
+    "sql_format"
+  ],
+  "manifest_must_find_rules": [
+    "unpinned",
+    "unbounded_range",
+    "http_index",
+    "git_http",
+    "local_path"
+  ]
+}

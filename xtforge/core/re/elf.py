@@ -1,6 +1,7 @@
-"""Dependency-free ELF inspection (headers, sections, symbols, dynamic, strings)."""
+"""Dependency-free ELF inspection (headers, sections, symbols, dynamic, strings, entropy)."""
 from __future__ import annotations
 
+import math
 import re
 import struct
 from pathlib import Path
@@ -320,3 +321,116 @@ def strings(path: str | Path, min_len: int = 4,
         out.append(text)
     return {"ok": True, "path": str(resolved), "min": minimum, "limit": cap,
             "strings": out, "truncated": truncated}
+
+
+def _shannon_bytes(data: bytes) -> float:
+    if not data:
+        return 0.0
+    counts = [0] * 256
+    for byte in data:
+        counts[byte] += 1
+    total = len(data)
+    return -sum((n / total) * math.log2(n / total) for n in counts if n)
+
+
+def entropy(path: str | Path, block: int = 0,
+            limit: int = 32) -> dict[str, Any]:
+    """Byte entropy (bits/char) overall and per block.
+
+    High entropy (≈7.0+) means packed, compressed or encrypted content; low
+    entropy means text or structured data. Useful for spotting a packed
+    payload hiding in an otherwise ordinary file.
+    """
+    resolved, data = _load(path)
+    if not data:
+        return {"ok": False, "err": "empty_file", "path": str(resolved)}
+    overall = round(_shannon_bytes(data), 3)
+
+    def verdict(value: float) -> str:
+        if value >= 7.0:
+            return "packed_or_encrypted"
+        if value >= 5.5:
+            return "mixed"
+        if value >= 3.5:
+            return "structured"
+        return "low"
+
+    out: dict[str, Any] = {
+        "ok": True, "path": str(resolved), "bytes": len(data),
+        "entropy": overall, "verdict": verdict(overall),
+    }
+    if block and block > 0:
+        size = max(16, int(block))
+        blocks = []
+        for offset in range(0, len(data), size):
+            chunk = data[offset:offset + size]
+            value = round(_shannon_bytes(chunk), 3)
+            blocks.append({"offset": offset, "size": len(chunk),
+                           "entropy": value, "verdict": verdict(value)})
+            if len(blocks) >= max(1, int(limit)):
+                break
+        out["block_size"] = size
+        out["blocks"] = blocks
+        out["truncated"] = len(data) > size * len(blocks)
+    return out
+
+
+def pack(path: str | Path) -> dict[str, Any]:
+    """Packing triage: is this binary hiding something?
+
+    Packed or encrypted payloads show high entropy *and* few recoverable
+    strings, so the two signals together are far more reliable than entropy
+    alone. Works on ELF; degrades to byte-level triage for anything else.
+    """
+    resolved, data = _load(path)
+    if not data:
+        return {"ok": False, "err": "empty_file", "path": str(resolved)}
+    overall = round(_shannon_bytes(data), 3)
+
+    string_re = re.compile(rb"[\x20-\x7e]{6,}")
+    long_re = re.compile(rb"[\x20-\x7e]{20,}")
+    strings = string_re.findall(data)
+    long_strings = long_re.findall(data)
+    density = round(len(strings) * 1024 / max(1, len(data)), 3)
+    long_density = round(len(long_strings) * 1024 / max(1, len(data)), 3)
+    avg_len = round(sum(len(s) for s in strings) / len(strings), 1) if strings else 0
+
+    section_rows: list[dict[str, Any]] = []
+    try:
+        info = sections(resolved)
+        for section in info.get("sections", []):
+            offset, size = section.get("offset"), section.get("size")
+            if not offset or not size or size < 64:
+                continue
+            chunk = data[offset:offset + size]
+            if not chunk:
+                continue
+            section_rows.append({"name": section.get("name"),
+                                 "size": size,
+                                 "entropy": round(_shannon_bytes(chunk), 3)})
+        section_rows.sort(key=lambda s: -s["entropy"])
+    except (ElfError, ValueError, OSError):
+        section_rows = []                        # not an ELF: byte triage only
+
+    hot = [s for s in section_rows if s["entropy"] >= 7.0]
+    # Long strings are the tell: random-looking bytes still produce short
+    # printable runs by chance, but not 20-character ones.
+    if overall >= 7.0 and long_density < 0.5:
+        verdict = "likely_packed_or_encrypted"
+    elif hot and long_density < 2.0:
+        verdict = "suspicious_section"
+    elif overall >= 6.0:
+        verdict = "mixed"
+    else:
+        verdict = "normal"
+
+    return {"ok": True, "path": str(resolved), "bytes": len(data),
+            "entropy": overall, "strings": len(strings),
+            "long_strings": len(long_strings),
+            "string_density_per_kb": density,
+            "long_string_density_per_kb": long_density,
+            "avg_string_len": avg_len,
+            "sections": section_rows[:10], "hot_sections": len(hot),
+            "verdict": verdict,
+            "note": ("high entropy with few long strings usually means packing, "
+                     "encryption or a compressed payload")}

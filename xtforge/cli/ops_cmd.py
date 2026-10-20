@@ -13,6 +13,35 @@ def cmd_goal(args):
     from ..version import runs_dir
     verb = args.goal_verb
     objective = (args.objective or "").strip()
+
+    if verb == "verify":
+        # Independent verification of a completion claim. The agent does not
+        # get to decide whether its own evidence holds up.
+        from .common import _read_file_arg
+        from ..core.goal import completion as comp
+        try:
+            raw = _read_file_arg(args, "body_file")
+        except OSError as exc:
+            return _out(args, {"ok": False, "error": str(exc)}, str(exc), code=1)
+        text = raw if raw is not None else (args.body or objective or "")
+        if not text.strip():
+            return _out(args, {"ok": False,
+                               "error": "goal verify needs the marker text "
+                                        "(--body-file -)"},
+                        "error: goal verify needs marker text", code=2)
+        criteria = [c.strip() for c in (args.criteria or "").split(";") if c.strip()]
+        approved = [c.strip() for c in
+                    (getattr(args, "approved_cmd", None) or []) if c.strip()]
+        res = comp.verify_completion(
+            text, workspace=args.workdir or ".", criteria=criteria,
+            approved_cmds=approved, verify_cmd=args.verify)
+        gaps = res.get("gaps") or []
+        human = (f"{res['verdict'].upper()}: {res.get('claim', '')[:90]}\n"
+                 + "\n".join(f"  - {gap}" for gap in gaps)) \
+            if gaps else f"PASS: {res.get('claim', '')[:90]}"
+        return _out(args, res, human,
+                    code=0 if res.get("ok") else 1)
+
     if verb == "status" and objective:
         verb = "run"
     if verb in {"run", "start"}:
@@ -55,6 +84,67 @@ def cmd_goal(args):
             return _out(args, {"history": g.history})
     return _out(args, {"error": gdrivers.DRIVER_REQUIRED},
                 gdrivers.DRIVER_REQUIRED, code=1)
+
+
+def cmd_loop(args):
+    """`xtforge loop` — grammar and policy; the harness owns the timers."""
+    from ..core import loop as loopmod
+    verb = args.loop_verb
+    value = (args.value or "").strip()
+
+    if verb == "parse":
+        plan = loopmod.parse_command(value)
+        human = (f"mode:    {plan['mode']}\n"
+                 f"task:    {plan['task'] or '(from loop.md)'}\n"
+                 + (f"cadence: {plan.get('label')} ({plan.get('interval')}s)"
+                    if plan.get("interval") else "")
+                 + (f"\nerror:   {plan['error']}" if plan.get("error") else ""))
+        return _out(args, plan, human.strip())
+
+    if verb == "normalize":
+        seconds = loopmod.parse_interval(value)
+        if seconds is None and value.isdigit():
+            seconds = int(value)
+        if seconds is None:
+            return _out(args, {"ok": False, "error": f"not an interval: {value}"},
+                        f"error: not an interval: {value}", code=2)
+        norm, label = loopmod.normalize_interval(seconds)
+        return _out(args, {"requested": seconds, "seconds": norm, "label": label},
+                    f"{seconds}s -> {label} ({norm}s)")
+
+    if verb == "markers":
+        res = loopmod.parse_markers(value)
+        human = (f"action: {res.get('action')}\n"
+                 + (f"delay:  {res.get('delay')}s\n" if res.get("delay") else "")
+                 + (f"reason: {res.get('reason')}\n" if res.get("reason") else "")
+                 + (f"gap:    {res.get('gap')}" if res.get("gap") else ""))
+        return _out(args, res, human.strip())
+
+    if verb == "next":
+        marker = loopmod.parse_markers(getattr(args, "body", None) or value)
+        res = loopmod.next_delay(args.base, marker,
+                                 quiet_streak=getattr(args, "quiet", 0) or 0,
+                                 omit_streak=getattr(args, "omit", 0) or 0)
+        human = (f"action: {res['action']}\n"
+                 + (f"delay:  {res.get('delay')}s\n" if res.get("delay") else "")
+                 + f"reason: {res.get('reason', '')}")
+        return _out(args, {**res, "marker": marker}, human.strip())
+
+    if verb == "policy":
+        from ..core.loop import schedule as sched
+        payload = {
+            "max_tasks": sched.MAX_TASKS,
+            "lifetime_seconds": sched.LIFETIME_SECONDS,
+            "min_delay": loopmod.MIN_DELAY,
+            "max_delay": loopmod.MAX_DELAY,
+            "kill_switch_env": loopmod.KILL_SWITCH,
+            "disabled": loopmod.disabled(),
+        }
+        human = "\n".join(f"{k:<18} {v}" for k, v in payload.items())
+        return _out(args, payload, human)
+
+    return _out(args, {"ok": False, "error": f"unknown verb: {verb}"},
+                f"error: unknown verb {verb}", code=2)
 
 
 def cmd_build(args):

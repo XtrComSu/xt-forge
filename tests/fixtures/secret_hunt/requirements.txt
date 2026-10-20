@@ -1,0 +1,9 @@
+# Fixture: dependency hygiene problems the scan must report.
+requests
+flask>=2.0
+urllib3==1.26.18
+package==*
+leftpad@latest
+--index-url http://pypi.example.com/simple
+git+http://example.com/pkg.git
+-e ../local-package

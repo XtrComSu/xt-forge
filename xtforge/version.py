@@ -57,6 +57,12 @@ def db_path() -> Path:
     return xt_home() / "mem.db"
 
 
+def taste_db_path() -> Path:
+    """Taste state lives beside memory but is a separate store: taste is
+    preference policy, not knowledge, and must be exportable on its own."""
+    return xt_home() / "taste.db"
+
+
 def flash_dir() -> Path:
     d = xt_home() / "flash"
     d.mkdir(parents=True, exist_ok=True)

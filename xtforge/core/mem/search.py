@@ -1,6 +1,11 @@
 """Memory retrieval: BM25 (FTS5) or trigram LIKE fallback, budget-packed (F2).
 
 Score components (explain=True): text, recency, pin, uses.
+
+Hybrid mode (`hybrid=True`, default) blends the lexical score with a local
+embedding similarity and lets semantic-only matches enter the candidate set.
+When no embedding is available or produces no match, the result is exactly the
+lexical ranking — the FTS-only path is not re-tuned.
 """
 from __future__ import annotations
 
@@ -9,6 +14,7 @@ import re
 import time
 from typing import Any
 
+from .embed import Embedder, VectorIndex
 from .scopes import read_order
 from .store import Store, trigrams
 
@@ -20,6 +26,30 @@ W_TEXT = 1.0
 W_RECENCY = 0.35
 W_PIN = 0.5
 W_USE = 0.15
+RRF_K = 60          # reciprocal-rank-fusion constant
+_SEMANTIC_CAP = 2000  # records considered by the vector pass
+
+
+def _ranks(scores: dict[str, float]) -> dict[str, int]:
+    """1-based rank by descending score; ties broken by id for determinism."""
+    order = sorted(scores, key=lambda rid: (-scores[rid], rid))
+    return {rec_id: index for index, rec_id in enumerate(order, start=1)}
+
+
+def _fuse(lexical: dict[str, float], semantic: dict[str, float]) -> dict[str, float]:
+    """Reciprocal rank fusion: scale-free, so a noisy lexical magnitude cannot
+    bury a correct semantic hit. A candidate absent from one list simply
+    collects one term instead of two."""
+    lex_rank, sem_rank = _ranks(lexical), _ranks(semantic)
+    out: dict[str, float] = {}
+    for rec_id in set(lex_rank) | set(sem_rank):
+        total = 0.0
+        if rec_id in lex_rank:
+            total += 1.0 / (RRF_K + lex_rank[rec_id])
+        if rec_id in sem_rank:
+            total += 1.0 / (RRF_K + sem_rank[rec_id])
+        out[rec_id] = total
+    return out
 
 
 def est_tokens(text: str) -> int:
@@ -58,11 +88,29 @@ def _scope_rank(rec_scope: str, order: list[str]) -> float:
         return 0.0
 
 
+def _vector_index(store: Store, embedder: Embedder) -> VectorIndex:
+    """Cached per store, invalidated by row count and newest update."""
+    row = store.conn.execute(
+        "SELECT COUNT(*) AS n, COALESCE(MAX(updated), 0) AS u FROM mem").fetchone()
+    key = (row["n"], row["u"])
+    cached = getattr(store, "_vec_index", None)
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    index = VectorIndex(embedder)
+    for rec in store.conn.execute(
+            "SELECT id, title, body, tags FROM mem LIMIT ?",
+            (_SEMANTIC_CAP,)).fetchall():
+        index.add(rec["id"], f"{rec['title']}\n{rec['body']}\n{rec['tags']}")
+    store._vec_index = (key, index)  # type: ignore[attr-defined]
+    return index
+
+
 def search(store: Store, query: str, scopes: list[str] | None = None, k: int = 5,
            token_budget: int = 800, session_id: str | None = None,
            workflow_id: str | None = None, project: str | None = None,
            explain: bool = False, kinds: list[str] | None = None,
-           include_pending: bool = False) -> dict[str, Any]:
+           include_pending: bool = False, hybrid: bool = True,
+           embedder: Embedder | None = None) -> dict[str, Any]:
     t = time.time()
     order = scopes or read_order(session_id, workflow_id, project)
     hits: dict[str, dict[str, Any]] = {}
@@ -108,6 +156,29 @@ def search(store: Store, query: str, scopes: list[str] | None = None, k: int = 5
             text_scores[rec["id"]] = 1.0
             hits[rec["id"]] = rec
 
+    # Semantic pass: additive. It can only add candidates and re-rank; when it
+    # contributes nothing the scoring below is the original lexical one.
+    semantic_scores: dict[str, float] = {}
+    embedder = embedder if embedder is not None else Embedder()
+    use_hybrid = bool(hybrid and query.strip() and embedder.available)
+    if use_hybrid:
+        index = _vector_index(store, embedder)
+        semantic_scores = dict(index.query(query, k=max(k * 8, 50)))
+        for rec_id in semantic_scores:
+            if rec_id not in hits:
+                rec = store.get(rec_id)
+                if rec:
+                    hits[rec_id] = rec
+                    text_scores.setdefault(rec_id, 0.0)
+        use_hybrid = bool(semantic_scores)
+    fused_scores: dict[str, float] = {}
+    fused_max = 0.0
+    if use_hybrid:
+        lexical_only = {rid: score for rid, score in text_scores.items()
+                        if score > 0}
+        fused_scores = _fuse(lexical_only, semantic_scores)
+        fused_max = max(fused_scores.values(), default=0.0)
+
     scored: list[dict[str, Any]] = []
     for rec_id, rec in hits.items():
         if rec["scope"] not in order:
@@ -119,12 +190,25 @@ def search(store: Store, query: str, scopes: list[str] | None = None, k: int = 5
         comp = _boosts(rec, t)
         scope_w = _scope_rank(rec["scope"], order) / max(1, len(order))
         text = text_scores.get(rec_id, 0.0)
-        total = W_TEXT * text + comp["pin"] + comp["recency"] + comp["use"] + 0.5 * scope_w
+        boosts = comp["pin"] + comp["recency"] + comp["use"] + 0.5 * scope_w
+        if use_hybrid:
+            semantic = semantic_scores.get(rec_id, 0.0)
+            blended = (fused_scores.get(rec_id, 0.0) / fused_max) if fused_max else 0.0
+            total = W_TEXT * blended + boosts
+        else:
+            semantic = 0.0
+            blended = 0.0
+            total = W_TEXT * text + boosts
         if explain:
             rec = dict(rec)
-            rec["_explain"] = {"text": round(text, 4), "recency": round(comp["recency"], 4),
-                               "pin": round(comp["pin"], 4), "uses": round(comp["use"], 4),
-                               "scope": round(scope_w, 4), "total": round(total, 4)}
+            rec["_explain"] = {"text": round(text, 4),
+                               "semantic": round(semantic, 4),
+                               "blended": round(blended, 4),
+                               "recency": round(comp["recency"], 4),
+                               "pin": round(comp["pin"], 4),
+                               "uses": round(comp["use"], 4),
+                               "scope": round(scope_w, 4),
+                               "total": round(total, 4)}
         scored.append((total, rec))
 
     scored.sort(key=lambda x: (-x[0], x[1].get("pin", 0), -(x[1].get("updated") or 0)))
@@ -139,5 +223,7 @@ def search(store: Store, query: str, scopes: list[str] | None = None, k: int = 5
         results.append({"record": rec, "line": line, "tokens": cost})
         if len(results) >= k:
             break
-    return {"results": results, "tokens_used": used, "fts_mode": "fts5" if store.fts else "like_trigram",
+    return {"results": results, "tokens_used": used,
+            "fts_mode": "fts5" if store.fts else "like_trigram",
+            "hybrid": use_hybrid, "embed_mode": embedder.backend,
             "scopes": order, "truncated": len(scored) > len(results)}
