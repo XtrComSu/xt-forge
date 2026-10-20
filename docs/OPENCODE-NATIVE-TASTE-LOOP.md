@@ -487,9 +487,10 @@ MCP additions: six `taste_*` tools, six `goal_*` tools (`goal_tick` and
 | L0 ✅ | loop parser + fixed scheduler | done 2026-10-20 — interval normalisation table (13 cases) passes; `/loop-stop` clears the timer |
 | L1 ✅ | self-paced loop + quiet backoff | done — first omission gives one 20-minute safety check, the second stops ("refusing to guess"); quiet streak doubles the delay, capped at 4× |
 | L2 ✅ | `loop.md`, persistence, kill switch | done — tasks survive a server boot and re-arm (mid-iteration becomes a safety check); `XT_NATIVE_LOOP=0` disables everything; 50-task and 7-day caps enforced |
-| H0 | hardening | 100% of new tests green; existing 38 MCP tools unchanged |
+| H0 ✅ | hardening | done 2026-10-20 — suite green; the MCP tool surface is now **pinned by name** in `tests/test_mcp_surface.py`, so no tool can be dropped or renamed without the change showing up in the same commit, and the 56-tool cap holds (51 today) |
 | P0 ✅ | plugin shipped from the repo | 2026-10-20 — `plugins/xt-native/` is the canon; `xtforge plugin install` installs and registers it, `xtforge plugin status` reports drift, and the installed copy is stamped with the paths it needs instead of one hard-coded home |
 | P1 ✅ | extraction precision | 2026-10-20 — a key needs a preference word ("always", "never", "prefer", "avoid", "please use", "use X not Y"). 19 of 23 live learnings were invented by the old rules; `taste prune` retires what the current rules would not invent |
+| P2 ✅ | concurrent writes lose nothing | 2026-10-20 — absorbing a signal is a read-modify-write, and SQLite's deferred transaction did the read *outside* the write lock: two processes learning the same key both read the same row and both wrote it back, so a piece of evidence was lost. Four concurrent writers recorded **1** piece of evidence instead of 4, the rule never reached `enforced`, and it was never injected. The store now takes the write lock before the read (`BEGIN IMMEDIATE`) |
 
 ---
 

@@ -160,6 +160,11 @@ class TasteStore:
         The whole batch is one write transaction: the read of the learning
         and the write of the result must not be separable, or two writers
         overwrite each other's counters.
+
+        What stays arrival-ordered: the *statement* of a learning is the one
+        its first piece of evidence carried, so two writers that race still
+        disagree about the wording of the rule — the key, the polarity, the
+        counters and the status do not depend on who won.
         """
         ts = int(now if now is not None else time.time())
         deltas = []

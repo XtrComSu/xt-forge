@@ -11,21 +11,17 @@ truth (`name= / version= / codename=`) — read by `xtforge/version.py` and by
 ## What's inside
 
 - **cli** — unified dispatcher (`xtforge <group> <verb>`) + slash passthrough
-- **mcp** — stdio MCP server exposing the full tool surface (50 tools)
+- **mcp** — stdio MCP server exposing the full tool surface (51 tools)
 - **taste** — deterministic preference learning: `taste learn|ingest|search|show|
   review|forget|export|import|inject|stats|prune`, contradictions flagged not
   overwritten. Drives the `/taste` command and system-block injection in the
   OpenCode plugin (`plugins/xt-native/`, installed to
   `~/.config/opencode/plugins/xt-native/`)
-- **plugin** — the OpenCode plugin ships from this repo: `xtforge plugin
-  install|status|uninstall|manifest` copies it, registers it in
-  `opencode.json`, and reports drift between the repo copy and the installed
-  one. `xtforge sync` asks the same code to do the work
 - **plugin** — the OpenCode plugin is source in this repo (`plugins/xt-native/`)
-  and `xtforge plugin install|status|uninstall` puts it on a machine:
+  and `xtforge plugin install|status|uninstall|manifest` puts it on a machine:
   install copies the source, stamps the paths the plugin needs and registers
-  it in the OpenCode config; `status` reports drift between the installed
-  copy and the source. `xtforge sync` installs it too
+  it in the OpenCode config; `status` reports drift between the installed copy
+  and the source. `xtforge sync` asks the same code to do the work
 - **repos** — bundled top-repos catalog, offline (list/search/show/domains/suggest/plan/stats/export)
 - **flash** — sub-50ms key/value notes (#tags, TTLs, pins)
 - **mem** — universal SQLite WAL + FTS5 memory: hybrid BM25 + embedding search,
