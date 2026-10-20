@@ -96,6 +96,78 @@ test("the prompt hook records an explicit preference", async () => {
   }
 })
 
+test("one prompt is ingested once, however many times the hook fires", async () => {
+  // The plugin is loaded once per location, so the same session can have the
+  // prompt hook registered more than once. Every registration used to ingest
+  // the prompt again, which inflated the evidence count: a rule the user
+  // stated once reached `enforced` and was then injected into every session.
+  const harness = await makeHarness()
+  try {
+    const event = {
+      messageID: "msg_dup_1",
+      prompt: { text: "Always use --json for command output." },
+    }
+    await harness.hook("prompt", event)
+    await harness.hook("prompt", event)
+    await harness.hook("prompt", event)
+    const landed = await harness.waitFor(async () => {
+      const stats = await harness.cli(["taste", "stats"])
+      return (stats.payload?.signals ?? 0) >= 1
+    })
+    assert.ok(landed, "the preference was never recorded")
+    // Give any duplicate ingest a chance to land before counting.
+    await new Promise((r) => setTimeout(r, 400))
+    const stats = await harness.cli(["taste", "stats"])
+    assert.equal(stats.payload.signals, 1,
+                 "the same prompt was ingested more than once")
+    assert.equal(stats.payload.total, 1)
+  } finally {
+    harness.cleanup()
+  }
+})
+
+test("a different prompt is a different piece of evidence", async () => {
+  // The dedup key is the prompt id, not the text: two distinct prompts that
+  // happen to read alike are still two statements.
+  const harness = await makeHarness()
+  try {
+    const text = "Always use --json for command output."
+    await harness.hook("prompt", { messageID: "msg_a", prompt: { text } })
+    await harness.hook("prompt", { messageID: "msg_b", prompt: { text } })
+    const landed = await harness.waitFor(async () => {
+      const stats = await harness.cli(["taste", "stats"])
+      return (stats.payload?.signals ?? 0) >= 2
+    })
+    assert.ok(landed, "the second prompt was never recorded")
+    const stats = await harness.cli(["taste", "stats"])
+    assert.equal(stats.payload.signals, 2)
+  } finally {
+    harness.cleanup()
+  }
+})
+
+test("without a prompt id, the session scopes the dedup", async () => {
+  // A hook event that carries no id still cannot be counted twice, but the
+  // same text in two sessions is two statements, not one.
+  const harness = await makeHarness()
+  try {
+    const text = "Always use --json for command output."
+    await harness.hook("prompt", { prompt: { text } })
+    await harness.hook("prompt", { prompt: { text } })
+    const landed = await harness.waitFor(async () => {
+      const stats = await harness.cli(["taste", "stats"])
+      return (stats.payload?.signals ?? 0) >= 1
+    })
+    assert.ok(landed, "the preference was never recorded")
+    await new Promise((r) => setTimeout(r, 400))
+    const stats = await harness.cli(["taste", "stats"])
+    assert.equal(stats.payload.signals, 1,
+                 "the same prompt was ingested more than once")
+  } finally {
+    harness.cleanup()
+  }
+})
+
 test("the context hook injects the enforced block", async () => {
   const harness = await makeHarness()
   try {

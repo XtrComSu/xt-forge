@@ -5,13 +5,44 @@ single source of truth. This repo is a consolidation snapshot of the xt-forge
 line (origin: `sample-app/xtforge` + `native/xtforge-rs`, plus the live
 `~/.xt-forge` store), created 2026-10-19 for portable backup and install.
 
+## 0.3.2-Damascus — 2026-10-21
+
+Three defects in the shipped taste plugin, found by auditing a live profile
+rather than by reading the code. All three made the profile lie about what
+the user had asked for.
+
+- **fix(taste): a rule the user avoided was injected as an instruction to
+  do it.** The statement is the subject of a preference ("fabricate output")
+  and the polarity says which way it points, but the injected block rendered
+  the statement alone. A user who wrote "Never fabricate output" had
+  `<rule>fabricate output</rule>` injected into every session — the exact
+  opposite of the instruction. The block now renders a negative learning as
+  a prohibition, and a statement that is already a prohibition is not
+  prefixed twice
+- **fix(taste): one prompt was ingested once per location.** The plugin is
+  loaded once per location, so the prompt hook fired two or three times for
+  the same prompt and each copy counted as another piece of evidence. A rule
+  the user stated *once* reached `enforced` and was injected into every
+  session, while the evidence log showed the same quote repeated. The
+  prompt carries an id that is unique per admitted prompt, so it is now the
+  deduplication key: one prompt, one signal
+- **fix(taste): `xtforge taste repair`** collapses evidence the plugin
+  recorded twice and recomputes the counters it inflated. Two rows are the
+  same observation when they carry the same kind, quote and source and were
+  recorded in the same second; a user who states the same thing again
+  later is evidence and is kept, and a deliberate `manual` learning is never
+  collapsed. Read-only unless `--apply`
+- cli: `xtforge taste repair` (report by default, `--apply` to fix)
+- 408 python tests + 17 plugin tests green
+
 ## 0.3.1-Damascus — 2026-10-20
 
 - plugin: the OpenCode taste plugin is source in this repo
   (`plugins/xt-native/`) and ships with `xtforge plugin install|status|
   uninstall`; `xtforge sync` installs it too. Installed byte-for-byte and
   stamped with the paths the plugin needs, so the copy on a machine is not
-  pinned to one home directory
+  pinned to one home directory. Without a stamp the plugin degrades to a
+  no-op instead of guessing
 - plugin: D2 acceptance — **10 scripted sessions -> 6 expected learnings, 0
   invented keys, 1 enforced rule injected** (`plugins/xt-native/test/
   taste.sessions.test.mjs`); near-miss prompts stay silent and a hint never
@@ -28,17 +59,6 @@ line (origin: `sample-app/xtforge` + `native/xtforge-rs`, plus the live
 - sync: the AGENTS.md template ships again (`adapters/generic/AGENTS.md.tpl`)
   and the generated launcher points at an interpreter and a shell that exist
 - cli: `xtforge plugin install|status|uninstall|manifest`
-
-## 0.3.1-Damascus — 2026-10-20
-
-- taste plugin: shipped from this repo. `plugins/xt-native/` is the canon;
-  `xtforge plugin install|status|uninstall|manifest` copies it to
-  `~/.config/opencode/plugins/xt-native/`, registers it in `opencode.json`
-  and reports drift between the repo copy and the installed one. `xtforge
-  sync` asks the same code to do the work — one writer, one set of rules
-- taste plugin: the installed copy is stamped with the xt-forge checkout and
-  the interpreter, so it no longer depends on one machine's home directory.
-  Without a stamp the plugin degrades to a no-op instead of guessing
 - taste: the extractor only creates a key from a preference word (always,
   never, prefer, avoid, please use, "use X not Y"). A bare "use" is a work
   order far more often than it is a durable preference — 19 of the 23 live

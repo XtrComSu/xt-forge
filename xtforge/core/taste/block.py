@@ -10,6 +10,9 @@ Rules:
 - statements are stripped of `<>&` so they can never close the block or open a
   nested tag
 - bounded in count and characters: taste is context, not the task
+- a rule the user *avoided* is rendered as a prohibition, never as the bare
+  object: "Never fabricate output" must not reach the model as
+  "fabricate output", which reads as an instruction to do exactly that
 """
 from __future__ import annotations
 
@@ -21,9 +24,27 @@ MAX_CHARS = 2400
 _UNSAFE = re.compile(r"[<>&]")
 _SPACE = re.compile(r"\s+")
 
+# A statement that already reads as a prohibition must not be prefixed again.
+_NEGATED = re.compile(
+    r"^\s*(?:never|avoid|avoiding|no\b|no\s+more|do\s+not|don'?t|stop\s+using|"
+    r"quit\s+using|refuse\s+to|don'?t\s+ever)\b", re.IGNORECASE)
+
 
 def _clean(text: Any) -> str:
     return _SPACE.sub(" ", _UNSAFE.sub(" ", str(text or ""))).strip()
+
+
+def _directive(statement: str, polarity: int) -> str:
+    """The rule as the model should read it, polarity included.
+
+    A learning's statement is the subject of the preference ("fabricate
+    output"), and the polarity says which way it points. Dropping the polarity
+    inverts the rule, so it is restored here: a negative learning is rendered
+    as a prohibition unless its statement already is one.
+    """
+    if polarity >= 0 or _NEGATED.match(statement):
+        return statement
+    return f"Never {statement}"
 
 
 def render_block(rows: Iterable[dict[str, Any]], source: str = "xt-forge",
@@ -37,6 +58,11 @@ def render_block(rows: Iterable[dict[str, Any]], source: str = "xt-forge",
         statement = _clean(row.get("statement"))
         if not statement:
             continue
+        try:
+            polarity = int(row.get("polarity", 1))
+        except (TypeError, ValueError):
+            polarity = 1
+        statement = _directive(statement, polarity)
         category = _clean(row.get("category")) or "general"
         try:
             confidence = float(row.get("confidence") or 0.0)

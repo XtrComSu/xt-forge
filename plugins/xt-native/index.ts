@@ -216,6 +216,37 @@ function report(command: string, payload: unknown): string {
 
 const verified = new Set<string>()
 
+// Prompt ids already ingested. Module-level on purpose: the plugin is loaded
+// once per location, so a per-`setup()` set would not be shared and the same
+// prompt would still be ingested once per location.
+//
+// Bounded: a server runs for days, and the set holds one entry per prompt.
+// The oldest entries are dropped once it grows past the cap — a prompt that
+// old will not be replayed, and re-ingesting it would only add a duplicate.
+const ingestedPrompts = new Set<string>()
+const MAX_TRACKED_PROMPTS = 4096
+
+function promptKey(event: any, text: string): string {
+  // The id the harness assigns is unique per admitted prompt, so it is the
+  // key. Without one, the session and the text stand in: the same text in
+  // two sessions is two statements, the same text twice in one session is
+  // one.
+  const id = event?.messageID ?? event?.prompt?.messageID
+  if (id) return String(id)
+  return `${event?.sessionID ?? ""}::${text}`
+}
+
+function rememberPrompt(key: string): boolean {
+  // False when the prompt was already ingested.
+  if (ingestedPrompts.has(key)) return false
+  ingestedPrompts.add(key)
+  if (ingestedPrompts.size > MAX_TRACKED_PROMPTS) {
+    const oldest = ingestedPrompts.values().next()
+    if (!oldest.done) ingestedPrompts.delete(oldest.value)
+  }
+  return true
+}
+
 function messageText(message: any): string {
   if (!message) return ""
   if (typeof message === "string") return message
@@ -718,10 +749,18 @@ export default {
     // learning's statement from its *first* piece of evidence, so two
     // overlapping prompts landing out of order would make the stored
     // statement depend on process timing instead of on what the user said.
+    //
+    // One prompt must produce one signal, however many times the hook is
+    // called for it. The plugin is loaded per location, so a session that
+    // spans two locations registers the hook twice and the same prompt is
+    // ingested twice — which inflates the evidence count and lets a rule the
+    // user stated once reach `enforced`. The prompt carries an id that is
+    // unique per admitted prompt, so it is the deduplication key.
     let ingestQueue: Promise<unknown> = Promise.resolve()
     await ctx.session.hook("prompt", (event: any) => {
       const text = String(event?.prompt?.text ?? "")
       if (!text || text.length > MAX_PROMPT_CHARS) return
+      if (!rememberPrompt(promptKey(event, text))) return
       ingestQueue = ingestQueue
         .then(() => ingest(text, "prompt", "global"))
         .catch(() => { /* a failed ingest must not break the queue */ })

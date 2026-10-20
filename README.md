@@ -13,8 +13,8 @@ truth (`name= / version= / codename=`) — read by `xtforge/version.py` and by
 - **cli** — unified dispatcher (`xtforge <group> <verb>`) + slash passthrough
 - **mcp** — stdio MCP server exposing the full tool surface (51 tools)
 - **taste** — deterministic preference learning: `taste learn|ingest|search|show|
-  review|forget|export|import|inject|stats|prune`, contradictions flagged not
-  overwritten. Drives the `/taste` command and system-block injection in the
+  review|forget|export|import|inject|stats|prune|repair`, contradictions flagged
+  not overwritten. Drives the `/taste` command and system-block injection in the
   OpenCode plugin (`plugins/xt-native/`, installed to
   `~/.config/opencode/plugins/xt-native/`)
 - **plugin** — the OpenCode plugin is source in this repo (`plugins/xt-native/`)

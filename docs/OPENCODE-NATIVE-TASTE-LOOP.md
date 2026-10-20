@@ -150,6 +150,15 @@ This gives the two properties that matter: **repetition raises confidence**
 and **contradiction is visible instead of overwriting**. It is deterministic:
 the same ordered signals produce the same state.
 
+One qualification, and it is the whole point of the `evidence` count: a
+piece of evidence is one *observation*. The plugin is loaded once per
+location, so its prompt hook fires more than once for the same prompt, and
+each copy would otherwise count as another observation — a rule the user
+stated *once* would reach `enforced` and be injected into every session.
+The prompt carries an id that is unique per admitted prompt, so that id is
+the deduplication key: one prompt, one signal. A user who states the same
+thing again later is a second observation and is kept.
+
 ### 2.2 Signal sources
 
 | Signal | Source | Weight | Notes |
@@ -202,6 +211,12 @@ Rules:
 - no secrets, paths or code snippets in the statement
 - the block is injected as a system message, never as user text
 - `/taste off` disables injection for the session; `/taste pause` for 1 hour
+- **the polarity travels with the statement.** A learning's statement is
+  the *subject* of the preference ("fabricate output") and its polarity
+  says which way it points. Rendering the statement alone turns "Never
+  fabricate output" into "fabricate output" — an instruction to do the
+  thing the user forbade. A negative learning is rendered as a prohibition;
+  a statement that is already one is not prefixed twice
 
 ### 2.5 Storage and commands
 
@@ -462,7 +477,7 @@ Bridge rules:
 New xt-forge surfaces required:
 
 ```
-xtforge taste ingest|search|show|review|export|import|forget|stats
+xtforge taste ingest|search|show|review|export|import|forget|stats|prune|repair
 xtforge goal start|status|tick|verify|pause|resume|stop|log
 xtforge loop parse|schedule|list|cancel      # pure helpers; scheduling stays in the harness
 ```
@@ -491,6 +506,7 @@ MCP additions: six `taste_*` tools, six `goal_*` tools (`goal_tick` and
 | P0 ✅ | plugin shipped from the repo | 2026-10-20 — `plugins/xt-native/` is the canon; `xtforge plugin install` installs and registers it, `xtforge plugin status` reports drift, and the installed copy is stamped with the paths it needs instead of one hard-coded home |
 | P1 ✅ | extraction precision | 2026-10-20 — a key needs a preference word ("always", "never", "prefer", "avoid", "please use", "use X not Y"). 19 of 23 live learnings were invented by the old rules; `taste prune` retires what the current rules would not invent |
 | P2 ✅ | concurrent writes lose nothing | 2026-10-20 — absorbing a signal is a read-modify-write, and SQLite's deferred transaction did the read *outside* the write lock: two processes learning the same key both read the same row and both wrote it back, so a piece of evidence was lost. Four concurrent writers recorded **1** piece of evidence instead of 4, the rule never reached `enforced`, and it was never injected. The store now takes the write lock before the read (`BEGIN IMMEDIATE`) |
+| P3 ✅ | the profile says what the user said | 2026-10-21 — three defects found by auditing a live profile, all of which made the profile lie. (1) A rule the user *avoided* was injected as an instruction to do it: the statement is the subject of the preference ("fabricate output") and the polarity says which way it points, but the block rendered the statement alone, so "Never fabricate output" reached the model as "fabricate output". The block now renders a negative learning as a prohibition. (2) One prompt was ingested once per location — the plugin is loaded per location, so the prompt hook fired two or three times and each copy counted as another piece of evidence, letting a rule stated *once* reach `enforced`. The prompt's id is now the deduplication key: one prompt, one signal. (3) `xtforge taste repair` collapses evidence the plugin recorded twice and recomputes the counters it inflated; a deliberate `manual` learning and a repetition in a later second are both kept |
 
 ---
 

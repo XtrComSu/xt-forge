@@ -150,6 +150,19 @@ def cmd_taste(args):
                          "(re-run with --apply)\n" + human)
             return _out(args, payload, human)
 
+        if verb == "repair":
+            # Repair a profile that counted the same observation twice.
+            # Read-only unless --apply.
+            result = store.collapse_duplicates(apply=bool(
+                getattr(args, "apply", False)))
+            human = (f"{result['duplicates']} duplicate signal rows"
+                     f" across {result['recomputed']} learnings")
+            if result["applied"]:
+                human += " (collapsed; counters recomputed)"
+            else:
+                human += " (re-run with --apply)"
+            return _out(args, {"ok": True, **result}, human)
+
         if verb == "export":
             root = args.path or value
             if not root:

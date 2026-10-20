@@ -212,6 +212,66 @@ class TestStore(unittest.TestCase):
         self.assertTrue(self.store.forget(delta["id"]))
         self.assertEqual(self.store.get(delta["id"])["status"], "retired")
 
+    def test_repair_collapses_a_prompt_ingested_twice(self):
+        """One prompt, ingested twice, is one observation.
+
+        The plugin used to be loaded once per location, so the same prompt
+        was ingested several times and each copy counted as another piece of
+        evidence: a rule stated once reached `enforced` and was injected
+        into every session.
+        """
+        signal = Signal(kind="explicit", polarity=1, category="cli",
+                        key="json output", statement="use --json for output",
+                        quote="Always use --json for output.", source="prompt")
+        for _ in range(3):
+            self.store.ingest([signal], now=1000)
+        row = self.store.search(query="json output")[0]
+        self.assertEqual(row["evidence"], 3)
+        self.assertEqual(row["status"], "enforced")
+
+        result = self.store.collapse_duplicates(apply=True)
+        self.assertEqual(result["duplicates"], 2)
+        row = self.store.search(query="json output")[0]
+        self.assertEqual(row["evidence"], 1)
+        self.assertEqual(row["alpha"], 1.5)
+        self.assertEqual(row["status"], "hint")
+
+    def test_repair_keeps_repetition_in_a_different_second(self):
+        """A user who states the same thing again later is evidence."""
+        signal = Signal(kind="explicit", polarity=1, category="cli",
+                        key="json output", statement="use --json for output",
+                        quote="Always use --json for output.", source="prompt")
+        self.store.ingest([signal], now=1000)
+        self.store.ingest([signal], now=2000)
+        self.store.collapse_duplicates(apply=True)
+        row = self.store.search(query="json output")[0]
+        self.assertEqual(row["evidence"], 2)
+        self.assertEqual(row["alpha"], 2.5)
+
+    def test_repair_keeps_deliberate_manual_learnings(self):
+        """Learning the same statement three times on purpose must stick."""
+        for _ in range(3):
+            self.store.learn("Always keep tool output machine-readable")
+        row = self.store.search(query="machine readable")[0]
+        self.assertEqual(row["evidence"], 3)
+        self.assertEqual(row["status"], "enforced")
+
+        self.store.collapse_duplicates(apply=True)
+        row = self.store.search(query="machine readable")[0]
+        self.assertEqual(row["evidence"], 3)
+        self.assertEqual(row["status"], "enforced")
+
+    def test_repair_is_read_only_until_applied(self):
+        signal = Signal(kind="explicit", polarity=1, category="cli",
+                        key="json output", statement="use --json for output",
+                        quote="Always use --json for output.", source="prompt")
+        self.store.ingest([signal], now=1000)
+        self.store.ingest([signal], now=1000)
+        result = self.store.collapse_duplicates(apply=False)
+        self.assertEqual(result["duplicates"], 1)
+        self.assertFalse(result["applied"])
+        self.assertEqual(self.store.stats()["signals"], 2)
+
     def test_search_filters(self):
         self.store.learn("Always write tests")
         self.store.learn("Never commit secrets")
@@ -314,6 +374,41 @@ class TestBlock(unittest.TestCase):
 
     def test_empty_when_nothing_enforced(self):
         self.assertEqual(render_block(self.rows("hint", "conflict")), "")
+
+    def test_a_negative_rule_is_rendered_as_a_prohibition(self):
+        """A rule the user avoided must not read as an instruction to do it.
+
+        The statement is the subject of the preference ("fabricate output")
+        and the polarity says which way it points. Rendering the statement
+        alone turned "Never fabricate output" into "fabricate output" — the
+        exact opposite of what the user asked for, injected into every
+        session.
+        """
+        block = render_block([{"status": "enforced", "category": "ui",
+                               "confidence": 0.93, "polarity": -1,
+                               "statement": "fabricate output"}])
+        self.assertIn("Never fabricate output", block)
+        self.assertNotIn(">fabricate output<", block)
+
+    def test_a_positive_rule_is_unchanged(self):
+        block = render_block([{"status": "enforced", "category": "cli",
+                               "confidence": 0.9, "polarity": 1,
+                               "statement": "use --json for output"}])
+        self.assertIn(">use --json for output<", block)
+        self.assertNotIn("Never", block)
+
+    def test_an_already_prohibitive_statement_is_not_prefixed_twice(self):
+        block = render_block([{"status": "enforced", "category": "security",
+                               "confidence": 0.9, "polarity": -1,
+                               "statement": "Never hardcode absolute paths"}])
+        self.assertIn(">Never hardcode absolute paths<", block)
+        self.assertNotIn("Never Never", block)
+
+    def test_a_missing_polarity_is_treated_as_preferred(self):
+        block = render_block([{"status": "enforced", "category": "cli",
+                               "confidence": 0.9,
+                               "statement": "use --json for output"}])
+        self.assertIn(">use --json for output<", block)
 
     def test_statements_cannot_break_out_of_the_block(self):
         block = render_block([{"status": "enforced", "category": "cli",

@@ -19,6 +19,23 @@ source; the test suite fails when it does not.
 | prompt hook | explicit preferences in a prompt become taste signals |
 | context hook | enforced taste rules ride along as a system block; a completion claim is verified in the same request |
 
+## One prompt, one signal
+
+OpenCode loads this plugin once per location, so the prompt hook is
+registered more than once and fires more than once for the same prompt.
+Each firing used to ingest the prompt again, and each copy counted as
+another piece of evidence: a rule the user stated **once** reached
+`enforced` and was injected into every session, with an evidence log that
+showed the same quote over and over.
+
+The prompt carries an id that is unique per admitted prompt, so that id is
+the deduplication key. The same id is ingested once; a different id is a
+different prompt and is ingested again. The set lives at module level
+because every load of the plugin shares one module instance.
+
+If a profile was already inflated this way, `xtforge taste repair` collapses
+the duplicated evidence and recomputes the counters.
+
 ## What it never does
 
 - no model call — the learner is arithmetic inside xt-forge

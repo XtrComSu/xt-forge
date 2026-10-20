@@ -105,6 +105,11 @@ class TasteStore:
 
         `BEGIN IMMEDIATE` takes the lock first: the second writer waits for
         the first to commit, then reads the committed state.
+
+        A transaction that is already open is joined, not replaced — and the
+        joiner does not commit it. The outer owner commits, so the work is
+        never lost; a writer that joined must not commit early either, or it
+        would commit the owner's half-finished work.
         """
         if self.conn.in_transaction:
             yield                      # already in one: join it
@@ -199,6 +204,89 @@ class TasteStore:
         cur = self.conn.execute("DELETE FROM taste_learning WHERE id=?", (rec_id,))
         self.conn.commit()
         return cur.rowcount > 0
+
+    # --------------------------- repair -------------------------------
+    def collapse_duplicates(self, apply: bool = False) -> dict[str, Any]:
+        """Drop repeated evidence and recompute the counters it inflated.
+
+        A piece of evidence is one *observation*. The plugin used to be
+        loaded once per location, so a single prompt was ingested several
+        times, and each copy counted as another observation: a rule the user
+        stated once reached `enforced` and was injected into every session.
+
+        Two rows are the same observation when they carry the same kind,
+        quote and source and were recorded in the same second — the plugin
+        ingests in the background, so the copies of one prompt land together.
+        A user who states the same thing again later produces rows in a
+        different second, and those are kept: repetition is evidence.
+
+        `manual` signals are never collapsed. A manual learning is a
+        deliberate act by the user, and learning the same statement three
+        times on purpose is how a rule is made to stick.
+
+        The counters are then recomputed from the surviving evidence, so
+        alpha, beta, evidence and status describe what is actually known
+        rather than what a duplicate counted twice.
+        """
+        rows = self.conn.execute(
+            "SELECT id, learning_id, kind, weight, polarity, quote, source, "
+            "created FROM taste_signal ORDER BY id").fetchall()
+        seen: set[tuple[Any, ...]] = set()
+        drop: list[int] = []
+        for row in rows:
+            if row["kind"] == "manual":
+                continue
+            identity = (row["learning_id"], row["kind"], row["quote"],
+                        row["source"], row["created"])
+            if identity in seen:
+                drop.append(row["id"])
+            else:
+                seen.add(identity)
+
+        recomputed = self._recompute()
+        payload = {"duplicates": len(drop), "recomputed": recomputed,
+                   "applied": bool(apply and drop)}
+        if not apply or not drop:
+            return payload
+
+        with self._write_txn():
+            for row_id in drop:
+                self.conn.execute("DELETE FROM taste_signal WHERE id=?", (row_id,))
+        self._recompute()
+        payload["recomputed"] = recomputed
+        return payload
+
+    def _recompute(self) -> int:
+        """Rebuild every learning's counters from its surviving evidence.
+
+        The learner is replayed in evidence order, so the statement, the
+        polarity and the status come out exactly as they would have if the
+        duplicate evidence had never been recorded.
+        """
+        learners = {learning.id: learning for learning in self.all()}
+        for learning in learners.values():
+            learning.alpha = learnmod.ALPHA0
+            learning.beta = learnmod.BETA0
+            learning.evidence = 0
+        rows = self.conn.execute(
+            "SELECT learning_id, kind, weight, polarity, quote, source, created "
+            "FROM taste_signal ORDER BY id").fetchall()
+        for row in rows:
+            learning = learners.get(row["learning_id"])
+            if learning is None:
+                continue
+            signal = Signal(kind=row["kind"], polarity=row["polarity"],
+                            category=learning.category, key=learning.key,
+                            statement=learning.statement, quote=row["quote"],
+                            source=row["source"], weight=row["weight"])
+            learnmod.absorb(learning, signal, row["created"])
+        # One transaction for the whole rebuild, so a reader never sees a
+        # half-recomputed profile, and so the connection is left idle rather
+        # than holding a transaction open for the next writer to join.
+        with self._write_txn():
+            for learning in learners.values():
+                self._save(learning)
+        return len(learners)
 
     # ----------------------------- reads -------------------------------
     def get(self, rec_id: str) -> dict[str, Any] | None:

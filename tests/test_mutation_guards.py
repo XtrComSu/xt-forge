@@ -121,5 +121,25 @@ class TestBase64UrlPadding(unittest.TestCase):
         self.assertEqual(payload_part["payload"]["sub"], "1234567890")
 
 
+class TestRot13IsActuallyARotation(unittest.TestCase):
+    """rot13 must rotate by 13, not stand still.
+
+    rot13 is an involution, so `decode(encode(x)) == x` holds for the
+    identity function too. A round-trip test alone cannot tell a working
+    rot13 from a no-op, so the output value itself has to be pinned.
+    """
+
+    def test_rot13_shifts_letters_by_thirteen(self):
+        self.assertEqual(codecmod._rot13("Uryyb, Jbeyq!"), "Hello, World!")
+
+    def test_rot13_leaves_non_letters_alone(self):
+        self.assertEqual(codecmod._rot13("Abc XYZ 123"), "Nop KLM 123")
+
+    def test_rot13_is_an_involution(self):
+        once = codecmod._rot13("The quick brown fox")
+        self.assertEqual(codecmod._rot13(once), "The quick brown fox")
+        self.assertNotEqual(once, "The quick brown fox")
+
+
 if __name__ == "__main__":
     unittest.main()

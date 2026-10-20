@@ -315,7 +315,7 @@ def _add_taste(sub) -> None:
     t = sub.add_parser("taste", help="deterministic preference learning")
     t.add_argument("taste_verb", choices=["ingest", "search", "show", "review",
                                           "learn", "forget", "export", "import",
-                                          "inject", "stats", "prune"])
+                                          "inject", "stats", "prune", "repair"])
     t.add_argument("value", nargs="?", default=None,
                    help="statement for learn, query for search, id for show")
     t.add_argument("--id", help="learning id")
@@ -331,7 +331,7 @@ def _add_taste(sub) -> None:
     t.add_argument("--taste-db", dest="taste_db",
                    help="taste database path override")
     t.add_argument("--apply", action="store_true",
-                   help="prune: retire the listed learnings")
+                   help="prune/repair: apply the change instead of reporting")
     t.set_defaults(func=cmd_taste)
 
 
