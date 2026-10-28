@@ -113,9 +113,15 @@ async function enforcedLearnings(scope = "global"): Promise<any[]> {
 
 /** Fold raw text into the taste store. Returns the ingest payload or null. */
 function ingest(text: string, source: string,
-                       scope = "global"): Promise<any | null> {
-  return xt(["taste", "ingest", "--body-file", "-", "--source", source,
-             "--scope", scope], text)
+                       scope = "global",
+                       promptId = ""): Promise<any | null> {
+  const args = ["taste", "ingest", "--body-file", "-", "--source", source,
+                "--scope", scope]
+  // The prompt id makes the ingest idempotent in the store: the plugin is
+  // loaded once per location, so this hook fires more than once for the
+  // same prompt, and the store is the one thing every load writes through.
+  if (promptId) args.push("--prompt-id", promptId)
+  return xt(args, text)
 }
 
 function learn(statement: string, source = "manual",
@@ -216,35 +222,23 @@ function report(command: string, payload: unknown): string {
 
 const verified = new Set<string>()
 
-// Prompt ids already ingested. Module-level on purpose: the plugin is loaded
-// once per location, so a per-`setup()` set would not be shared and the same
-// prompt would still be ingested once per location.
-//
-// Bounded: a server runs for days, and the set holds one entry per prompt.
-// The oldest entries are dropped once it grows past the cap — a prompt that
-// old will not be replayed, and re-ingesting it would only add a duplicate.
-const ingestedPrompts = new Set<string>()
-const MAX_TRACKED_PROMPTS = 4096
-
-function promptKey(event: any, text: string): string {
-  // The id the harness assigns is unique per admitted prompt, so it is the
-  // key. Without one, the session and the text stand in: the same text in
-  // two sessions is two statements, the same text twice in one session is
-  // one.
+/**
+ * The id of the prompt an event carries, or "" when it carries none.
+ *
+ * The harness assigns a unique id per admitted prompt, and that id is what
+ * makes the ingest idempotent: the plugin is loaded once per location, so
+ * this hook fires more than once for the same prompt, and each firing would
+ * otherwise count as another piece of evidence — a rule the user stated
+ * *once* would reach `enforced` and be injected into every session.
+ *
+ * The id is enforced in the store rather than here, because this plugin's
+ * module state is not shared between its loads: every load evaluates the
+ * file again, so a set kept here would only ever see one load's prompts.
+ * The store is the one thing every load writes through.
+ */
+function promptId(event: any): string {
   const id = event?.messageID ?? event?.prompt?.messageID
-  if (id) return String(id)
-  return `${event?.sessionID ?? ""}::${text}`
-}
-
-function rememberPrompt(key: string): boolean {
-  // False when the prompt was already ingested.
-  if (ingestedPrompts.has(key)) return false
-  ingestedPrompts.add(key)
-  if (ingestedPrompts.size > MAX_TRACKED_PROMPTS) {
-    const oldest = ingestedPrompts.values().next()
-    if (!oldest.done) ingestedPrompts.delete(oldest.value)
-  }
-  return true
+  return id ? String(id) : ""
 }
 
 function messageText(message: any): string {
@@ -755,14 +749,15 @@ export default {
     // spans two locations registers the hook twice and the same prompt is
     // ingested twice — which inflates the evidence count and lets a rule the
     // user stated once reach `enforced`. The prompt carries an id that is
-    // unique per admitted prompt, so it is the deduplication key.
+    // unique per admitted prompt; the store uses it to make the ingest
+    // idempotent.
     let ingestQueue: Promise<unknown> = Promise.resolve()
     await ctx.session.hook("prompt", (event: any) => {
       const text = String(event?.prompt?.text ?? "")
       if (!text || text.length > MAX_PROMPT_CHARS) return
-      if (!rememberPrompt(promptKey(event, text))) return
+      const id = promptId(event)
       ingestQueue = ingestQueue
-        .then(() => ingest(text, "prompt", "global"))
+        .then(() => ingest(text, "prompt", "global", id))
         .catch(() => { /* a failed ingest must not break the queue */ })
       void ingestQueue
     })

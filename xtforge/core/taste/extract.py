@@ -98,6 +98,34 @@ def _sentence(text: str) -> str:
     return " ".join((text or "").split())[:160]
 
 
+_TRAILING = ("**", ",", ":", ";", "(", "[", " and", " or", " in", " the",
+             " a", " an", " to", " of", " with", " that", " when", " is")
+
+
+def _valid_statement(statement: str) -> bool:
+    """A rule must read as a complete, self-contained sentence fragment.
+
+    Fragments are worse than silence: "Never a panic**" or "Never no bypass at
+    all" both mislead and cost context on every turn. A cue plus an object is
+    the minimum ("never delete"); anything unbalanced, truncated or too long is
+    dropped instead of promoted.
+    """
+    s = " ".join((statement or "").split())
+    if len(s) < 8 or len(s) > 140:
+        return False
+    if s.count("(") != s.count(")") or s.count("[") != s.count("]"):
+        return False
+    if s.count('"') % 2 or s.count("`") % 2:
+        return False
+    # double negation is not a rule, it is a mangled sentence
+    if re.match(r"^(?:never|avoid|do\s+not|don'?t)\s+(?:no|not|never)\b",
+                s, re.IGNORECASE):
+        return False
+    if s.endswith(_TRAILING):
+        return False
+    return len(s.split()) >= 2
+
+
 def extract(text: str, source: str = "", scope: str = "global",
             ) -> list[Signal]:
     """Explicit preference signals from free text. Deterministic.
@@ -110,7 +138,7 @@ def extract(text: str, source: str = "", scope: str = "global",
 
     def add(statement: str, polarity: int, quote: str) -> None:
         key = normalize_key(statement)
-        if len(key) < 3:
+        if len(key) < 3 or not _valid_statement(statement):
             return
         identity = (key, scope, polarity)
         if identity in seen:
@@ -140,13 +168,15 @@ def extract(text: str, source: str = "", scope: str = "global",
                 if not free(match.span()):
                     continue
                 claimed.append(match.span())
+                cue = " ".join(match.group(1).split()).lower()
                 if take == 2:
-                    add(match.group(1), 1, stripped)
-                    add(match.group(2), -1, stripped)
+                    # "use X not Y": X is preferred, Y is refused
+                    add(f"prefer {match.group(1)}", 1, stripped)
+                    add(f"avoid {match.group(2)}", -1, stripped)
                 elif pattern is AVOID:
-                    add(match.group(2), -1, stripped)
+                    add(f"{cue} {match.group(2)}", -1, stripped)
                 else:
-                    add(match.group(2), 1, stripped)
+                    add(f"{cue} {match.group(2)}", 1, stripped)
     return out
 
 

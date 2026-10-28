@@ -19,8 +19,8 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable
 
-MAX_RULES = 40
-MAX_CHARS = 2400
+MAX_RULES = 12
+MAX_CHARS = 1200
 _UNSAFE = re.compile(r"[<>&]")
 _SPACE = re.compile(r"\s+")
 
@@ -52,6 +52,7 @@ def render_block(rows: Iterable[dict[str, Any]], source: str = "xt-forge",
                  max_chars: int = MAX_CHARS) -> str:
     """Render the `<taste>` block, or "" when nothing qualifies."""
     rules = []
+    seen: set[str] = set()
     for row in rows:
         if not isinstance(row, dict) or row.get("status") != "enforced":
             continue
@@ -63,6 +64,12 @@ def render_block(rows: Iterable[dict[str, Any]], source: str = "xt-forge",
         except (TypeError, ValueError):
             polarity = 1
         statement = _directive(statement, polarity)
+        # a cue glued onto an article reads as gibberish ("Never a panic");
+        # identical statements learned under two categories must not repeat
+        if re.match(r"^(?:never|avoid)\s+(?:a|an|the|no)\b", statement,
+                    re.IGNORECASE) or statement.lower() in seen:
+            continue
+        seen.add(statement.lower())
         category = _clean(row.get("category")) or "general"
         try:
             confidence = float(row.get("confidence") or 0.0)

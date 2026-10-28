@@ -5,6 +5,7 @@ Run: python3 -m unittest discover -s tests -v
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -212,6 +213,72 @@ class TestStore(unittest.TestCase):
         self.assertTrue(self.store.forget(delta["id"]))
         self.assertEqual(self.store.get(delta["id"])["status"], "retired")
 
+    def test_legacy_store_opens_and_gains_the_prompt_id_column(self):
+        """A store written before `prompt_id` must still open.
+
+        The index on the new column was created with the tables, so on a
+        legacy store it named a column that did not exist yet and the whole
+        schema script failed: every taste command stopped working, and the
+        plugin's prompt capture died with it.
+        """
+        path = Path(self.tmp) / "legacy.db"
+        legacy = sqlite3.connect(path)
+        legacy.executescript(
+            "CREATE TABLE taste_signal("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, learning_id TEXT NOT NULL,"
+            "kind TEXT NOT NULL, weight REAL NOT NULL, polarity INTEGER NOT NULL,"
+            "quote TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT '',"
+            "created INTEGER NOT NULL);")
+        legacy.execute(
+            "INSERT INTO taste_signal(learning_id,kind,weight,polarity,quote,"
+            "source,created) VALUES('x','explicit',1.0,1,"
+            "'Always use --json for output.','prompt',100)")
+        legacy.commit()
+        legacy.close()
+
+        store = TasteStore(path)
+        try:
+            columns = {row["name"] for row in
+                       store.conn.execute("PRAGMA table_info(taste_signal)")}
+            self.assertIn("prompt_id", columns)
+            indexes = {row["name"] for row in store.conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'")}
+            self.assertIn("idx_tsignal_prompt", indexes)
+            self.assertEqual(store.stats()["signals"], 1,
+                             "the rows the legacy store held were lost")
+        finally:
+            store.close()
+
+    def test_the_same_prompt_id_is_ingested_once(self):
+        """One prompt, ingested twice, is one observation.
+
+        The plugin is loaded once per location, so the same prompt reaches
+        the store more than once. Without the prompt id each copy counted
+        as another piece of evidence and a rule stated once reached
+        `enforced`.
+        """
+        signal = Signal(kind="explicit", polarity=1, category="cli",
+                        key="json output", statement="use --json for output",
+                        quote="Always use --json for output.", source="prompt")
+        first = self.store.ingest([signal], now=1000, prompt_id="msg_1")
+        second = self.store.ingest([signal], now=2000, prompt_id="msg_1")
+        self.assertEqual(len(first), 1)
+        self.assertEqual(second, [])
+        self.assertEqual(self.store.stats()["signals"], 1)
+        row = self.store.search(query="json output")[0]
+        self.assertEqual(row["evidence"], 1)
+
+    def test_a_different_prompt_id_is_another_piece_of_evidence(self):
+        """The dedup key is the prompt id, not the text."""
+        signal = Signal(kind="explicit", polarity=1, category="cli",
+                        key="json output", statement="use --json for output",
+                        quote="Always use --json for output.", source="prompt")
+        self.store.ingest([signal], now=1000, prompt_id="msg_1")
+        self.store.ingest([signal], now=2000, prompt_id="msg_2")
+        self.assertEqual(self.store.stats()["signals"], 2)
+        row = self.store.search(query="json output")[0]
+        self.assertEqual(row["evidence"], 2)
+
     def test_repair_collapses_a_prompt_ingested_twice(self):
         """One prompt, ingested twice, is one observation.
 
@@ -271,6 +338,46 @@ class TestStore(unittest.TestCase):
         self.assertEqual(result["duplicates"], 1)
         self.assertFalse(result["applied"])
         self.assertEqual(self.store.stats()["signals"], 2)
+
+    def test_ingest_is_idempotent_for_one_prompt_id(self):
+        """One prompt, ingested twice, contributes its evidence once.
+
+        The plugin is loaded once per location, so its prompt hook fires
+        more than once for the same prompt. The id the harness assigns to an
+        admitted prompt is what makes the ingest idempotent, and it has to be
+        enforced in the store: the plugin's module state is not shared
+        between its loads, but the store is.
+        """
+        signal = Signal(kind="explicit", polarity=1, category="cli",
+                        key="json output", statement="use --json for output",
+                        quote="Always use --json for output.", source="prompt")
+        first = self.store.ingest([signal], prompt_id="msg_1")
+        second = self.store.ingest([signal], prompt_id="msg_1")
+        self.assertEqual(len(first), 1)
+        self.assertEqual(second, [])
+        row = self.store.search(query="json output")[0]
+        self.assertEqual(row["evidence"], 1)
+        self.assertEqual(row["alpha"], 1.5)
+        self.assertEqual(row["status"], "hint")
+
+    def test_ingest_without_a_prompt_id_still_counts_each_time(self):
+        """A signal that carries no prompt id is a separate observation."""
+        signal = Signal(kind="explicit", polarity=1, category="cli",
+                        key="json output", statement="use --json for output",
+                        quote="Always use --json for output.", source="prompt")
+        self.store.ingest([signal])
+        self.store.ingest([signal])
+        row = self.store.search(query="json output")[0]
+        self.assertEqual(row["evidence"], 2)
+
+    def test_two_prompt_ids_are_two_observations(self):
+        signal = Signal(kind="explicit", polarity=1, category="cli",
+                        key="json output", statement="use --json for output",
+                        quote="Always use --json for output.", source="prompt")
+        self.store.ingest([signal], prompt_id="msg_1")
+        self.store.ingest([signal], prompt_id="msg_2")
+        row = self.store.search(query="json output")[0]
+        self.assertEqual(row["evidence"], 2)
 
     def test_search_filters(self):
         self.store.learn("Always write tests")

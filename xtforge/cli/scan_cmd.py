@@ -164,7 +164,7 @@ def cmd_scan(args):
                    "summary": scanmod.summarize(findings)}
         return _out(args, payload, _human_findings(payload))
 
-    mode = "secrets" if verb == "secrets" else "patterns"
+    mode = "secrets" if verb == "secrets" else ("injection" if verb == "injection" else "patterns")
     if target.is_file():
         res = scanmod.scan_file(target, reveal=reveal, mode=mode)
         payload = {"ok": "error" not in res, "root": str(target),

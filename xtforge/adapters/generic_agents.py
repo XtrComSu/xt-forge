@@ -16,9 +16,18 @@ TEMPLATE = ROOT / "adapters" / "generic" / "AGENTS.md.tpl"
 
 
 def bin_path() -> Path:
-    """Absolute launcher path — harness shells lack ~/bin and Termux's PATH."""
+    """Absolute launcher path — harness shells lack ~/bin and Termux's PATH.
+
+    `sync` installs `~/bin/xtforge`; `app_name()` is `xt-forge`, so using it
+    here would render a path that does not exist. Prefer an installed
+    launcher, then fall back to the name sync creates.
+    """
     home = Path(os.environ.get("HOME") or Path.home())
-    return home / "bin" / app_name()
+    for name in ("xtforge", app_name()):
+        candidate = home / "bin" / name
+        if candidate.exists():
+            return candidate
+    return home / "bin" / "xtforge"
 
 
 def render(target_root: Path | None = None) -> str:

@@ -9,6 +9,9 @@
  */
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { makeHarness } from "./harness.mjs"
 
@@ -101,6 +104,8 @@ test("one prompt is ingested once, however many times the hook fires", async () 
   // prompt hook registered more than once. Every registration used to ingest
   // the prompt again, which inflated the evidence count: a rule the user
   // stated once reached `enforced` and was then injected into every session.
+  // The store makes the ingest idempotent on the prompt's id, because the
+  // plugin's module state is not shared between its loads.
   const harness = await makeHarness()
   try {
     const event = {
@@ -141,28 +146,6 @@ test("a different prompt is a different piece of evidence", async () => {
     assert.ok(landed, "the second prompt was never recorded")
     const stats = await harness.cli(["taste", "stats"])
     assert.equal(stats.payload.signals, 2)
-  } finally {
-    harness.cleanup()
-  }
-})
-
-test("without a prompt id, the session scopes the dedup", async () => {
-  // A hook event that carries no id still cannot be counted twice, but the
-  // same text in two sessions is two statements, not one.
-  const harness = await makeHarness()
-  try {
-    const text = "Always use --json for command output."
-    await harness.hook("prompt", { prompt: { text } })
-    await harness.hook("prompt", { prompt: { text } })
-    const landed = await harness.waitFor(async () => {
-      const stats = await harness.cli(["taste", "stats"])
-      return (stats.payload?.signals ?? 0) >= 1
-    })
-    assert.ok(landed, "the preference was never recorded")
-    await new Promise((r) => setTimeout(r, 400))
-    const stats = await harness.cli(["taste", "stats"])
-    assert.equal(stats.payload.signals, 1,
-                 "the same prompt was ingested more than once")
   } finally {
     harness.cleanup()
   }
@@ -213,6 +196,39 @@ test("taste off disables injection and survives a restart", async () => {
     assert.ok(harness.systemParts(on).find((t) => t.includes("<taste")))
   } finally {
     harness.cleanup()
+  }
+})
+
+test("two plugin loads still ingest one prompt once", async () => {
+  // The plugin is loaded once per location, so two loads can both see the
+  // same prompt. The set of seen prompts is per load, so the store is what
+  // has to recognise a prompt it already holds — the store is the one thing
+  // every load writes through.
+  const home = mkdtempSync(join(tmpdir(), "xt-native-shared-"))
+  const first = await makeHarness({ xtHome: home })
+  const second = await makeHarness({ xtHome: home })
+  try {
+    const event = {
+      messageID: "msg_shared_1",
+      prompt: { text: "Always use --json for command output." },
+    }
+    await first.hook("prompt", event)
+    await second.hook("prompt", event)
+    const landed = await first.waitFor(async () => {
+      const stats = await first.cli(["taste", "stats"])
+      return (stats.payload?.signals ?? 0) >= 1
+    })
+    assert.ok(landed, "the preference was never recorded")
+    // Give any duplicate ingest a chance to land before counting.
+    await new Promise((r) => setTimeout(r, 400))
+    const stats = await first.cli(["taste", "stats"])
+    assert.equal(stats.payload.signals, 1,
+                 "the same prompt was ingested twice across two loads")
+    assert.equal(stats.payload.total, 1)
+  } finally {
+    second.cleanup()
+    first.cleanup()
+    rmSync(home, { recursive: true, force: true })
   }
 })
 

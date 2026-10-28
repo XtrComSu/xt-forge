@@ -63,7 +63,9 @@ def cmd_taste(args):
             from ..core.taste import extract
             signals = extract(raw, source=getattr(args, "source", None) or "ingest",
                               scope=scope)
-            deltas = store.ingest(signals, scope=scope)
+            deltas = store.ingest(
+                signals, scope=scope,
+                prompt_id=getattr(args, "prompt_id", None) or "")
             payload = {"ingested": len(deltas), "deltas": deltas}
             human = "\n".join(_human_learning({
                 "id": d["id"], "status": d["after"]["status"],

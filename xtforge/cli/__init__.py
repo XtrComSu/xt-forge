@@ -24,6 +24,7 @@ from .taste_cmd import cmd_taste
 from .plugin_cmd import cmd_plugin
 from .device_cmd import (cmd_route, cmd_phone, cmd_compress, cmd_ascii,
                          cmd_version, cmd_doctor, cmd_code)
+from .prompt_cmd import cmd_prompt
 
 
 def _add_mem(sub) -> None:
@@ -226,15 +227,33 @@ def _add_tools(sub) -> None:
 
 
 def _add_code(sub) -> None:
-    c = sub.add_parser("code", help="code structure: symbols, outline, refs")
-    c.add_argument("code_verb", choices=["symbols", "outline", "refs"])
+    c = sub.add_parser("code", help="code structure: symbols, outline, refs, syntax")
+    c.add_argument("code_verb", choices=["symbols", "outline", "refs", "syntax"])
     c.add_argument("value", nargs="?", default=None,
-                   help="symbol name for refs (same as --name)")
+                   help="symbol name for refs, or path for symbols/outline/syntax")
     c.add_argument("path", nargs="?", default=None,
                    help="file or directory (default: .)")
     c.add_argument("--name", help="symbol name for refs")
     c.add_argument("--limit", type=int, default=50)
     c.set_defaults(func=cmd_code)
+
+
+def _add_prompt(sub) -> None:
+    p = sub.add_parser("prompt", help="prompt management and agent prompt injection")
+    p.add_argument("prompt_verb", choices=["inject", "render", "hash"])
+    p.add_argument("name", nargs="?", default=None, help="prompt name")
+    p.add_argument("--name", dest="name_flag", help="prompt name")
+    p.add_argument("--no-taste", action="store_true", help="exclude taste rules from injection")
+    p.add_argument("--no-flash", action="store_true", help="exclude pinned flash notes from injection")
+    p.add_argument("--flash-scope", default="global", help="flash scope for pinned notes")
+    p.add_argument("--query", "-q", help="search query to recall matching durable memories")
+    p.add_argument("--mem-k", type=int, default=3, help="number of durable memories to recall")
+    p.add_argument("--harness", choices=["auto", "dsh", "opencode", "generic"], default="auto",
+                   help="target agent harness context")
+    p.add_argument("--compact", action="store_true", help="produce dense, token-minimized output")
+    p.add_argument("--token-budget", type=int, default=None, help="maximum token budget for injected context")
+    p.add_argument("--var", action="append", default=[], help="variable substitution in KEY=VALUE format")
+    p.set_defaults(func=cmd_prompt)
 
 
 def _add_re(sub) -> None:
@@ -300,7 +319,7 @@ def _add_hub(sub) -> None:
 
 def _add_scan(sub) -> None:
     s = sub.add_parser("scan", help="static safety scan (read-only)")
-    s.add_argument("scan_verb", choices=["secrets", "patterns", "deps"])
+    s.add_argument("scan_verb", choices=["secrets", "patterns", "deps", "injection"])
     s.add_argument("value", nargs="?", default=None,
                    help="file or directory (same as --path)")
     s.add_argument("path", nargs="?", default=None)
@@ -326,6 +345,9 @@ def _add_taste(sub) -> None:
     t.add_argument("--body-file", dest="body_file",
                    help="read text from a file, or '-' for stdin")
     t.add_argument("--source", help="where a signal came from")
+    t.add_argument("--prompt-id", dest="prompt_id",
+                   help="id of the prompt a signal came from; makes the "
+                        "ingest idempotent, so one prompt is one signal")
     t.add_argument("--path", help="export directory or import file")
     t.add_argument("--limit", "--k", "-n", dest="limit", type=int, default=None)
     t.add_argument("--taste-db", dest="taste_db",
@@ -463,6 +485,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_build(sub)
     _add_route(sub)
     _add_code(sub)
+    _add_prompt(sub)
     _add_re(sub)
     _add_docs(sub)
     _add_intel(sub)

@@ -47,10 +47,21 @@ CREATE TABLE IF NOT EXISTS taste_signal(
   polarity INTEGER NOT NULL,
   quote TEXT NOT NULL DEFAULT '',
   source TEXT NOT NULL DEFAULT '',
-  created INTEGER NOT NULL
+  created INTEGER NOT NULL,
+  prompt_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_tsignal_learning ON taste_signal(learning_id);
 CREATE TABLE IF NOT EXISTS taste_meta(k TEXT PRIMARY KEY, v TEXT);
+"""
+
+# Indexes on columns a store may predate. They are created after the column
+# migration, not with the tables: `CREATE TABLE IF NOT EXISTS` does not add a
+# column to a table that already exists, so an older store still lacks
+# `prompt_id` when this runs, and an index on a missing column is an error
+# that stops the whole script — which is how a legacy store came to fail to
+# open at all.
+INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_tsignal_prompt ON taste_signal(prompt_id);
 """
 
 _BULLET = re.compile(r"^\s*[-*]\s+(.*?)\s*<!--\s*id:\s*([0-9a-f]{6,64})\s*-->\s*$")
@@ -64,12 +75,45 @@ class TasteStore:
         self.conn = sqlite3.connect(self.path, check_same_thread=False,
                                     timeout=15.0)
         self.conn.row_factory = sqlite3.Row
+        self.index_error = ""
         self._ensure_wal()
         self.conn.executescript(MIGRATION)
+        self._migrate_columns()
+        self._create_indexes()
         self.conn.execute(
             "INSERT INTO taste_meta(k,v) VALUES('schema_version',?) "
             "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (str(SCHEMA_VERSION),))
         self.conn.commit()
+
+    def _migrate_columns(self) -> None:
+        """Add columns a store predates, without touching existing rows.
+
+        `CREATE TABLE IF NOT EXISTS` does not add a column to a table that
+        already exists, so a store written by an older version keeps its
+        old shape until this runs.
+        """
+        columns = {row["name"] for row in
+                   self.conn.execute("PRAGMA table_info(taste_signal)")}
+        if "prompt_id" not in columns:
+            self.conn.execute(
+                "ALTER TABLE taste_signal ADD COLUMN prompt_id TEXT NOT NULL DEFAULT ''")
+            self.conn.commit()
+
+    def _create_indexes(self) -> None:
+        """Create the indexes on columns a store may have lacked.
+
+        An index is a speed-up, not a correctness requirement: a store whose
+        shape still cannot be indexed stays usable, and the reason is kept
+        for the doctor to report instead of being swallowed.
+        """
+        try:
+            self.conn.executescript(INDEXES)
+            self.conn.commit()
+        except sqlite3.OperationalError as exc:
+            self.conn.rollback()
+            self.index_error = str(exc)
+        else:
+            self.index_error = ""
 
     def _ensure_wal(self) -> None:
         """Put the store in WAL mode, tolerating a concurrent writer.
@@ -150,16 +194,25 @@ class TasteStore:
              learning.first_seen, learning.last_seen,
              1 if learning.retired else 0))
 
-    def _record_signal(self, learning_id_: str, signal: Signal, created: int) -> None:
+    def _record_signal(self, learning_id_: str, signal: Signal, created: int,
+                       prompt_id: str = "") -> None:
         self.conn.execute(
             "INSERT INTO taste_signal(learning_id,kind,weight,polarity,quote,"
-            "source,created) VALUES(?,?,?,?,?,?,?)",
+            "source,created,prompt_id) VALUES(?,?,?,?,?,?,?,?)",
             (learning_id_, signal.kind, signal.weight, signal.polarity,
-             signal.quote, signal.source, created))
+             signal.quote, signal.source, created, prompt_id))
+
+    def _prompt_seen(self, prompt_id: str) -> bool:
+        """Has this prompt already contributed evidence?"""
+        row = self.conn.execute(
+            "SELECT 1 FROM taste_signal WHERE prompt_id=? LIMIT 1",
+            (prompt_id,)).fetchone()
+        return row is not None
 
     # ----------------------------- writes ------------------------------
     def ingest(self, signals: Iterable[Signal], scope: str = "global",
-               now: int | None = None) -> list[dict[str, Any]]:
+               now: int | None = None,
+               prompt_id: str = "") -> list[dict[str, Any]]:
         """Fold signals into learnings. Returns one delta per signal.
 
         The whole batch is one write transaction: the read of the learning
@@ -170,10 +223,22 @@ class TasteStore:
         its first piece of evidence carried, so two writers that race still
         disagree about the wording of the rule — the key, the polarity, the
         counters and the status do not depend on who won.
+
+        `prompt_id` identifies the prompt a signal came from, and makes the
+        ingest **idempotent**: a prompt that is ingested twice contributes
+        its evidence once. The plugin is loaded once per location, so its
+        prompt hook fires more than once for the same prompt, and without
+        this each firing would count as another observation — a rule the
+        user stated once would reach `enforced` and be injected into every
+        session. The id is enforced here rather than in the plugin because
+        the plugin's module state is not shared between its loads, while the
+        store is the one thing every load writes through.
         """
         ts = int(now if now is not None else time.time())
         deltas = []
         with self._write_txn():
+            if prompt_id and self._prompt_seen(prompt_id):
+                return []
             for signal in signals:
                 rec_id = learning_id(scope, signal.category, signal.key)
                 learning = self._load(rec_id) or learnmod.new_learning(
@@ -182,7 +247,7 @@ class TasteStore:
                 delta["category"] = learning.category
                 delta["statement"] = learning.statement
                 self._save(learning)
-                self._record_signal(learning.id, signal, ts)
+                self._record_signal(learning.id, signal, ts, prompt_id)
                 deltas.append(delta)
         return deltas
 
@@ -214,11 +279,13 @@ class TasteStore:
         times, and each copy counted as another observation: a rule the user
         stated once reached `enforced` and was injected into every session.
 
-        Two rows are the same observation when they carry the same kind,
-        quote and source and were recorded in the same second — the plugin
-        ingests in the background, so the copies of one prompt land together.
-        A user who states the same thing again later produces rows in a
-        different second, and those are kept: repetition is evidence.
+        A row that carries a prompt id is identified by it: the same prompt
+        id is the same observation, whatever second it landed in. A row
+        without one — written before the store recorded prompt ids — is
+        identified by its kind, quote, source and second, because the copies
+        of one prompt land together. A user who states the same thing again
+        later produces rows in a different second, and those are kept:
+        repetition is evidence.
 
         `manual` signals are never collapsed. A manual learning is a
         deliberate act by the user, and learning the same statement three
@@ -230,14 +297,17 @@ class TasteStore:
         """
         rows = self.conn.execute(
             "SELECT id, learning_id, kind, weight, polarity, quote, source, "
-            "created FROM taste_signal ORDER BY id").fetchall()
+            "created, prompt_id FROM taste_signal ORDER BY id").fetchall()
         seen: set[tuple[Any, ...]] = set()
         drop: list[int] = []
         for row in rows:
             if row["kind"] == "manual":
                 continue
-            identity = (row["learning_id"], row["kind"], row["quote"],
-                        row["source"], row["created"])
+            if row["prompt_id"]:
+                identity = ("prompt", row["prompt_id"])
+            else:
+                identity = (row["learning_id"], row["kind"], row["quote"],
+                            row["source"], row["created"])
             if identity in seen:
                 drop.append(row["id"])
             else:

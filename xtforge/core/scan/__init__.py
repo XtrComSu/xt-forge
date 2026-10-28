@@ -100,6 +100,22 @@ PATTERN_RULES: list[tuple[str, str, re.Pattern[str], str]] = [
      "security check via assert (stripped with -O)"),
 ]
 
+# (id, severity, pattern, description) for detecting prompt injections in retrieved data
+INJECTION_RULES: list[tuple[str, str, re.Pattern[str], str]] = [
+    ("ignore_instructions", "critical",
+     re.compile(r"(?i)\b(?:ignore|disregard|forget)\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions|prompts|rules|context)\b"),
+     "Prompt injection: instruction override attempt"),
+    ("system_tag_spoof", "critical",
+     re.compile(r"(?i)<\s*(?:system|im_start|im_end|human|assistant|user)\s*>"),
+     "Prompt injection: turn marker / system tag spoofing"),
+    ("developer_mode", "high",
+     re.compile(r"(?i)\b(?:enter|enable|activate)\s+(?:developer|god|unrestricted|jailbreak)\s+mode\b"),
+     "Prompt injection: jailbreak persona switch"),
+    ("exfiltration_cue", "high",
+     re.compile(r"(?i)\b(?:send|exfiltrate|post|curl|fetch)\s+(?:to|towards)?\s+https?://[^\s]+\s+(?:containing|with)\s+(?:passwords|secrets|keys|tokens)\b"),
+     "Prompt injection: data exfiltration instruction"),
+]
+
 # (id, severity, pattern, description) applied to manifests
 MANIFEST_RULES: list[tuple[str, str, re.Pattern[str], str]] = [
     ("unpinned", "low", re.compile(r"^\s*[A-Za-z0-9_.\-\[\]]+\s*(?:#.*)?$"),
@@ -237,6 +253,14 @@ def scan_text(text: str, path: str = "<text>", reveal: bool = False,
     if mode in ("patterns", "all"):
         for line_no, line in enumerate(lines, start=1):
             for rule_id, severity, pattern, description in PATTERN_RULES:
+                if pattern.search(line):
+                    findings.append(_finding(rule_id, severity, description,
+                                             path, line_no, line.strip()[:80],
+                                             reveal=True))
+
+    if mode in ("injection", "all"):
+        for line_no, line in enumerate(lines, start=1):
+            for rule_id, severity, pattern, description in INJECTION_RULES:
                 if pattern.search(line):
                     findings.append(_finding(rule_id, severity, description,
                                              path, line_no, line.strip()[:80],

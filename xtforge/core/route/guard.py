@@ -157,13 +157,18 @@ def check_command(cmd: str) -> str | None:
     """Reject shell shapes that are never allowed. Returns reason or None."""
     forbidden = [
         (r"\brm\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*r", "recursive delete"),
+        (r"\brm\s+-[a-zA-Z]*f\b\s+[/~]", "forced root or home wipe"),
         (r"\bsudo\b|\bsu\b", "privilege escalation"),
         (r"\bcurl\b[^|]*\|\s*(ba)?sh", "remote code execution"),
         (r"\bwget\b[^|]*\|\s*(ba)?sh", "remote code execution"),
         (r">\s*/(etc|usr|bin|sbin|system|boot)/", "write to system path"),
-        (r"\bchmod\s+777\b", "world-writable"),
+        (r"\bchmod\s+(?:-R\s+)?777\b", "world-writable permissions"),
         (r"\bdd\s+.*of=/dev/", "raw device write"),
         (r"\bmkfs\b|\bfdisk\b", "filesystem destruction"),
+        (r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:", "fork bomb"),
+        (r"\bshred\b", "destructive file shredding"),
+        (r">\s*/dev/(?:sda|nvme|hda|vda)", "raw disk write redirection"),
+        (r"\b(?:base64\s+-d|xxd\s+-r)[^|]*\|\s*(?:ba)?sh", "encoded payload pipe to shell"),
     ]
     for pat, reason in forbidden:
         if re.search(pat, cmd, re.IGNORECASE):

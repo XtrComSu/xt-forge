@@ -147,6 +147,21 @@ def cmd_code(args):
                           f"{'  [def]' if r['definition'] else ''} {r['text']}"
                           for r in info["refs"]) or "(no references)"
         return _out(args, info, human)
+    if verb == "syntax":
+        from ..core.code import syntax as codesyntax
+        target_path = args.path or args.value or "."
+        info = codesyntax.check_syntax(target_path)
+        if info.get("ok"):
+            human = f"[ok] {info['path']} ({info.get('language')}) syntax clean"
+        else:
+            errors = info.get("errors", [])
+            lines = [f"[error] {info['path']} ({info.get('language')}): {len(errors)} syntax error(s)"]
+            for err in errors:
+                lines.append(f"  L{err.get('line')}:{err.get('column')} - {err.get('message')}")
+                if err.get("snippet"):
+                    lines.append(f"    {err['snippet']}")
+            human = "\n".join(lines)
+        return _out(args, info, human, code=0 if info.get("ok") else 1)
     return _out(args, {"ok": False, "error": f"unknown verb: {verb}"},
                 f"error: unknown verb {verb}", code=2)
 

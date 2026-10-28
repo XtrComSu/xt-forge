@@ -5,6 +5,7 @@ No runtime prompt may be constructed anywhere else.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -75,6 +76,184 @@ def hash_all() -> dict[str, str]:
         rel = p.relative_to(PROMPT_DIR).with_suffix("").as_posix()
         out[rel] = hashlib.sha256(p.read_bytes()).hexdigest()[:12]
     return out
+
+
+def build_agent_context(include_taste: bool = True,
+                        include_rules: bool = True,
+                        include_flash: bool = True,
+                        flash_scope: str = "global",
+                        flash_base: Path | str | None = None,
+                        query: str | None = None,
+                        mem_k: int = 3,
+                        harness: str = "auto",
+                        compact: bool = False,
+                        token_budget: int | None = None,
+                        prompt_name: str | None = None,
+                        **values: Any) -> str:
+    """Build a consolidated, optimized system context block for LLM agents.
+    
+    Injects:
+    1. Base prompt if specified (e.g. prompt_name="phases/design")
+    2. Relevant durable memories from Store if query is given
+    3. Active pinned session context from FlashStore
+    4. Active enforced taste policies from TasteStore
+    5. Harness-specific tool context (e.g. DSH MCP tools and plugins)
+    6. Native xt-forge launcher directives with safety and token optimization.
+    """
+    sections: list[str] = []
+    
+    # 1. Base prompt if specified
+    if prompt_name:
+        sections.append(render(prompt_name, **values))
+
+    # 2. Durable memory recall if query is provided
+    if query:
+        try:
+            from .mem.store import Store
+            from .mem import search as memsearch
+            from ..version import db_path
+            st = Store(db_path())
+            search_res = memsearch.search(st, query, k=mem_k)
+            results = search_res.get("results", [])
+            st.close()
+            if results:
+                if compact:
+                    items = []
+                    for r in results:
+                        rec = r.get("record", {})
+                        title = rec.get("title", "")[:40]
+                        body = rec.get("body", "").strip()[:160]
+                        items.append(f'<mem id="{rec.get("id")}" t="{title}">{body}</mem>')
+                    sections.append(f'<recalled_memory q="{query}">' + "".join(items) + '</recalled_memory>')
+                else:
+                    lines = [f'<recalled_memory query="{query}">']
+                    for r in results:
+                        rec = r.get("record", {})
+                        lines.append(f'  <item id="{rec.get("id")}" title="{rec.get("title","")}">{rec.get("body","").strip()}</item>')
+                    lines.append('</recalled_memory>')
+                    sections.append("\n".join(lines))
+        except Exception:
+            pass
+
+    # 3. Pinned hot flash memory
+    if include_flash:
+        try:
+            from .mem.flash import Flash
+            from ..version import flash_dir
+            fb = flash_base or flash_dir()
+            fl = Flash(fb)
+            pinned = fl.list(scope=flash_scope, pin_only=True)
+            if pinned:
+                if compact:
+                    items = [f'<p k="{p.get("k")}">{p.get("v","").strip()}</p>' for p in pinned]
+                    sections.append('<session_flash>' + "".join(items) + '</session_flash>')
+                else:
+                    lines = ['<session_flash source="flash" type="pinned">']
+                    for p in pinned:
+                        lines.append(f'  <item key="{p.get("k")}">{p.get("v","").strip()}</item>')
+                    lines.append('</session_flash>')
+                    sections.append("\n".join(lines))
+        except Exception:
+            pass
+
+    # 4. Enforced taste rules
+    if include_taste:
+        try:
+            from .taste.store import TasteStore
+            from .taste import block as tasteblock
+            from ..version import taste_db_path
+            st = TasteStore(taste_db_path())
+            rows = st.search(status="enforced", limit=100)
+            if rows:
+                if compact:
+                    items = [f'<r cat="{r.get("category")}" cf="{r.get("confidence", 0.0):.2f}">{r.get("statement","")}</r>' for r in rows]
+                    sections.append('<taste>' + "".join(items) + '</taste>')
+                else:
+                    taste_block = tasteblock.render_block(rows)
+                    if taste_block:
+                        sections.append(taste_block)
+            st.close()
+        except Exception:
+            pass
+
+    # 5. Harness-specific context
+    eff_harness = harness.lower() if harness else "auto"
+    if eff_harness == "auto":
+        if os.environ.get("XT_HARNESS"):
+            eff_harness = os.environ.get("XT_HARNESS", "").lower()
+        elif os.environ.get("DSH_HOME") or (Path.home() / ".dsh").is_dir():
+            eff_harness = "dsh"
+        else:
+            eff_harness = "generic"
+
+    if eff_harness == "dsh":
+        if compact:
+            sections.append(
+                '<harness type="dsh">'
+                '<mcp srv="memos" tools="mcp__memos__mem_put,mcp__memos__mem_search"/>'
+                '<plugins list="dsh-context,dshmarket,dsh-rea,dsh-purge,dsh-project-memory"/>'
+                '<skills list="media-tools,remotion-*,browser-skill"/>'
+                '</harness>'
+            )
+        else:
+            sections.append(
+                '<harness_context type="dsh">\n'
+                '  <mcp_tools server="memos">\n'
+                '    Use `mcp__memos__mem_put` to store verified findings and `mcp__memos__mem_search` to recall.\n'
+                '  </mcp_tools>\n'
+                '  <plugins>\n'
+                '    Active in web profile: dsh-context, dsh-purge (audit only; never run --apply), dshmarket, dsh-rea, dsh-project-memory.\n'
+                '    Mounted local skills: media-tools, remotion-*, browser-skill.\n'
+                '  </plugins>\n'
+                '</harness_context>'
+            )
+
+    # 6. Tool invocation directives
+    if compact:
+        sections.append(
+            '<system_instructions source="xt-forge">'
+            '<directive priority="critical">Use /home/user/bin/xtforge route/code/mem/scan; always --json; no destructive cmds.</directive>'
+            '</system_instructions>'
+        )
+    else:
+        sections.append(
+            '<system_instructions source="xt-forge">\n'
+            '  <directive priority="critical">\n'
+            '    Always prioritize reaching for native xt-forge tools via `/home/user/bin/xtforge`\n'
+            '    for repository mapping (`route context`, `code symbols/syntax`), memory recall (`mem search`), \n'
+            '    and safety checks (`scan secrets`, `code syntax`) before re-deriving or guessing.\n'
+            '  </directive>\n'
+            '</system_instructions>'
+        )
+
+    delimiter = "" if compact else "\n\n"
+    rendered = delimiter.join(sections)
+
+    # 7. Token budget enforcement (~4 chars / token)
+    if token_budget and token_budget > 0:
+        char_limit = token_budget * 4
+        if len(rendered) > char_limit:
+            # If standard directive is too large for budget, switch to compact directive
+            if not compact and len(sections[-1]) > char_limit:
+                compact_dir = (
+                    '<system_instructions source="xt-forge">'
+                    '<directive priority="critical">Use /home/user/bin/xtforge route/code/mem/scan; always --json.</directive>'
+                    '</system_instructions>'
+                )
+                sections[-1] = compact_dir
+                rendered = delimiter.join(sections)
+
+            last_sec = sections[-1]
+            avail = max(0, char_limit - len(last_sec) - len(delimiter))
+            if avail > 0:
+                truncated_head = rendered[:avail]
+                if not compact and "\n\n" in truncated_head:
+                    truncated_head = truncated_head.rsplit("\n\n", 1)[0]
+                rendered = f"{truncated_head}{delimiter}{last_sec}"
+            else:
+                rendered = last_sec[:char_limit]
+
+    return rendered
 
 
 def clear_cache() -> None:
