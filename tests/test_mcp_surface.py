@@ -25,6 +25,7 @@ SERVER = ROOT / "adapters" / "mcp" / "server.py"
 # The surface, by group. The taste plugin added `taste` and `goal`; the rest
 # predates it and must keep working unchanged.
 PINNED: dict[str, list[str]] = {
+    "search": ["search", "recall", "tool_call"],
     "mem": ["mem_put", "mem_get", "mem_search", "mem_list", "mem_forget",
             "mem_review", "mem_export", "mem_import", "mem_sync"],
     "flash": ["flash_set", "flash_get", "flash_list", "flash_pin",
@@ -42,6 +43,7 @@ PINNED: dict[str, list[str]] = {
               "build_lint"],
     "ops": ["version", "doctor", "tools_status", "calibrate", "slash",
             "ascii"],
+    "re": ["re_inspect", "re_cfg"],
 }
 
 TOOL_CAP = 56

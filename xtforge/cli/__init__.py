@@ -17,6 +17,13 @@ from .repos_cmd import cmd_repos
 from .scan_cmd import cmd_re, cmd_scan
 from .codec_cmd import cmd_codec
 from .recon_cmd import cmd_recon
+from .recall_cmd import cmd_recall
+from .search_cmd import cmd_search
+from .tool_cmd import cmd_tool
+from .artifact_cmd import cmd_artifact
+from .knowledge_cmd import cmd_knowledge
+from .design_cmd import cmd_design
+from .mcp_cmd import cmd_mcp
 from .docs_cmd import cmd_docs
 from .intel_cmd import cmd_intel, cmd_hub
 from .eval_cmd import cmd_eval
@@ -260,19 +267,29 @@ def _add_re(sub) -> None:
     r = sub.add_parser("re", help="binary inspection and native RE analysis")
     r.add_argument("re_verb", choices=["info", "needed", "sections", "symbols",
                                        "strings", "entropy", "pack",
-                                       "ioc", "disasm", "graph"])
+                                       "ioc", "disasm", "graph",
+                                       "pe", "cfg", "block", "view", "xrefs"])
     r.add_argument("value", nargs="?", default=None,
-                   help="binary path (same as --path)")
+                   help="binary path or subverb (same as --path)")
     r.add_argument("path", nargs="?", default=None)
+    r.add_argument("extra", nargs="*", default=[], help="additional positional arguments")
     r.add_argument("--limit", type=int, default=200)
     r.add_argument("--min-len", dest="min_len", type=int, default=4)
     r.add_argument("--block", type=int, default=0,
                    help="entropy: report per-block entropy of this size")
     r.add_argument("--count", type=int, default=32,
                    help="entropy: max blocks to report (disasm: instruction count)")
-    r.add_argument("--symbol", help="disasm: disassemble one symbol")
+    r.add_argument("--symbol", help="disasm/cfg: target symbol")
     r.add_argument("--section", help="disasm: disassemble one section")
     r.add_argument("--start", help="disasm: skip below this hex address")
+    r.add_argument("--rva", help="cfg: function start RVA in hex (e.g. 0x1000)")
+    r.add_argument("--engine", choices=["auto", "builtin", "rizin"], default="auto",
+                   help="cfg: disassembly and graph engine")
+    r.add_argument("--max-instructions", type=int, default=250,
+                   help="cfg: maximum instructions to serialize in block graph")
+    r.add_argument("--block-id", help="block: basic block id to fetch instructions for")
+    r.add_argument("--out", help="view: output path for companion HTML file")
+    r.add_argument("--target", help="xrefs: target symbol or hex address")
     r.set_defaults(func=cmd_re)
 
 
@@ -473,13 +490,162 @@ def _add_plugin(sub) -> None:
     p.set_defaults(func=cmd_plugin)
 
 
+def _add_design(sub) -> None:
+    d = sub.add_parser("design", help="search the curated design library")
+    d.add_argument("design_verb", choices=["search", "show", "check"])
+    d.add_argument("value", nargs="?", default=None, help="query or entry id")
+    d.add_argument("--id")
+    d.add_argument("--query", "-q")
+    d.add_argument("--kind", choices=["pattern", "anti"])
+    d.add_argument("--limit", type=int, default=8)
+    d.add_argument("--states", help="check: comma-separated states that must be covered")
+    d.set_defaults(func=cmd_design)
+
+
+def _add_knowledge(sub) -> None:
+    k = sub.add_parser("knowledge", help="agent-contributed knowledge with lifecycle status")
+    k.add_argument("knowledge_verb",
+                   choices=["put", "get", "search", "verify", "revise", "link", "deprecate"])
+    k.add_argument("value", nargs="?", default=None,
+                   help="id for get/verify/revise/deprecate; query for search")
+    k.add_argument("--id", help="record id")
+    k.add_argument("--kind", help="fact|decision|procedure|error_pattern|problem|"
+                                 "recovery|design|design_antipattern|discovery|"
+                                 "environment|example")
+    k.add_argument("--title")
+    k.add_argument("--body")
+    k.add_argument("--body-file", dest="body_file",
+                   help="read the body from a file, or '-' for stdin")
+    k.add_argument("--scope", default="global")
+    k.add_argument("--status", help="observed|proposed (agents cannot assert "
+                                    "verified directly)")
+    k.add_argument("--project")
+    k.add_argument("--target")
+    k.add_argument("--evidence")
+    k.add_argument("--author", help="authoring agent identity")
+    k.add_argument("--version", action="append", help="applicable version (repeatable)")
+    k.add_argument("--environment")
+    k.add_argument("--tag", action="append")
+    k.add_argument("--method", help="verify: how it was checked")
+    k.add_argument("--result", choices=["pass", "fail", "inconclusive"],
+                   help="verify: outcome of the check")
+    k.add_argument("--checker", help="verify: identity of the check that ran")
+    k.add_argument("--exit-status", dest="exit_status", type=int,
+                   help="verify: exit status of the executed check")
+    k.add_argument("--contradict", action="store_true",
+                   help="verify: this check contradicts the record")
+    k.add_argument("--relation", help="link: relates_to|part_of|depends_on|"
+                                      "caused_by|fixes|contradicts|see_also")
+    k.add_argument("--reason", help="deprecate: why")
+    k.add_argument("--superseded-by", dest="superseded_by")
+    k.add_argument("--query", "-q")
+    k.add_argument("--k", type=int, default=8)
+    k.set_defaults(func=cmd_knowledge)
+
+
+def _add_artifact(sub) -> None:
+    a = sub.add_parser("artifact", help="record and verify produced files")
+    a.add_argument("artifact_verb", choices=["record", "check", "require", "show", "verify"])
+    a.add_argument("path", help="path to the artifact")
+    a.add_argument("--media-type", dest="media_type")
+    a.add_argument("--producer", help="tool/attempt that produced it")
+    a.add_argument("--check", help="check id (check verb), e.g. pdf-pages")
+    a.add_argument("--result", choices=["pass", "fail", "skipped"], default="pass")
+    a.add_argument("--detail", help="what the check observed")
+    a.add_argument("--version", help="check implementation version")
+    a.add_argument("--by", help="who ran it")
+    a.add_argument("--checker", help="identity of the check implementation that "
+                                     "actually ran, e.g. scripts/check-pdf.py@2")
+    a.add_argument("--exit-status", dest="exit_status", type=int,
+                   help="exit status of the executed checker; its presence marks "
+                        "the check as executed rather than declared")
+    a.add_argument("--evidence", help="path or reference to the checker's output")
+    a.add_argument("--declared", action="store_true",
+                   help="record an assertion only; a declared pass can never "
+                        "produce 'verified'")
+    a.add_argument("--requires", action="append", metavar="CHECK_ID",
+                   help="declare a check that must pass for completion "
+                        "(repeatable; used with the 'require' verb)")
+    a.set_defaults(func=cmd_artifact)
+
+
+def _add_recall(sub) -> None:
+    r = sub.add_parser("recall", help="one query across mem, recon, flash and errors")
+    r.add_argument("value", nargs="?", default=None, help="search text")
+    r.add_argument("--query", "-q", help="search text (alias for the positional)")
+    r.add_argument("--target", help="recon target label; findings are per-target")
+    r.add_argument("--tool", help="tool name for error-memory lookup, e.g. bash")
+    r.add_argument("--store", help="comma list to restrict sources: mem,recon,flash,errors")
+    r.add_argument("--k", type=int, default=5, help="hits per source from mem (default 5)")
+    r.add_argument("--limit", type=int, default=10, help="row cap per non-mem source")
+    r.add_argument("--artifacts-root", action="append", dest="artifacts_root",
+                   help="directory to search for artifact sidecars (repeatable; "
+                        "defaults to the caller's working directory)")
+    r.add_argument("--budget-chars", dest="budget_chars", type=int, default=0,
+                   help="hard cap on returned content in characters (0 = no cap); "
+                        "truncation is reported, never silent")
+    r.add_argument("--loose", action="store_true",
+                   help="accept the stores' raw ranking instead of filtering to rows "
+                        "that share a token with the query")
+    r.set_defaults(func=cmd_recall)
+
+
+def _add_search(sub) -> None:
+    s = sub.add_parser("search", help="federated search across code, memory, knowledge, web, CVEs, and tools")
+    s.add_argument("value", nargs="?", default=None, help="search query text or sub-mode (web, cve, tool)")
+    s.add_argument("path", nargs="?", default=None, help="directory for code search, or query when sub-mode given")
+    s.add_argument("--query", "-q", help="search query text")
+    s.add_argument("--path", dest="path_flag", help="directory for code search")
+    s.add_argument("--web", action="store_true", help="search the web via local searchd (Google SERP) / SearXNG")
+    s.add_argument("--cve", action="store_true", help="search CVEs, NVD, EPSS, and CISA KEV")
+    s.add_argument("--tools", action="store_true", help="search external MCP tools and capabilities")
+    s.add_argument("--all", action="store_true", help="search all stores including web, CVEs, and tools")
+    s.add_argument("--limit", type=int, default=8, help="max results per category (default: 8)")
+    s.add_argument("--stores", help="comma-separated stores: code,mem,flash,knowledge,recon,web,cve,tools")
+    s.set_defaults(func=cmd_search)
+
+
+def _add_tool(sub) -> None:
+    t = sub.add_parser("tool", help="on-demand external MCP tool discovery and execution")
+    t.add_argument("tool_verb", choices=["list", "search", "run"],
+                   help="verb: list, search, run")
+    t.add_argument("server", nargs="?", help="server name or search query")
+    t.add_argument("tool_name", nargs="?", help="tool name (for run)")
+    t.add_argument("arguments", nargs="?", help="JSON arguments string (for run)")
+    t.add_argument("--query", "-q", help="search query")
+    t.add_argument("--args-file", dest="args_file", help="path to JSON arguments file or '-' for stdin")
+    t.add_argument("--timeout", type=int, default=60, help="execution timeout in seconds")
+    t.set_defaults(func=cmd_tool)
+
+
+def _add_mcp(sub) -> None:
+    m = sub.add_parser("mcp", help="MCP servers the harness mounts, and what they cost")
+    m.add_argument("mcp_verb", nargs="?", default="status",
+                   choices=["status", "advice", "configs"])
+    m.add_argument("--profile", help="only read this profile's cordis patch "
+                                     "(default: every profile)")
+    m.add_argument("--probe", action="store_true",
+                   help="status: start each selected server and measure its "
+                        "real tools/list payload (opt-in: this spawns processes)")
+    m.add_argument("--timeout", type=float, default=20.0,
+                   help="probe: seconds allowed per server")
+    m.set_defaults(func=cmd_mcp)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=app_name())
     p.add_argument("--json", action="store_true", help="print raw JSON")
     p.add_argument("--db", help="path to mem.db")
     p.add_argument("--flash-base", help="flash storage directory override")
     sub = p.add_subparsers(dest="noun")
+    _add_search(sub)
+    _add_tool(sub)
     _add_mem(sub)
+    _add_recall(sub)
+    _add_artifact(sub)
+    _add_knowledge(sub)
+    _add_design(sub)
+    _add_mcp(sub)
     _add_flash(sub)
     _add_goal(sub)
     _add_build(sub)

@@ -118,12 +118,46 @@ def _tool(name: str, description: str, properties: dict[str, Any],
 _TEXT = {"type": "string"}
 _INT = {"type": "integer"}
 _BOOL = {"type": "boolean"}
+_OBJ = {"type": "object"}
 _TAGS = {"type": "array", "items": {"type": "string"}}
 
 
 # -------------------------------------------------------------- tool table
 
 TOOLS: list[dict[str, Any]] = [
+    # search & recall ---------------------------------------------------
+    _tool(
+        "search",
+        "Federated search across codebase files, durable memories, knowledge base, web (Google SERP/SearXNG), CVE security intelligence, and external tools.",
+        {"query": _TEXT, "path": _TEXT, "web": _BOOL, "cve": _BOOL, "tools": _BOOL, "all": _BOOL, "limit": _INT, "stores": _TEXT},
+        ["query"],
+        lambda a: ["search", _str(a, "query"),
+                   *([a["path"]] if a.get("path") else []),
+                   *_opt(a, "web", "--web"),
+                   *_opt(a, "cve", "--cve"),
+                   *_opt(a, "tools", "--tools"),
+                   *_opt(a, "all", "--all"),
+                   *_opt(a, "limit", "--limit"),
+                   *_opt(a, "stores", "--stores")],
+    ),
+    _tool(
+        "recall",
+        "Unified cross-store query across memory, recon findings, flash notes, and artifacts.",
+        {"query": _TEXT, "store": _TEXT, "k": _INT, "limit": _INT},
+        ["query"],
+        lambda a: ["recall", _str(a, "query"),
+                   *_opt(a, "store", "--store"),
+                   *_opt(a, "k", "--k"),
+                   *_opt(a, "limit", "--limit")],
+    ),
+    _tool(
+        "tool_call",
+        "Dispatch an on-demand external MCP tool (cad3d/OpenSCAD, photoeditor, glmocr, searchd) without mounting it permanently.",
+        {"server": _TEXT, "tool": _TEXT, "arguments": _OBJ},
+        ["server", "tool"],
+        lambda a: ["tool", "run", _str(a, "server"), _str(a, "tool"),
+                   *([json.dumps(a["arguments"])] if a.get("arguments") else [])],
+    ),
     # mem ---------------------------------------------------------------
     _tool(
         "mem_put",
@@ -200,10 +234,13 @@ TOOLS: list[dict[str, Any]] = [
         {"text": _TEXT, "key": _TEXT, "scope": _TEXT, "tags": _TAGS,
          "ttl": _INT},
         ["text"],
-        lambda a: ["flash", "set", "--text-file", "-",
-                   *_opt(a, "key", "--key"), *_opt(a, "scope", "--scope"),
+        # The CLI takes ONE positional: either "TEXT" or "KEY=TEXT". Passing a
+        # second positional key silently mis-parsed (the key was stored as a
+        # GLB flag the last time this happened). Build "KEY=TEXT" here.
+        lambda a: ["flash", "set",
+                   (f"{_str(a, 'key')}=" if a.get("key") else "") + _str(a, "text"),
+                   *_opt(a, "scope", "--scope"),
                    *_tags(a), *_opt(a, "ttl", "--ttl")],
-        stdin=lambda a: a["text"],
     ),
     _tool(
         "flash_get",
@@ -527,6 +564,31 @@ TOOLS: list[dict[str, Any]] = [
         "Validate all workflows, or one spec file.",
         {"path": _TEXT}, [],
         lambda a: ["build", "lint", *_opt(a, "path", "--path")],
+    ),
+    # reverse engineering -----------------------------------------------
+    _tool(
+        "re_inspect",
+        "Inspect binary structures: format headers, sections with entropy, imports, exports, or PE TLS callbacks.",
+        {"path": _TEXT, "verb": {"type": "string", "enum": ["info", "sections", "symbols", "pe_info", "pe_sections", "pe_imports", "pe_exports", "pe_tls", "ioc"]}, "limit": _INT},
+        ["path"],
+        lambda a: (["re", "pe", a.get("verb", "info")[3:], _str(a, "path"), *_opt(a, "limit", "--limit")]
+                   if a.get("verb", "").startswith("pe_")
+                   else ["re", a.get("verb") or "info", _str(a, "path"), *_opt(a, "limit", "--limit")]),
+    ),
+    _tool(
+        "re_cfg",
+        "Reconstruct function basic block Control Flow Graph (CFG), block disassembly, or cross-references in token-bounded JSON.",
+        {"path": _TEXT, "symbol": _TEXT, "rva": _TEXT, "engine": {"type": "string", "enum": ["auto", "builtin", "rizin"]},
+         "max_instructions": _INT, "block_id": _TEXT, "target": _TEXT},
+        ["path"],
+        lambda a: (["re", "block", _str(a, "path"), "--block-id", _str(a, "block_id"),
+                    *_opt(a, "symbol", "--symbol"), *_opt(a, "rva", "--rva"), *_opt(a, "engine", "--engine")]
+                   if a.get("block_id")
+                   else (["re", "xrefs", _str(a, "path"), "--target", _str(a, "target")]
+                         if a.get("target")
+                         else ["re", "cfg", _str(a, "path"),
+                               *_opt(a, "symbol", "--symbol"), *_opt(a, "rva", "--rva"),
+                               *_opt(a, "engine", "--engine"), *_opt(a, "max_instructions", "--max-instructions")])),
     ),
 ]
 
