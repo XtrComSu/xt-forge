@@ -258,3 +258,96 @@ def graph(path: str | Path, max_calls: int = 200) -> dict[str, Any]:
             "call_sites": calls, "call_count": len(calls),
             "hot_targets": [{"target": t, "calls": n} for t, n in hot],
             "binutils": bool(available or ok)}
+
+
+# ------------------------------------------------------------ multi-format dispatcher
+
+def sniff_format(target: str | Path | bytes) -> str:
+    """Detect binary format ('elf', 'pe', or 'unknown') from bytes or file header."""
+    if isinstance(target, (bytes, bytearray)):
+        prefix = bytes(target[:4])
+    else:
+        try:
+            canon = guard.read_guard(target)
+            if not canon.is_file():
+                return "unknown"
+            with canon.open("rb") as f:
+                prefix = f.read(4)
+        except (guard.Denied, OSError):
+            return "unknown"
+
+    if prefix.startswith(b"\x7fELF"):
+        return "elf"
+    if prefix.startswith(b"MZ"):
+        return "pe"
+    return "unknown"
+
+
+def get_info(path: str | Path) -> dict[str, Any]:
+    """Extract format-appropriate header and execution metadata."""
+    fmt = sniff_format(path)
+    if fmt == "pe":
+        from .pe import PEFile, PeError
+        try:
+            pe = PEFile(path)
+            info = pe.info()
+            return {"ok": True, "path": str(path), **info}
+        except PeError as exc:
+            return {"ok": False, "err": str(exc), "path": str(path)}
+    elif fmt == "elf":
+        from . import elf
+        try:
+            info = elf.info(path)
+            return {"ok": True, **info}
+        except Exception as exc:
+            return {"ok": False, "err": str(exc), "path": str(path)}
+    return {"ok": False, "err": f"unrecognized binary format for {path}"}
+
+
+def get_sections(path: str | Path) -> dict[str, Any]:
+    """Extract section table with entropy for ELF or PE."""
+    fmt = sniff_format(path)
+    if fmt == "pe":
+        from .pe import PEFile, PeError
+        try:
+            pe = PEFile(path)
+            return {"ok": True, "path": str(path), "sections": pe.sections()}
+        except PeError as exc:
+            return {"ok": False, "err": str(exc), "path": str(path)}
+    elif fmt == "elf":
+        from . import elf
+        try:
+            return elf.sections(path)
+        except Exception as exc:
+            return {"ok": False, "err": str(exc), "path": str(path)}
+    return {"ok": False, "err": f"unrecognized binary format for {path}"}
+
+
+def get_symbols(path: str | Path, limit: int = 200) -> dict[str, Any]:
+    """Extract exported or visible symbols for ELF or PE."""
+    fmt = sniff_format(path)
+    if fmt == "pe":
+        from .pe import PEFile, PeError
+        try:
+            pe = PEFile(path)
+            exps = pe.exports()
+            symbols = [
+                {
+                    "name": exp["name"],
+                    "rva": exp["rva"],
+                    "ordinal": exp["ordinal"],
+                    "kind": "export",
+                }
+                for exp in exps[:limit]
+            ]
+            return {"ok": True, "path": str(path), "symbols": symbols, "count": len(symbols)}
+        except PeError as exc:
+            return {"ok": False, "err": str(exc), "path": str(path)}
+    elif fmt == "elf":
+        from . import elf
+        try:
+            return elf.symbols(path, limit=limit)
+        except Exception as exc:
+            return {"ok": False, "err": str(exc), "path": str(path)}
+    return {"ok": False, "err": f"unrecognized binary format for {path}"}
+
