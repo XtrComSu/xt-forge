@@ -16,6 +16,7 @@ from .tools_cmd import cmd_tools
 from .repos_cmd import cmd_repos
 from .scan_cmd import cmd_re, cmd_scan
 from .swarm_cmd import cmd_swarm
+from .session_cmd import cmd_session
 from .codec_cmd import cmd_codec
 from .recon_cmd import cmd_recon
 from .recall_cmd import cmd_recall
@@ -270,7 +271,8 @@ def _add_re(sub) -> None:
                                        "strings", "entropy", "pack",
                                        "ioc", "disasm", "graph",
                                        "pe", "cfg", "block", "view", "xrefs",
-                                       "checksec", "hooks", "patch", "rtti", "diff"])
+                                       "checksec", "hooks", "patch", "rtti", "diff",
+                                       "capa", "crash"])
     r.add_argument("value", nargs="?", default=None,
                    help="binary path or subverb (same as --path)")
     r.add_argument("path", nargs="?", default=None)
@@ -650,6 +652,14 @@ def _add_swarm(sub) -> None:
     s.set_defaults(func=cmd_swarm)
 
 
+def _add_session(sub) -> None:
+    s = sub.add_parser("session", help="session checkpointing (fork and rewind state)")
+    s.add_argument("session_verb", choices=["fork", "rewind", "list", "delete"], default="list", nargs="?")
+    s.add_argument("target", nargs="?", default=None, help="checkpoint id or snapshot name")
+    s.add_argument("--name", help="descriptive name for checkpoint")
+    s.set_defaults(func=cmd_session)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=app_name())
     p.add_argument("--json", action="store_true", help="print raw JSON")
@@ -665,6 +675,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_design(sub)
     _add_mcp(sub)
     _add_swarm(sub)
+    _add_session(sub)
     _add_flash(sub)
     _add_goal(sub)
     _add_build(sub)

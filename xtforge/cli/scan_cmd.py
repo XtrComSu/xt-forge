@@ -176,6 +176,12 @@ def cmd_re(args):
             if not bin2:
                 return _out(args, {"ok": False, "error": "diff requires two binary paths: xtforge re diff <bin1> <bin2>"}, "error: diff requires two binary paths", code=2)
             res = diff_binaries(path, bin2)
+        elif verb == "capa":
+            from ..core.re.capa import detect_capabilities
+            res = detect_capabilities(path)
+        elif verb == "crash":
+            from ..core.re.crash import parse_crash
+            res = parse_crash(path)
         else:
             return _out(args, {"ok": False, "error": f"unknown verb: {verb}"},
                         f"error: unknown verb {verb}", code=2)
@@ -281,6 +287,25 @@ def cmd_re(args):
             f"  Removed:  {res.get('removed_count')} functions {res.get('removed_functions', [])[:6]}\n"
             f"  Modified: {res.get('modified_count')} functions"
         )
+    elif verb == "capa":
+        caps = res.get("capabilities", [])
+        lines = [f"Capabilities for {res.get('path')} ({res.get('format')}): {len(caps)} detected"]
+        for cap in caps:
+            lines.append(f"  [{cap.get('severity')}] {cap.get('name')}: {cap.get('description')}")
+            for m in cap.get("matches", []):
+                lines.append(f"      - {m.get('type')}: {m.get('indicator')}")
+        human = "\n".join(lines)
+    elif verb == "crash":
+        exc = res.get("exception") or {}
+        crashing_mod = res.get("crashing_module") or {}
+        lines = [
+            f"Crash Dump: {res.get('path')} ({res.get('format')})",
+            f"  Exception: {exc.get('code_name')} ({exc.get('code')}) at {exc.get('address')} (thread {exc.get('thread_id')})",
+        ]
+        if crashing_mod:
+            lines.append(f"  Faulting Module: {crashing_mod.get('name')} + {crashing_mod.get('offset')} (base {crashing_mod.get('base')})")
+        lines.append(f"  Loaded Modules: {len(res.get('modules', []))}, Threads: {res.get('thread_count', 0)}")
+        human = "\n".join(lines)
     elif verb == "strings":
         if "stack_strings" in res:
             human = "\n".join(f"{s['function']}: {s['string']}" for s in res["stack_strings"]) or "(no stack strings found)"

@@ -80,3 +80,40 @@ class TestRECLI(unittest.TestCase):
             data = json.loads(res.stdout)
             self.assertTrue(data.get("ok"))
             self.assertEqual(data["exports"][0]["name"], "HookEntry")
+
+    def test_re_capa_and_crash_cli(self):
+        from tests.test_re_crash import create_synthetic_minidump
+        with tempfile.TemporaryDirectory() as tmpdir:
+            p_pe = Path(tmpdir) / "sample.exe"
+            p_pe.write_bytes(
+                create_minimal_pe(
+                    bits=64,
+                    sections=[(".text", 0x1000, 0x1000, b"\x90" * 0x1000, 0x60000020)],
+                    imports={"kernel32.dll": ["IsDebuggerPresent"]},
+                )
+            )
+
+            res = subprocess.run(
+                [sys.executable, "-m", "xtforge.cli", "--json", "re", "capa", str(p_pe)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res.returncode, 0, res.stderr)
+            data = json.loads(res.stdout)
+            self.assertTrue(data.get("ok"))
+            caps = [c["name"] for c in data.get("capabilities", [])]
+            self.assertIn("anti_debugging", caps)
+
+            p_dmp = Path(tmpdir) / "crash.dmp"
+            p_dmp.write_bytes(create_synthetic_minidump())
+            res_crash = subprocess.run(
+                [sys.executable, "-m", "xtforge.cli", "--json", "re", "crash", str(p_dmp)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(res_crash.returncode, 0, res_crash.stderr)
+            data_crash = json.loads(res_crash.stdout)
+            self.assertTrue(data_crash.get("ok"))
+            self.assertEqual(data_crash.get("format"), "minidump")
+            self.assertEqual(data_crash["exception"]["code"], "0xc0000005")
+
