@@ -7,6 +7,7 @@ from typing import Any
 
 from ..core.swarm.mapreduce import map_functions
 from ..core.swarm.mcts import speculative_solve
+from ..core.swarm.audit import audit_binary
 
 
 def _out(args: Any, payload: dict[str, Any], human: str, code: int = 0) -> int:
@@ -52,5 +53,18 @@ def cmd_swarm(args: Any) -> int:
             f"  Sample: {res.get('decoded_sample')}"
         )
         return _out(args, res, human)
+
+    elif verb == "audit":
+        res = audit_binary(target, workers=workers)
+        if not res.get("ok"):
+            return _out(args, res, f"error: {res.get('err')}", code=1)
+        summary = res.get("summary", {})
+        lines = [
+            f"Swarm Security & Capability Audit for {res.get('path')}: {res.get('total_findings')} findings",
+            f"  Severities: HIGH={summary.get('HIGH',0)}  MEDIUM={summary.get('MEDIUM',0)}  LOW={summary.get('LOW',0)}  INFO={summary.get('INFO',0)}"
+        ]
+        for f in res.get("findings", [])[:15]:
+            lines.append(f"  [{f['severity']:<6}] {f['title']}: {f['description']}")
+        return _out(args, res, "\n".join(lines))
 
     return _out(args, {"ok": False, "error": f"unknown verb: {verb}"}, f"error: unknown verb {verb}", code=2)

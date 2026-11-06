@@ -641,7 +641,7 @@ def _add_mcp(sub) -> None:
 
 def _add_swarm(sub) -> None:
     s = sub.add_parser("swarm", help="high-concurrency binary analysis and speculative solving")
-    s.add_argument("swarm_verb", choices=["map", "solve"], default="map")
+    s.add_argument("swarm_verb", choices=["map", "solve", "audit"], default="map")
     s.add_argument("target", nargs="?", default=None, help="target binary path")
     s.add_argument("--workers", type=int, default=8, help="parallel worker count")
     s.add_argument("--offset", help="solve: byte offset to test speculative decoding")
