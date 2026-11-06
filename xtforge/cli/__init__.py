@@ -15,6 +15,7 @@ from .calibrate_cmd import cmd_calibrate
 from .tools_cmd import cmd_tools
 from .repos_cmd import cmd_repos
 from .scan_cmd import cmd_re, cmd_scan
+from .swarm_cmd import cmd_swarm
 from .codec_cmd import cmd_codec
 from .recon_cmd import cmd_recon
 from .recall_cmd import cmd_recall
@@ -638,6 +639,17 @@ def _add_mcp(sub) -> None:
     m.set_defaults(func=cmd_mcp)
 
 
+def _add_swarm(sub) -> None:
+    s = sub.add_parser("swarm", help="high-concurrency binary analysis and speculative solving")
+    s.add_argument("swarm_verb", choices=["map", "solve"], default="map")
+    s.add_argument("target", nargs="?", default=None, help="target binary path")
+    s.add_argument("--workers", type=int, default=8, help="parallel worker count")
+    s.add_argument("--offset", help="solve: byte offset to test speculative decoding")
+    s.add_argument("--size", type=int, default=256, help="solve: size of byte chunk to evaluate")
+    s.add_argument("--hypotheses", help="solve: comma-separated list of decoding hypotheses")
+    s.set_defaults(func=cmd_swarm)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=app_name())
     p.add_argument("--json", action="store_true", help="print raw JSON")
@@ -652,6 +664,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_knowledge(sub)
     _add_design(sub)
     _add_mcp(sub)
+    _add_swarm(sub)
     _add_flash(sub)
     _add_goal(sub)
     _add_build(sub)
