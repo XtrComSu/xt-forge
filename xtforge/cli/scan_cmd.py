@@ -57,8 +57,19 @@ def cmd_re(args):
         elif verb == "symbols":
             res = renative.get_symbols(path, limit=args.limit)
         elif verb == "strings":
-            res = elf.strings(path, min_len=getattr(args, "min_len", 4),
-                              limit=args.limit)
+            if getattr(args, "stack", False):
+                dis_res = renative.disasm(path, count=10000)
+                # Reconstruct raw disasm text from instructions
+                tool = shutil.which("objdump")
+                out_txt, _ = renative._run([tool, "-d", str(path)]) if tool else ("", False)
+                res = {"ok": True, "path": str(path), "stack_strings": renative.extract_stack_strings(out_txt, min_len=getattr(args, "min_len", 4))}
+            elif getattr(args, "xor", False):
+                canon = renative.guard.read_guard(path)
+                data = canon.read_bytes()
+                res = {"ok": True, "path": str(path), "xor_strings": renative.extract_xor_strings(data, min_len=getattr(args, "min_len", 4))}
+            else:
+                res = elf.strings(path, min_len=getattr(args, "min_len", 4),
+                                  limit=args.limit)
         elif verb == "entropy":
             res = elf.entropy(path, block=getattr(args, "block", 0),
                               limit=getattr(args, "count", 32))
@@ -137,6 +148,24 @@ def cmd_re(args):
             from ..core.re import analysis
             target_ref = getattr(args, "target", None) or getattr(args, "symbol", None) or ""
             res = analysis.find_xrefs(path, target_ref)
+        elif verb == "checksec":
+            res = renative.checksec(path)
+        elif verb == "hooks":
+            tool = shutil.which("objdump")
+            out_txt, _ = renative._run([tool, "-d", str(path)], timeout=45) if tool else ("", False)
+            res = {"ok": True, "path": str(path), **renative.scan_hooks_and_syscalls(out_txt)}
+        elif verb == "patch":
+            from ..core.re.patch import apply_patch
+            off_str = getattr(args, "offset", None)
+            if not off_str:
+                return _out(args, {"ok": False, "error": "patch requires --offset"}, "error: patch requires --offset", code=2)
+            off = int(off_str, 16) if ("0x" in off_str or "0X" in off_str) else int(off_str)
+            p_hex = getattr(args, "patch_bytes", None)
+            if not p_hex:
+                return _out(args, {"ok": False, "error": "patch requires --patch-bytes (hex string)"}, "error: patch requires --patch-bytes", code=2)
+            pbytes = bytes.fromhex(p_hex.replace(" ", ""))
+            obytes = bytes.fromhex(args.orig_bytes.replace(" ", "")) if getattr(args, "orig_bytes", None) else None
+            res = apply_patch(path, offset=off, patch_bytes=pbytes, original_bytes=obytes, out_path=getattr(args, "out", None))
         else:
             return _out(args, {"ok": False, "error": f"unknown verb: {verb}"},
                         f"error: unknown verb {verb}", code=2)
@@ -211,8 +240,30 @@ def cmd_re(args):
             f"  {x.get('caller')} ({x.get('address')}): {x.get('mnemonic')} {x.get('operands')}"
             for x in xrefs
         )
+    elif verb == "checksec":
+        mits = res.get("mitigations", {})
+        human = f"Checksec for {res.get('path')} ({res.get('format')}):\n" + "\n".join(
+            f"  {k:<18} {'YES' if v is True else ('NO' if v is False else v)}"
+            for k, v in mits.items()
+        )
+    elif verb == "hooks":
+        syscalls = res.get("syscalls", [])
+        hooks = res.get("hooks", [])
+        lines = [f"Hooks & Syscalls for {res.get('path')}: {len(hooks)} hooks, {len(syscalls)} syscall stubs"]
+        for h in hooks[:10]:
+            lines.append(f"  [HOOK]    {h['function']} @ {h['address']}: {h['type']} -> {h['target']}")
+        for sc in syscalls[:10]:
+            lines.append(f"  [SYSCALL] {sc['function']} @ {sc['address']}: SSN {sc.get('hex_ssn')} ({sc.get('ssn')})")
+        human = "\n".join(lines)
+    elif verb == "patch":
+        human = f"Patched {res.get('bytes_patched')} bytes at {res.get('offset')} -> {res.get('out_path')}"
     elif verb == "strings":
-        human = "\n".join(res.get("strings", []))
+        if "stack_strings" in res:
+            human = "\n".join(f"{s['function']}: {s['string']}" for s in res["stack_strings"]) or "(no stack strings found)"
+        elif "xor_strings" in res:
+            human = "\n".join(f"key {s['hex_key']} @ {s['offset']}: {s['string']}" for s in res["xor_strings"]) or "(no XOR strings found)"
+        else:
+            human = "\n".join(res.get("strings", []))
     elif verb == "pack":
         human = (f"verdict  {res.get('verdict')}\n"
                  f"entropy  {res.get('entropy')} bits/byte\n"

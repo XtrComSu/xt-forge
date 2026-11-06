@@ -287,6 +287,22 @@ class PEFile:
             return rva
         return None
 
+    def checksec(self) -> dict[str, Any]:
+        """Evaluate Windows binary mitigation and security flags."""
+        chars = self.dll_characteristics
+        has_cert = False
+        if len(self.data_directories) > 4:
+            has_cert = bool(self.data_directories[4]["size"])
+        return {
+            "aslr": bool(chars & 0x0040),
+            "high_entropy_va": bool(chars & 0x0020) and (self.bits == 64),
+            "dep_nx": bool(chars & 0x0100),
+            "cfg": bool(chars & 0x4000),
+            "force_integrity": bool(chars & 0x0080),
+            "no_seh": bool(chars & 0x0400),
+            "authenticode": has_cert,
+        }
+
     def info(self) -> dict[str, Any]:
         """Summary information about the PE binary."""
         tls_info = self.tls()

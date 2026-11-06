@@ -268,13 +268,16 @@ def _add_re(sub) -> None:
     r.add_argument("re_verb", choices=["info", "needed", "sections", "symbols",
                                        "strings", "entropy", "pack",
                                        "ioc", "disasm", "graph",
-                                       "pe", "cfg", "block", "view", "xrefs"])
+                                       "pe", "cfg", "block", "view", "xrefs",
+                                       "checksec", "hooks", "patch"])
     r.add_argument("value", nargs="?", default=None,
                    help="binary path or subverb (same as --path)")
     r.add_argument("path", nargs="?", default=None)
     r.add_argument("extra", nargs="*", default=[], help="additional positional arguments")
     r.add_argument("--limit", type=int, default=200)
     r.add_argument("--min-len", dest="min_len", type=int, default=4)
+    r.add_argument("--stack", action="store_true", help="strings: recover stack-constructed strings from disasm")
+    r.add_argument("--xor", action="store_true", help="strings: brute-force single-byte XOR keys")
     r.add_argument("--block", type=int, default=0,
                    help="entropy: report per-block entropy of this size")
     r.add_argument("--count", type=int, default=32,
@@ -288,8 +291,11 @@ def _add_re(sub) -> None:
     r.add_argument("--max-instructions", type=int, default=250,
                    help="cfg: maximum instructions to serialize in block graph")
     r.add_argument("--block-id", help="block: basic block id to fetch instructions for")
-    r.add_argument("--out", help="view: output path for companion HTML file")
+    r.add_argument("--out", help="view/patch: output path for companion HTML or patched binary")
     r.add_argument("--target", help="xrefs: target symbol or hex address")
+    r.add_argument("--offset", help="patch: hex or decimal file offset to modify")
+    r.add_argument("--patch-bytes", dest="patch_bytes", help="patch: hex bytes to write (e.g. 9090 or c3)")
+    r.add_argument("--orig-bytes", dest="orig_bytes", help="patch: expected original hex bytes to verify")
     r.set_defaults(func=cmd_re)
 
 

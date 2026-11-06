@@ -434,3 +434,42 @@ def pack(path: str | Path) -> dict[str, Any]:
             "verdict": verdict,
             "note": ("high entropy with few long strings usually means packing, "
                      "encryption or a compressed payload")}
+
+
+def checksec(path: str | Path) -> dict[str, Any]:
+    """Inspect Linux ELF security hardening mitigations."""
+    resolved, data = _load(path)
+    hdr = _header(data)
+    progs = _programs(data, hdr)
+    secs = _sections(data, hdr)
+
+    has_relro = any(p.get("type") == 0x6474E552 for p in progs)
+    dyn = _dynamic(data, hdr, secs)
+    relro_status = "Partial" if has_relro else "No"
+
+    try:
+        sym_res = symbols(resolved)
+        canary = any("stack_chk" in s.get("name", "") or "security_cookie" in s.get("name", "")
+                     for s in sym_res.get("symbols", []))
+    except Exception:
+        canary = False
+
+    gnu_stack = next((p for p in progs if p.get("type") == 0x6474E551), None)
+    nx = True
+    if gnu_stack and (gnu_stack.get("flags", 0) & 1):
+        nx = False
+
+    pie = hdr.get("type") == 3
+
+    rpath = bool(dyn.get("rpath"))
+    runpath = bool(dyn.get("runpath"))
+
+    return {
+        "relro": relro_status,
+        "canary": canary,
+        "nx": nx,
+        "pie": pie,
+        "rpath": rpath,
+        "runpath": runpath,
+    }
+

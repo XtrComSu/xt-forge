@@ -351,3 +351,206 @@ def get_symbols(path: str | Path, limit: int = 200) -> dict[str, Any]:
             return {"ok": False, "err": str(exc), "path": str(path)}
     return {"ok": False, "err": f"unrecognized binary format for {path}"}
 
+
+def checksec(path: str | Path) -> dict[str, Any]:
+    """Inspect binary security mitigations (ASLR, DEP, CFG, RELRO, Canaries, etc.)."""
+    fmt = sniff_format(path)
+    if fmt == "pe":
+        from .pe import PEFile, PeError
+        try:
+            pe = PEFile(path)
+            return {"ok": True, "path": str(path), "format": "pe", "mitigations": pe.checksec()}
+        except PeError as exc:
+            return {"ok": False, "err": str(exc), "path": str(path)}
+    elif fmt == "elf":
+        from . import elf
+        try:
+            return {"ok": True, "path": str(path), "format": "elf", "mitigations": elf.checksec(path)}
+        except Exception as exc:
+            return {"ok": False, "err": str(exc), "path": str(path)}
+    return {"ok": False, "err": f"unrecognized binary format for {path}"}
+
+
+# ------------------------------------------------------------ advanced string recovery
+
+_STACK_BYTE_ATT = re.compile(
+    r"movb\s+\$0x([0-9a-fA-F]+),\s*(-?0x[0-9a-fA-F]+|-?\d+)\(%[re]?[sb]p\)"
+)
+_STACK_BYTE_INTEL = re.compile(
+    r"mov\s+BYTE\s+PTR\s+\[%?[re]?[sb]p\s*([+-]\s*0x[0-9a-fA-F]+|[+-]\s*\d+)\],\s*0x([0-9a-fA-F]+)",
+    re.IGNORECASE
+)
+
+
+def extract_stack_strings(disasm_text: str, min_len: int = 4) -> list[dict[str, Any]]:
+    """Heuristically reconstruct strings constructed via byte stores on the stack."""
+    results: list[dict[str, Any]] = []
+    current_fn = ""
+    current_bytes: bytearray = bytearray()
+    last_offset = None
+
+    def flush():
+        nonlocal current_bytes
+        if len(current_bytes) >= min_len:
+            # Extract ASCII strings
+            for m in re.finditer(rb"[\x20-\x7e]{%d,}" % min_len, current_bytes):
+                text = m.group().decode("ascii", "replace")
+                results.append({"function": current_fn, "string": text, "bytes": len(text)})
+        current_bytes = bytearray()
+
+    for line in disasm_text.splitlines():
+        header = re.match(r"^[0-9a-fA-F]+\s+<([^>]+)>:\s*$", line.strip())
+        if header:
+            flush()
+            current_fn = header.group(1).split("+")[0]
+            last_offset = None
+            continue
+
+        byte_val = None
+        stack_offset = None
+
+        m_att = _STACK_BYTE_ATT.search(line)
+        if m_att:
+            b_hex, off_str = m_att.groups()
+            byte_val = int(b_hex, 16)
+            stack_offset = int(off_str, 16) if ("0x" in off_str or "0X" in off_str) else int(off_str)
+        else:
+            m_intel = _STACK_BYTE_INTEL.search(line)
+            if m_intel:
+                off_str, b_hex = m_intel.groups()
+                off_str = off_str.replace(" ", "")
+                byte_val = int(b_hex, 16)
+                stack_offset = int(off_str, 16) if ("0x" in off_str or "0X" in off_str) else int(off_str)
+
+        if byte_val is not None and stack_offset is not None:
+            if last_offset is not None and stack_offset != last_offset + 1:
+                flush()
+            current_bytes.append(byte_val)
+            last_offset = stack_offset
+        else:
+            if current_bytes and not any(k in line for k in ("nop", "lea", "sub")):
+                flush()
+                last_offset = None
+
+    flush()
+    return results
+
+
+def extract_xor_strings(data: bytes, min_len: int = 4, keys: list[int] | None = None) -> list[dict[str, Any]]:
+    """Brute-force single-byte XOR keys to recover obfuscated strings."""
+    results: list[dict[str, Any]] = []
+    test_keys = keys or list(range(1, 256))
+    pattern = re.compile(rb"[\x20-\x7e]{%d,}" % max(3, min_len))
+
+    for k in test_keys:
+        dec = bytes(b ^ k for b in data)
+        pad_char = chr(k) if 32 <= k <= 126 else ""
+        for m in pattern.finditer(dec):
+            text = m.group().decode("ascii", "replace")
+            if pad_char:
+                text = text.strip(pad_char)
+            # Filter low entropy / repetitive runs
+            if len(text) >= min_len and len(set(text)) >= 3:
+                results.append({
+                    "key": k,
+                    "hex_key": hex(k),
+                    "offset": m.start(),
+                    "string": text,
+                    "length": len(text),
+                })
+                if len(results) >= 200:
+                    return results
+
+    return results
+
+
+# ------------------------------------------------------------ syscalls & hooks
+
+_SYSCALL_SSN = re.compile(r"mov(?:l)?\s+\$0x([0-9a-fA-F]+),\s*%eax|mov\s+eax,\s*0x([0-9a-fA-F]+)", re.IGNORECASE)
+
+
+def scan_hooks_and_syscalls(disasm_text: str) -> dict[str, Any]:
+    """Scan disassembly for raw syscall/SSN stubs and inline hook trampolines."""
+    syscalls: list[dict[str, Any]] = []
+    hooks: list[dict[str, Any]] = []
+
+    current_fn = ""
+    fn_insns: list[dict[str, str]] = []
+
+    def check_fn():
+        if not current_fn or not fn_insns:
+            return
+
+        # Check for inline hooks in the first 2 instructions
+        first = fn_insns[0]
+        second = fn_insns[1] if len(fn_insns) > 1 else None
+
+        mnem1 = first["mnemonic"].lower()
+        ops1 = first["operands"].lower()
+
+        if mnem1.startswith("jmp"):
+            hooks.append({
+                "function": current_fn,
+                "address": first["address"],
+                "type": "direct_jmp",
+                "target": ops1,
+            })
+        elif ("movabs" in mnem1 or "mov" in mnem1) and ("%rax" in ops1 or "rax" in ops1):
+            if second and second["mnemonic"].lower().startswith("jmp"):
+                hooks.append({
+                    "function": current_fn,
+                    "address": first["address"],
+                    "type": "indirect_jmp_rax",
+                    "target": ops1,
+                })
+
+        # Check for syscall stubs
+        recent_ssn = None
+        for ins in fn_insns:
+            mnem = ins["mnemonic"].lower()
+            ops = ins["operands"]
+
+            m_ssn = _SYSCALL_SSN.search(f"{mnem} {ops}")
+            if m_ssn:
+                hex_val = m_ssn.group(1) or m_ssn.group(2)
+                try:
+                    recent_ssn = int(hex_val, 16)
+                except ValueError:
+                    recent_ssn = None
+
+            if mnem in ("syscall", "sysenter", "int") and "0x2e" in ops or mnem == "syscall":
+                syscalls.append({
+                    "function": current_fn,
+                    "address": ins["address"],
+                    "ssn": recent_ssn,
+                    "hex_ssn": hex(recent_ssn) if recent_ssn is not None else None,
+                })
+
+    for line in disasm_text.splitlines():
+        header = re.match(r"^[0-9a-fA-F]+\s+<([^>]+)>:\s*$", line.strip())
+        if header:
+            check_fn()
+            current_fn = header.group(1).split("+")[0]
+            fn_insns = []
+            continue
+
+        m = _FUNC_LINE.match(line)
+        if m:
+            addr, _, mnem, ops = m.groups()
+            fn_insns.append({
+                "address": f"0x{addr.lower()}",
+                "mnemonic": mnem or "",
+                "operands": ops or "",
+            })
+
+    check_fn()
+    return {
+        "syscalls": syscalls,
+        "syscall_count": len(syscalls),
+        "hooks": hooks,
+        "hook_count": len(hooks),
+    }
+
+
+
+
