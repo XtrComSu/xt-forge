@@ -270,7 +270,7 @@ def _add_re(sub) -> None:
                                        "strings", "entropy", "pack",
                                        "ioc", "disasm", "graph",
                                        "pe", "cfg", "block", "view", "xrefs",
-                                       "checksec", "hooks", "patch"])
+                                       "checksec", "hooks", "patch", "rtti", "diff"])
     r.add_argument("value", nargs="?", default=None,
                    help="binary path or subverb (same as --path)")
     r.add_argument("path", nargs="?", default=None)

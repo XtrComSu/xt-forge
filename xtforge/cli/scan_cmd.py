@@ -166,6 +166,16 @@ def cmd_re(args):
             pbytes = bytes.fromhex(p_hex.replace(" ", ""))
             obytes = bytes.fromhex(args.orig_bytes.replace(" ", "")) if getattr(args, "orig_bytes", None) else None
             res = apply_patch(path, offset=off, patch_bytes=pbytes, original_bytes=obytes, out_path=getattr(args, "out", None))
+        elif verb == "rtti":
+            from ..core.re.rtti import extract_rtti
+            res = extract_rtti(path)
+        elif verb == "diff":
+            from ..core.re.diff import diff_binaries
+            extra = getattr(args, "extra", [])
+            bin2 = args.path or (extra[0] if extra else None)
+            if not bin2:
+                return _out(args, {"ok": False, "error": "diff requires two binary paths: xtforge re diff <bin1> <bin2>"}, "error: diff requires two binary paths", code=2)
+            res = diff_binaries(path, bin2)
         else:
             return _out(args, {"ok": False, "error": f"unknown verb: {verb}"},
                         f"error: unknown verb {verb}", code=2)
@@ -257,6 +267,20 @@ def cmd_re(args):
         human = "\n".join(lines)
     elif verb == "patch":
         human = f"Patched {res.get('bytes_patched')} bytes at {res.get('offset')} -> {res.get('out_path')}"
+    elif verb == "rtti":
+        classes = res.get("classes", [])
+        lines = [f"RTTI Classes for {res.get('path')} ({res.get('format')}): {len(classes)} classes"]
+        for c in classes[:15]:
+            lines.append(f"  {c.get('demangled_name', c.get('name'))} (vtable: {c.get('vtable_rva') or c.get('address')}) - {c.get('method_count', len(c.get('methods', [])))} methods")
+        human = "\n".join(lines)
+    elif verb == "diff":
+        human = (
+            f"Binary Diff: {res.get('bin1')} vs {res.get('bin2')}\n"
+            f"  Similarity: {res.get('similarity_pct')}%\n"
+            f"  Added:    {res.get('added_count')} functions {res.get('added_functions', [])[:6]}\n"
+            f"  Removed:  {res.get('removed_count')} functions {res.get('removed_functions', [])[:6]}\n"
+            f"  Modified: {res.get('modified_count')} functions"
+        )
     elif verb == "strings":
         if "stack_strings" in res:
             human = "\n".join(f"{s['function']}: {s['string']}" for s in res["stack_strings"]) or "(no stack strings found)"
