@@ -4,7 +4,11 @@ __pycache__/
 *.egg-info/
 *.bak
 *.bak-*
+data/
+AGENTS-BOOTSTRAP.md
 native/xtforge-rs/target/
+native/xtforge-rs/bench-home/
+native/xtforge-rs/bench.jsonl
 native/xtforge-go/xtforge-hub
 dist/
 *.db-shm

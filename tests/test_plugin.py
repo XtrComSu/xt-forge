@@ -207,7 +207,7 @@ class TestSource(PluginCase):
 
     def test_the_plugin_never_hardcodes_one_home_directory(self):
         text = (manager.source_dir() / "index.ts").read_text(encoding="utf-8")
-        self.assertNotIn("$HOME", text)
+        self.assertNotIn(str(Path.home()), text)
         self.assertIn("installed.json", text)
 
 

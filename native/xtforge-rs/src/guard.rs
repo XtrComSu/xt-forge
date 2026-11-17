@@ -16,7 +16,7 @@ pub const DENY_GLOBS: &[&str] = &[
 ];
 
 const DEFAULT_ROOTS: &[&str] = &[
-    "$HOME", "$HOME/storage/shared", "$HOME/sample-app",
+    "$HOME", "$HOME/storage/shared", "$HOME/xt-forge",
     "/tmp", "/var/tmp",
     "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/lib64",
     "/lib", "/lib64", "/opt",

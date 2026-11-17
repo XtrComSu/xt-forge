@@ -17,7 +17,7 @@ from typing import Any
 from ...version import cache_dir
 
 DEFAULT_ROOTS = [
-    "$HOME", "$HOME/storage/shared", "$HOME/sample-app",
+    "$HOME", "$HOME/storage/shared", "$HOME/xt-forge",
     # Scratch space: tests and tools need a writable place that is not HOME.
     "/tmp", "/var/tmp",
     # System binaries and libraries: what `re info|sections|symbols|strings`

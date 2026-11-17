@@ -76,7 +76,7 @@ it rather than replace it.
 |---|---|---|---|---|
 | E1 | **phone** (growth) | `battery thermal network` | termux/termux-app | probes degrade to hints on non-Termux hosts |
 | E2 | **model** | `list probe quant` | ggml-org/llama.cpp | reports installed artifacts; never downloads |
-| E3 | **disk guard** | `check require` | (sample-project incident, memory `c1677285…`) | refuses snapshotting under the free-space threshold |
+| E3 | **disk guard** | `check require` | preflight disk check | refuses snapshotting under the free-space threshold |
 
 ---
 

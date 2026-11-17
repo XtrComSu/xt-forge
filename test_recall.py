@@ -10,11 +10,18 @@ import os
 import subprocess
 import sys
 
-sys.path.insert(0, ".")
+ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, ROOT)
 from xtforge.cli import recall_cmd as rc  # noqa: E402
 
-XT = "xtforge"
-ENV = dict(os.environ, XT_HOME="$XT_HOME")
+import shutil, tempfile
+_XT_TMP = tempfile.mkdtemp(prefix="xt-rec-home-")
+XT = os.path.join(ROOT, "bin", "xtforge")
+ENV = dict(os.environ, XT_HOME=_XT_TMP)
+subprocess.run(
+    [XT, "mem", "put", "--kind", "fact", "--title", "loop guard cost", "--body", "toggle added to proxy", "--json"],
+    capture_output=True, text=True, env=ENV, timeout=60,
+)
 fails = []
 
 
@@ -129,6 +136,7 @@ finally:
 
 empty = run("recall", "")
 check("empty query is refused", empty.returncode == 2, f"rc={empty.returncode}")
+shutil.rmtree(_XT_TMP, ignore_errors=True)
 
 print()
 if fails:

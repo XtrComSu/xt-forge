@@ -26,7 +26,7 @@ class TestPrompts(unittest.TestCase):
     def test_build_agent_context_basic(self):
         ctx = pmod.build_agent_context(include_taste=False, include_flash=False, harness="generic")
         self.assertIn("system_instructions", ctx)
-        self.assertIn("xtforge", ctx)
+        self.assertIn(pmod._xt_cmd(), ctx)
 
     def test_build_agent_context_flash_pinned(self):
         self.fl.set("pinned note for context", key="pin1", pin=True)

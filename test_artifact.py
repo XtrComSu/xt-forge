@@ -23,7 +23,8 @@ import subprocess
 import sys
 import tempfile
 
-XT = "xtforge"
+ROOT = os.path.dirname(os.path.abspath(__file__))
+XT = os.path.join(ROOT, "bin", "xtforge")
 fails = []
 
 
@@ -209,7 +210,7 @@ try:
     check("sidecar written next to the caller's file",
           os.path.exists(os.path.join(tmp, art + ".xt-artifact.json")))
     check("nothing written into the tool root",
-          not os.path.exists("" + art + ".xt-artifact.json"))
+          not os.path.exists(os.path.join(ROOT, art + ".xt-artifact.json")))
 
     # --- missing file is a clean caller error ---------------------------
     r = run("artifact", "record", "does-not-exist.bin", cwd=tmp)

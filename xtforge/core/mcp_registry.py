@@ -13,12 +13,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
+_SHARE_ROOT = Path.home() / ".local" / "share"
+
 EXTERNAL_SERVERS: dict[str, dict[str, Any]] = {
     "cad3d": {
         "title": "3D CAD & OpenSCAD Modeling",
         "description": "3D CAD modeling, OpenSCAD script compilation, CSG booleans, extrusion, mesh inspection, and STL/OBJ/GLB/3MF conversions.",
-        "command": "$HOME/.local/share/mcp-cad-env/bin/python",
-        "args": ["$HOME/.local/share/cad3d/cad3d_mcp.py"],
+        "command": str(_SHARE_ROOT / "mcp-cad-env" / "bin" / "python"),
+        "args": [str(_SHARE_ROOT / "cad3d" / "cad3d_mcp.py")],
         "aliases": ["opencad", "cad", "3d", "openscad", "stl", "obj", "mesh", "trimesh", "csg", "modeling", "cad3d"],
         "tools": [
             {"name": "cad_generate_scad", "description": "Generate and compile parametric OpenSCAD scripts into STL/OBJ/3MF 3D meshes."},
@@ -33,8 +35,8 @@ EXTERNAL_SERVERS: dict[str, dict[str, Any]] = {
     "photoeditor": {
         "title": "Photo & Image Manipulation",
         "description": "Photo editing, color grading, adjustments, filters, cropping, resizing, annotations, watermark compositing, and background removal.",
-        "command": "$HOME/.local/share/mcp-cad-env/bin/python",
-        "args": ["$HOME/.local/share/photoeditor/photoeditor_mcp.py"],
+        "command": str(_SHARE_ROOT / "mcp-cad-env" / "bin" / "python"),
+        "args": [str(_SHARE_ROOT / "photoeditor" / "photoeditor_mcp.py")],
         "aliases": ["photo", "image", "picture", "filter", "crop", "resize", "watermark", "background_removal", "photoeditor", "png", "jpeg"],
         "tools": [
             {"name": "photo_adjust", "description": "Color, brightness, contrast, saturation, and sharpness adjustments."},
@@ -50,8 +52,8 @@ EXTERNAL_SERVERS: dict[str, dict[str, Any]] = {
     "glmocr": {
         "title": "Local Document & Image OCR",
         "description": "Local high-precision OCR on images and PDFs for small text, tables, and formulas.",
-        "command": "/usr/bin/python3",
-        "args": ["$HOME/.local/share/glmocr/glmocr_mcp.py"],
+        "command": sys.executable,
+        "args": [str(_SHARE_ROOT / "glmocr" / "glmocr_mcp.py")],
         "aliases": ["ocr", "text_recognition", "scan_image", "glmocr", "read_image", "pdf_ocr"],
         "tools": [
             {"name": "ocr", "description": "Extract text, markdown, and tables from image or PDF file."},
@@ -60,8 +62,8 @@ EXTERNAL_SERVERS: dict[str, dict[str, Any]] = {
     "searchd": {
         "title": "Local Web & Google Search",
         "description": "Google organic web search endpoint via local searchd daemon.",
-        "command": "/usr/bin/python3",
-        "args": ["$HOME/.local/share/searchd/searchd_mcp.py"],
+        "command": sys.executable,
+        "args": [str(_SHARE_ROOT / "searchd" / "searchd_mcp.py")],
         "aliases": ["web", "google", "searchd", "web_search"],
         "tools": [
             {"name": "search", "description": "Search the web with real Google organic results."},

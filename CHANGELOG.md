@@ -85,9 +85,8 @@
 # Changelog
 
 Version scheme: `MAJOR.MINOR.PATCH-<codename>`; the root `VERSION` file is the
-single source of truth. This repo is a consolidation snapshot of the xt-forge
-line (origin: `sample-app/xtforge` + `native/xtforge-rs`, plus the live
-`~/.xt-forge` store), created 2026-10-19 for portable backup and install.
+single source of truth. This repository holds the unified `xt-forge` toolkit
+(`xtforge/`, `native/xtforge-rs`, and `native/xtforge-go`).
 
 ## 0.3.2-Damascus — 2026-10-21
 

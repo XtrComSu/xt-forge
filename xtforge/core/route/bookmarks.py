@@ -24,8 +24,8 @@ BUILTIN: dict[str, str] = {
     "documents": "~/storage/shared/Documents",
     "sdcard": "/sdcard",
     "tmp": "/tmp",
-    "workspace": "~/sample-app",
-    "project": "~/sample-app",
+    "workspace": "~/xt-forge",
+    "project": "~/xt-forge",
 }
 
 

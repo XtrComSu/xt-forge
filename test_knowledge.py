@@ -21,7 +21,8 @@ import subprocess
 import sys
 import tempfile
 
-XT = "xtforge"
+ROOT = os.path.dirname(os.path.abspath(__file__))
+XT = os.path.join(ROOT, "bin", "xtforge")
 fails = []
 
 

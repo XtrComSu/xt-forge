@@ -2,7 +2,7 @@ import unittest
 from xtforge.core.code.syntax import check_syntax
 from xtforge.core.route import guard
 from xtforge.core.scan import scan_text
-from xtforge.core.prompts import build_agent_context
+from xtforge.core.prompts import _xt_cmd, build_agent_context
 
 
 class TestSyntaxAndSafety(unittest.TestCase):
@@ -46,7 +46,7 @@ class TestSyntaxAndSafety(unittest.TestCase):
     def test_agent_context_injection(self):
         ctx = build_agent_context(include_taste=True)
         self.assertIn("system_instructions", ctx)
-        self.assertIn("xtforge", ctx)
+        self.assertIn(_xt_cmd(), ctx)
 
 
 if __name__ == "__main__":
