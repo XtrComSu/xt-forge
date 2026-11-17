@@ -13,7 +13,6 @@ from .slash_cmd import cmd_slash
 from .sync_cmd import cmd_sync
 from .calibrate_cmd import cmd_calibrate
 from .tools_cmd import cmd_tools
-from .repos_cmd import cmd_repos
 from .scan_cmd import cmd_re, cmd_scan
 from .swarm_cmd import cmd_swarm
 from .session_cmd import cmd_session
@@ -487,35 +486,6 @@ def _add_eval(sub) -> None:
     e.set_defaults(func=cmd_eval)
 
 
-def _add_repos(sub) -> None:
-    r = sub.add_parser("repos", help="bundled top-repos catalog (read-only)")
-    r.add_argument("repos_verb", choices=["list", "search", "show", "domains",
-                                          "suggest", "plan", "stats", "export"])
-    r.add_argument("value", nargs="?", default=None,
-                   help="query for search, owner/name for show/plan, "
-                        "capability for suggest")
-    r.add_argument("--query", "-q", help="search query (same as the positional)")
-    r.add_argument("--capability", help="capability family for suggest")
-    r.add_argument("--domain", help="filter: cs domain, e.g. red teaming")
-    r.add_argument("--verdict", help="filter: adopt|borrow|study|skip")
-    r.add_argument("--surface", help="filter (list/export) or override (plan)")
-    r.add_argument("--language", help="filter: language, e.g. Rust")
-    r.add_argument("--license", help="filter: SPDX id, e.g. MIT")
-    r.add_argument("--min-stars", type=int, default=0)
-    r.add_argument("--include-archived", action="store_true")
-    r.add_argument("--limit", "--k", "-n", dest="limit", type=int, default=None,
-                   help="max rows (export: all rows when omitted)")
-    r.add_argument("--sort", default="fit", choices=["fit", "stars", "name"])
-    r.add_argument("--format", default="json",
-                   choices=["json", "csv", "md", "jsonl"],
-                   help="export format; jsonl is the learning dataset")
-    r.add_argument("--path", help="export destination; prints when omitted")
-    r.add_argument("--ns", help="plan: target namespace, e.g. scan")
-    r.add_argument("--tool-verb", dest="tool_verb",
-                   help="plan: target verb, e.g. secrets")
-    r.set_defaults(func=cmd_repos)
-
-
 def _add_plugin(sub) -> None:
     p = sub.add_parser("plugin", help="install the OpenCode plugin")
     p.add_argument("plugin_verb", choices=["install", "status", "uninstall",
@@ -755,7 +725,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_sync(sub)
     _add_calibrate(sub)
     _add_tools(sub)
-    _add_repos(sub)
     ascii_cmd = sub.add_parser("ascii", help="XT-Forge ASCII banners")
     ascii_cmd.add_argument("style", nargs="?", default="signal",
                            choices=["compact", "wide", "signal"])
@@ -775,6 +744,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    # Shortcut: `xtforge --meta` or `xt-forge --meta` launches the sub-1KB MCP gateway directly.
+    if "--meta" in argv and (not argv or argv[0].startswith("-")):
+        argv = ["mcp", "serve"] + argv
     # --json is documented as global but argparse binds it to the root parser
     # only, so "xtforge version --json" used to fail. Accept it anywhere.
     force_json = len(argv) > 1 and "--json" in argv[1:]

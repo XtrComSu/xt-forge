@@ -6,7 +6,7 @@
   "mcp": {
     "xt-forge": {
       "type": "local",
-      "command": ["/path/to/xt-forge/bin/xtforge", "mcp", "serve", "--meta"],
+      "command": ["xt-forge", "--meta"],
       "enabled": true,
       "environment": {
         "XT_PERM_MODE": "ask"

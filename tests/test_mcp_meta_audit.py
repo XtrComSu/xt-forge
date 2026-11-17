@@ -52,7 +52,7 @@ class TestMcpMetaAuditResearchLoop(unittest.TestCase):
         payload = json.loads(disc["result"]["content"][0]["text"])
         self.assertTrue(payload["ok"])
         self.assertGreater(payload["count"], 0)
-        self.assertEqual(payload["total_catalog"], 56)
+        self.assertEqual(payload["total_catalog"], len(mcp_srv.TOOLS))
 
     def test_rug_pull_and_scan_mcp_injection(self):
         with tempfile.TemporaryDirectory() as td:

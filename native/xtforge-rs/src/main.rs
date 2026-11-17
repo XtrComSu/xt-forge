@@ -118,6 +118,11 @@ fn wants_hub(p: &args::Parsed) -> bool {
 fn run() -> i32 {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let p = args::parse(&argv);
+    if p.noun.is_none() && p.fbool("meta") {
+        let mut hub_argv = vec!["mcp".to_string(), "serve".to_string()];
+        hub_argv.extend(argv.clone());
+        hub_fallback(&hub_argv);
+    }
     if wants_hub(&p) && resolve_hub().is_some() {
         hub_fallback(&argv);
     }

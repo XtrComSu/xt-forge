@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "xt-forge": {
-      "command": "/path/to/xt-forge/bin/xtforge",
-      "args": ["mcp", "serve", "--meta"],
+      "command": "xt-forge",
+      "args": ["--meta"],
       "env": {
         "XT_PERM_MODE": "ask"
       }

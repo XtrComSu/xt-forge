@@ -8,8 +8,7 @@ one surface while another still calls it is a broken release.
 So the surface is pinned here by name. Changing it means changing this file
 in the same commit, which is the point: the change becomes visible.
 
-The cap comes from `docs/TOOL-BACKLOG.md`: MCP promotion requires retiring
-or merging another tool, with a ceiling of 56 tools in `0.4.0`.
+The cap keeps the direct MCP catalog concise with a ceiling of 50 tools in `0.4.0`.
 
 Run: python3 -m unittest discover -s tests -v
 """
@@ -34,8 +33,6 @@ PINNED: dict[str, list[str]] = {
               "route_du", "route_recent", "route_where", "route_context",
               "route_errors"],
     "compress": ["compress"],
-    "repos": ["repos_search", "repos_show", "repos_domains", "repos_suggest",
-              "repos_plan", "repos_stats"],
     "taste": ["taste_learn", "taste_search", "taste_show", "taste_review",
               "taste_export", "taste_stats"],
     "goal": ["goal_status", "goal_run", "goal_verify"],
@@ -46,7 +43,7 @@ PINNED: dict[str, list[str]] = {
     "re": ["re_inspect", "re_cfg"],
 }
 
-TOOL_CAP = 56
+TOOL_CAP = 50
 
 
 def load_tools() -> list[dict]:

@@ -16,7 +16,7 @@ from .route.guard import issue_token
 from ..version import db_path
 
 FLASH_COMMANDS = "/m", "/mg", "/ml", "/mp", "/mx", "/mc", "/mw", "/mu"
-ALL_COMMANDS = FLASH_COMMANDS + ("/goal", "/build", "/route", "/phone", "/help")
+ALL_COMMANDS = FLASH_COMMANDS + ("/xtf", "/goal", "/build", "/route", "/phone", "/help")
 
 
 def is_slash(text: str) -> bool:
@@ -131,6 +131,25 @@ def dispatch(text: str, *, flash: Flash | None = None, store: Store | None = Non
         return {"command": "/help", "ok": True,
                 "reply": " ".join(ALL_COMMANDS),
                 "commands": list(ALL_COMMANDS)}
+    if cmd == "/xtf":
+        rest = text[len("/xtf"):].strip()
+        if not rest or rest == "--help":
+            return {
+                "command": "/xtf",
+                "ok": True,
+                "reply": "usage: /xtf --meta | /xtf doctor | /xtf re <verb> <path> | /xtf intel cve <CVE> | /xtf code graph <sym> .",
+            }
+        if rest == "--meta":
+            return {
+                "command": "/xtf",
+                "ok": True,
+                "mode": "meta",
+                "exec": "xt-forge --meta",
+                "forward": "xt-forge --meta",
+                "reply": "MCP gateway command: `xt-forge --meta` (4 meta-tools: xt_discover, xt_schema, xt_call, xt_batch). Add to your agent config or run directly over stdio.",
+            }
+        return {"command": "/xtf", "ok": True, "forward": f"xt-forge {rest}",
+                "reply": "run: xt-forge " + rest}
     if cmd == "/goal":
         return {"command": "/goal", "ok": True, "forward": text,
                 "reply": "hand the following to the goal engine verbatim: " + text}

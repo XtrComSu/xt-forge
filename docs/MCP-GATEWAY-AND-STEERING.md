@@ -8,17 +8,17 @@ XT-Forge 0.4.0 tackles both token overhead and supply-chain risk in one layer.
 
 ## 1. Keeping Compatibility AND Cutting Schema Overhead (`--meta`)
 
-Default `adapters/mcp/server.py` keeps its exact pinned catalog (`56` tools) so existing clients and contracts stay unchanged. Whenever your harness wants lean gateway discovery, add `--meta`:
+Default `adapters/mcp/server.py` keeps its exact pinned catalog (`50` tools) so existing clients and contracts stay unchanged. Whenever your harness wants lean gateway discovery, run `xt-forge --meta`:
 
 ```sh
-./bin/xtforge mcp serve --meta
+xt-forge --meta
 # or in pure Python mode:
 python3 -m adapters.mcp.server --meta
 ```
 
-In `--meta` mode, `tools/list` exposes only **4 compact meta-tools** (~1.4 KB total schema weight):
+In `--meta` mode, `tools/list` exposes only **4 compact meta-tools** (~0.90 KB schema weight):
 
-1. `xt_discover`: Keyword search across all 56+ tools and CLI subcommands.
+1. `xt_discover`: Keyword search across all 50+ tools and CLI subcommands.
 2. `xt_schema`: On-demand JSON schema lookup for a single tool you actually plan to invoke.
 3. `xt_call`: Dispatch any XT-Forge MCP tool or CLI noun/verb.
 4. `xt_batch`: Run up to 10 read or analysis calls in a single JSON-RPC round trip.
@@ -33,14 +33,14 @@ Before trusting a third-party MCP stdio server, inspect its `tools/list` payload
 
 ```sh
 # Offline scan of a saved MCP manifest JSON file (native Rust scanner)
-./bin/xtforge scan mcp ./suspicious_tools.json --json
+xt-forge scan mcp ./suspicious_tools.json --json
 
 # Live handshake audit with trust-on-first pinning
-./bin/xtforge mcp audit --server fs-helper --cmd "npx -y @org/mcp-fs" --trust-on-first --json
+xt-forge mcp audit --server fs-helper --cmd "npx -y @org/mcp-fs" --trust-on-first --json
 
 # Explicit pin / inspect trust DB (~/.xt-forge/mcp_trust.json)
-./bin/xtforge mcp trust --server fs-helper --cmd "npx -y @org/mcp-fs" --json
-./bin/xtforge mcp trust --json
+xt-forge mcp trust --server fs-helper --cmd "npx -y @org/mcp-fs" --json
+xt-forge mcp trust --json
 ```
 
 On subsequent launches, if any tool docstring injects hidden tags (`<system>`, `[SYSTEM]`, `ignore previous instructions`, `.ssh/id_rsa`, `curl | sh`, stealth instructions, or zero-width characters) OR changes a pinned schema hash silently, `mcp audit` exits non-zero and reports `"rug_pull": true` (`status: "rug_pull"`).
@@ -48,7 +48,7 @@ On subsequent launches, if any tool docstring injects hidden tags (`<system>`, `
 You can also wrap an upstream MCP server in Go's compression/audit proxy:
 
 ```sh
-./bin/xtforge mcp proxy --prefix fs --cmd "npx -y @org/mcp-fs" --trust-on-first
+xt-forge mcp proxy --prefix fs --cmd "npx -y @org/mcp-fs" --trust-on-first
 ```
 
 ## 3. Agent Steering Workflows
@@ -60,7 +60,7 @@ You can also wrap an upstream MCP server in Go's compression/audit proxy:
 Run `xtforge goal check` before high-impact edits or mid-way through a multi-round goal:
 
 ```sh
-./bin/xtforge goal check "Migrate storage index" \
+xt-forge goal check "Migrate storage index" \
   --criteria "WAL mode preserved; all unit tests pass" \
   --workdir . --json
 ```
@@ -74,14 +74,14 @@ Run `xtforge goal check` before high-impact edits or mid-way through a multi-rou
 
 ```sh
 # Teach the toolkit what failed and why
-./bin/xtforge mem record-failure \
+xt-forge mem record-failure \
   --title "Avoid unindexed LIKE scan on large table" \
   --body "Full table scan exceeded 4s timeout during peak ingestion" \
   --error-sig "SQLITE_TIMEOUT"
 
 # Consolidate repetitive notes while keeping full derived_from provenance links
-./bin/xtforge mem consolidate --dry-run
-./bin/xtforge mem consolidate
+xt-forge mem consolidate --dry-run
+xt-forge mem consolidate
 ```
 
 ![Code Graph Symbol Context Packing](assets/code-graph-context.gif)

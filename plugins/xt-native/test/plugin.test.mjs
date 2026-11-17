@@ -32,10 +32,12 @@ async function learnEnforced(harness) {
 test("registers every command", async () => {
   const harness = await makeHarness()
   try {
-    for (const name of ["taste", "goal", "loop", "loops", "loop-stop"]) {
+    for (const name of ["taste", "goal", "loop", "loops", "loop-stop", "xtf"]) {
       assert.ok(harness.commands.has(name), `missing command: ${name}`)
       assert.ok(harness.commands.get(name).description.length > 0)
     }
+    const metaOut = await harness.command("xtf", "--meta")
+    assert.match(metaOut, /xt-forge --meta/)
   } finally {
     harness.cleanup()
   }

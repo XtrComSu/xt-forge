@@ -48,7 +48,6 @@ packages = [
   "xtforge.core.plugin",
   "xtforge.core.re",
   "xtforge.core.recon",
-  "xtforge.core.repos",
   "xtforge.core.route",
   "xtforge.core.scan",
   "xtforge.core.swarm",

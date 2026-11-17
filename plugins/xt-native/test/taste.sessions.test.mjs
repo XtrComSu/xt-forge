@@ -2,8 +2,7 @@
  * The D2 acceptance test: ten scripted sessions, the expected learnings, and
  * nothing else.
  *
- * `docs/TOOL-BACKLOG.md` puts the bar for "taste in OpenCode" at *10
- * scripted sessions -> expected learnings, zero invented keys*. The other
+ * Ten scripted sessions -> expected learnings, zero invented keys. The other
  * plugin tests prove the plumbing; this one proves the learning contract
  * against the real xt-forge CLI and a real store:
  *

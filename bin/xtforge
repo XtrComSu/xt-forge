@@ -2,7 +2,8 @@
 # portable xt-forge launcher — native-first dispatch, python fallback.
 # XT_FORCE_PYTHON=1 forces the Python reference path.
 # Self-locating: resolves ROOT from this script's location (repo root above bin/).
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 export XT_HOME="${XT_HOME:-$HOME/.xt-forge}"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 NATIVE="$ROOT/native/xtforge-rs/target/release/xtforge-native"

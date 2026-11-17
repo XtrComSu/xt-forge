@@ -2,33 +2,34 @@
 
 ![Claude Code Setup Preview](claude-code-setup.gif)
 
-Watch the full walkthrough: [claude-code-setup.mp4](claude-code-setup.mp4)
-
-Claude Code supports project-scoped `.mcp.json` discovery and repository playbooks in `CLAUDE.md`. Using `--meta` exposes just four tools (`xt_discover`, `xt_schema`, `xt_call`, `xt_batch`) so you get full call-graph routing, reverse engineering, CVE intel, and anti-drift checks without bloating your context window.
+Claude Code supports project-scoped `.mcp.json` discovery, `/xtf` slash commands (`~/.claude/commands/xtf.md`), and repository playbooks in `CLAUDE.md`. Using `xt-forge --meta` exposes just four tools (`xt_discover`, `xt_schema`, `xt_call`, `xt_batch`) so you get call-graph routing, reverse engineering, CVE intel, and anti-drift checks without bloating your context window. See [claude-code-setup.mp4](claude-code-setup.mp4) for a visual walkthrough alongside these setup steps.
 
 ## Quick Setup
 
-1. Copy `.mcp.json` and `CLAUDE.md` into your target project directory (update `/path/to/xt-forge`):
+1. Install `xt-forge` on PATH, `/xtf`, and all `XTF-*` skills into `~/.claude/skills`:
+
+```sh
+npx xt-forge init
+# or from a local clone: ./install.sh
+```
+
+2. Copy `.mcp.json` and `CLAUDE.md` into your target project directory, or register `xt-forge --meta` at user scope:
 
 ```sh
 cp integrations/claude-code/.mcp.json integrations/claude-code/CLAUDE.md /path/to/your/project/
+# or via CLI:
+claude mcp add xt-forge xt-forge --meta
 ```
 
-2. Or register `xt-forge` at user scope via the Claude CLI:
+3. Pin any external MCP servers you run so silent schema mutations are caught immediately:
 
 ```sh
-claude mcp add xt-forge -- /path/to/xt-forge/bin/xtforge mcp serve --meta
-```
-
-3. Pin any external MCP servers you also run so silent schema changes are caught immediately:
-
-```sh
-./bin/xtforge mcp audit /path/to/xt-forge/adapters/mcp/server.py
-./bin/xtforge mcp trust check --all
+xt-forge mcp audit --server fs-helper --cmd "npx -y @org/mcp-fs" --trust-on-first
+xt-forge mcp trust --json
 ```
 
 ## Included Files
 
-- [`.mcp.json`](.mcp.json): drop-in project MCP config using `--meta`
+- [`.mcp.json`](.mcp.json): drop-in project MCP config running `xt-forge --meta`
 - [`CLAUDE.md`](CLAUDE.md): Claude Code project instructions covering symbol packing, RE workflows, and `goal verify`
-- [`claude-code-setup.mp4`](claude-code-setup.mp4) and [`claude-code-setup.gif`](claude-code-setup.gif): visual walkthrough
+- [`claude-code-setup.mp4`](claude-code-setup.mp4) and [`claude-code-setup.gif`](claude-code-setup.gif): Claude Code walkthrough

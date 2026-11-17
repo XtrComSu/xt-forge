@@ -1,6 +1,6 @@
 [mcp_servers.xt_forge]
-command = "/path/to/xt-forge/bin/xtforge"
-args = ["mcp", "serve", "--meta"]
+command = "xt-forge"
+args = ["--meta"]
 startup_timeout_sec = 10
 tool_timeout_sec = 60
 

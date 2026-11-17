@@ -28,6 +28,7 @@ const VALUE_FLAGS: &[&str] = &[
 const BOOL_FLAGS: &[&str] = &[
     "json", "all", "pin-only", "stats", "legend", "dry-run", "check", "force",
     "status", "explain", "pin", "symbols", "reveal", "xor", "web", "trust-on-first",
+    "meta",
 ];
 
 pub fn parse(argv: &[String]) -> Parsed {

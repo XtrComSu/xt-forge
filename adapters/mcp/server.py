@@ -365,65 +365,6 @@ TOOLS: list[dict[str, Any]] = [
         lambda a: ["compress", a.get("level") or "L1", "--text", _str(a, "text"),
                    *_opt(a, "stats", "--stats"), *_opt(a, "legend", "--legend")],
     ),
-    # repos -------------------------------------------------------------
-    _tool(
-        "repos_search",
-        "Search the bundled top-repos catalog (offline, read-only). "
-        "Returns repo, stars, fit score, verdict, proposed xt-forge surface.",
-        {"query": _TEXT, "k": _INT, "domain": _TEXT, "verdict": _TEXT,
-         "surface": _TEXT, "language": _TEXT, "license": _TEXT,
-         "min_stars": _INT, "sort": _TEXT},
-        ["query"],
-        lambda a: ["repos", "search", _str(a, "query"),
-                   *_opt(a, "k", "--limit"), *_opt(a, "domain", "--domain"),
-                   *_opt(a, "verdict", "--verdict"),
-                   *_opt(a, "surface", "--surface"),
-                   *_opt(a, "language", "--language"),
-                   *_opt(a, "license", "--license"),
-                   *_opt(a, "min_stars", "--min-stars"),
-                   *_opt(a, "sort", "--sort")],
-    ),
-    _tool(
-        "repos_show",
-        "Show one catalog repo with fit score, verdict, CS fields and the "
-        "xt-forge ideas distilled from it.",
-        {"name": _TEXT}, ["name"],
-        lambda a: ["repos", "show", _str(a, "name")],
-    ),
-    _tool(
-        "repos_domains",
-        "List the CS domains in the corpus with counts and representative repos.",
-        {}, [], lambda a: ["repos", "domains"],
-    ),
-    _tool(
-        "repos_suggest",
-        "Suggest candidates for a capability family (memory, security, "
-        "offensive, agents, mcp, cli, testing, compression, ...). "
-        "Omit capability to list the families.",
-        {"capability": _TEXT, "k": _INT, "verdict": _TEXT, "min_stars": _INT},
-        [],
-        lambda a: (["repos", "suggest", *_opt(a, "capability"),
-                    *_opt(a, "k", "--limit"), *_opt(a, "verdict", "--verdict"),
-                    *_opt(a, "min_stars", "--min-stars")]
-                   if a.get("capability")
-                   else ["repos", "suggest", *_opt(a, "k", "--limit")]),
-    ),
-    _tool(
-        "repos_plan",
-        "Render the one-page tool spec for a candidate: mechanic, surface, "
-        "guard, tests, measurement. Nothing is written.",
-        {"name": _TEXT, "ns": _TEXT, "tool_verb": _TEXT, "surface": _TEXT},
-        ["name"],
-        lambda a: ["repos", "plan", _str(a, "name"),
-                   *_opt(a, "ns", "--ns"),
-                   *_opt(a, "tool_verb", "--tool-verb"),
-                   *_opt(a, "surface", "--surface")],
-    ),
-    _tool(
-        "repos_stats",
-        "Corpus summary: totals, verdicts, licenses, proposed surfaces.",
-        {}, [], lambda a: ["repos", "stats"],
-    ),
     # taste -------------------------------------------------------------
     _tool(
         "taste_learn",
@@ -595,56 +536,6 @@ TOOLS: list[dict[str, Any]] = [
 _TOOL_MAP = {tool["name"]: tool for tool in TOOLS}
 
 
-# ------------------------------------------- in-process fast path (repos)
-
-# `repos_*` tools share their payload API with the CLI, so the server answers
-# them in-process instead of paying a ~250ms Python startup per call. The
-# subprocess path below stays as the fallback: if the import ever fails, the
-# tool still works, just slower.
-_REPOS_API: Any = None
-
-_REPOS_ARGV: dict[str, tuple[str, dict[str, str]]] = {
-    "repos_search": ("search", {"query": "value", "k": "limit",
-                                "license": "license_name"}),
-    "repos_show": ("show", {"name": "value"}),
-    "repos_domains": ("domains", {}),
-    "repos_suggest": ("suggest", {"capability": "capability", "k": "limit"}),
-    "repos_plan": ("plan", {"name": "value", "tool_verb": "tool_verb"}),
-    "repos_stats": ("stats", {}),
-}
-
-
-def _call_repos(name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
-    """Answer a `repos_*` tool through xtforge.core.repos.api, in-process."""
-    mapping = _REPOS_ARGV.get(name)
-    if mapping is None:
-        return None
-    verb, renames = mapping
-    global _REPOS_API
-    if _REPOS_API is None:
-        try:
-            sys.path.insert(0, str(ROOT))
-            from xtforge.core.repos import api as repos_api
-            _REPOS_API = repos_api
-        except Exception:
-            return None  # fall back to the subprocess path
-    kwargs: dict[str, Any] = {}
-    for key, value in arguments.items():
-        if value in (None, ""):
-            continue
-        kwargs[renames.get(key, key)] = value
-    if "value" not in kwargs and verb == "suggest":
-        kwargs["value"] = kwargs.get("capability")
-    try:
-        payload = _REPOS_API.run(verb, **kwargs)
-    except (ValueError, FileNotFoundError) as exc:
-        text = json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False,
-                          indent=2)
-        return {"content": [{"type": "text", "text": text}], "isError": True}
-    text = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
-    return {"content": [{"type": "text", "text": text}], "isError": False}
-
-
 # ------------------------------------------------------------- JSON-RPC core
 
 class RpcError(Exception):
@@ -677,9 +568,6 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
                if arguments.get(key) in (None, "")]
     if missing:
         raise RpcError(-32602, "missing required argument(s): " + ", ".join(missing))
-    fast = _call_repos(name, arguments)
-    if fast is not None:
-        return fast
     try:
         argv = tool["build"](arguments)
         stdin_text = tool["stdin"](arguments) if tool["stdin"] else None

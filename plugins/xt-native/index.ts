@@ -1,7 +1,5 @@
 /**
- * xt-native — taste learning and injection for OpenCode.
- *
- * Track D of docs/TOOL-BACKLOG.md, stages T2/T3.
+ * xt-native — taste learning, goal checks, and /xtf dispatch for OpenCode & compatible harnesses.
  *
  * What it does:
  *   1. `/taste` command — show, review, stats, learn, forget, why, on/off
@@ -730,6 +728,42 @@ export default {
             text: stopped.length
               ? `[loop] cancelled ${stopped.length}: ${stopped.join(", ")}`
               : "[loop] nothing to cancel",
+          })
+        },
+      })
+
+      // ------------------------------------------------------------- /xtf
+      editor.add({
+        name: "xtf",
+        description:
+          "Run xt-forge natively: --meta | doctor | re <verb> <path> | " +
+          "intel cve <ID> | code graph <sym> . | route context .",
+        execute: async ({ sessionID, prompt }: any) => {
+          const text = String(prompt?.text ?? "").trim()
+          if (!text || text === "--help" || text === "help") {
+            await ctx.session.synthetic({
+              sessionID,
+              text: "[xtf] usage: /xtf --meta | /xtf doctor | /xtf re checksec <bin> | /xtf intel cve <CVE> | /xtf code graph <sym> .",
+            })
+            return
+          }
+          if (text === "--meta") {
+            const payload = await xt(["docs", "skills"]) ?? { meta_command: "xt-forge --meta" }
+            await ctx.session.synthetic({
+              sessionID,
+              text: "[xtf --meta] Sub-1KB MCP gateway (`xt_discover`, `xt_schema`, `xt_call`, `xt_batch`).\n" +
+                "MCP stdio command: `xt-forge --meta`\n" +
+                JSON.stringify(payload, null, 2),
+            })
+            return
+          }
+          const parts = text.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((s) =>
+            s.replace(/^['"]|['"]$/g, "")
+          ) ?? [text]
+          const res = await xt(parts)
+          await ctx.session.synthetic({
+            sessionID,
+            text: res ? `[xtf] ${text}\n${JSON.stringify(res, null, 2)}` : `[xtf] command unavailable or failed: ${text}`,
           })
         },
       })
