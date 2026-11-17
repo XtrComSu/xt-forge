@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "xt-forge": {
+      "type": "stdio",
+      "command": "/path/to/xt-forge/bin/xtforge",
+      "args": ["mcp", "serve", "--meta"],
+      "env": {
+        "XT_PERM_MODE": "ask"
+      }
+    }
+  }
+}

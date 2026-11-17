@@ -1,0 +1,16 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    "~/.config/opencode/plugins/xt-native"
+  ],
+  "mcp": {
+    "xt-forge": {
+      "type": "local",
+      "command": ["/path/to/xt-forge/bin/xtforge", "mcp", "serve", "--meta"],
+      "enabled": true,
+      "environment": {
+        "XT_PERM_MODE": "ask"
+      }
+    }
+  }
+}

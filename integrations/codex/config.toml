@@ -1,0 +1,8 @@
+[mcp_servers.xt_forge]
+command = "/path/to/xt-forge/bin/xtforge"
+args = ["mcp", "serve", "--meta"]
+startup_timeout_sec = 10
+tool_timeout_sec = 60
+
+[mcp_servers.xt_forge.env]
+XT_PERM_MODE = "ask"
