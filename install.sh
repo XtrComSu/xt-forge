@@ -14,7 +14,7 @@ fi
 
 if command -v go >/dev/null 2>&1 && [ -f "${ROOT}/native/xtforge-go/go.mod" ]; then
   echo "[xt-forge] Building Go service hub (native/xtforge-go)..."
-  (cd "${ROOT}/native/xtforge-go" && go build -o xtforge-hub ./cmd/xtforge-hub)
+  (cd "${ROOT}/native/xtforge-go" && go build -ldflags="-s -w" -o xtforge-hub ./cmd/xtforge-hub)
 fi
 
 chmod +x "${ROOT}/bin/xtforge" "${ROOT}/bin/xtforge-termux" "${ROOT}/bin/npx-xtforge.mjs"

@@ -129,6 +129,12 @@ function cmdInit(argv) {
       "Run `xt-forge $ARGUMENTS` and present crisp findings.\n",
   )
 
+  const ocPluginDst = join(HOME, ".config", "opencode", "plugins", "xt-native")
+  if (existsSync(ocPluginDst)) {
+    const runner = resolveRunner()
+    spawnSync(runner.cmd, [...runner.prefixArgs, "plugin", "install"], { stdio: "ignore" })
+  }
+
   console.log("XT-Forge initialized successfully:\n")
   console.log(`  Commands on PATH : ${binPath}, ${aliasPath}, ${shortAlias}`)
   console.log(`  Gateway command  : xt-forge --meta`)

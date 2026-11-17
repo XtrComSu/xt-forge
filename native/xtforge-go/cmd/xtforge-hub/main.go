@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"xtforge-hub/internal/guard"
+	"xtforge-hub/internal/intel"
 	"xtforge-hub/internal/loopd"
 	"xtforge-hub/internal/lsp"
 	"xtforge-hub/internal/mcp"
@@ -52,6 +53,11 @@ func run(args []string) int {
 	noun := filtered[0]
 	rest := filtered[1:]
 
+	if noun == "--meta" {
+		maxBytes := flagInt(rest, "--max-bytes", 16384)
+		return mcp.ServeMeta(mcp.ResolveSelfBinary(), maxBytes)
+	}
+
 	switch noun {
 	case "mcp":
 		return handleMCP(rest)
@@ -59,6 +65,8 @@ func run(args []string) int {
 		return handleCode(rest)
 	case "re":
 		return handleRE(rest)
+	case "intel":
+		return handleIntel(rest)
 	case "research":
 		return handleResearch(rest)
 	case "loop":
@@ -249,8 +257,55 @@ func handleRE(args []string) int {
 		tok := flagStr(rest, "--confirm", "")
 		dry := hasFlag(rest, "--dry-run")
 		return printJSONCode(rehub.Trace(filePath, preset, tok, dry))
+	case "checksec":
+		return printJSONCode(rehub.Checksec(filePath))
+	case "capa":
+		return printJSONCode(rehub.Capa(filePath))
 	default:
 		return printError("unknown re hub verb: " + verb)
+	}
+}
+
+func handleIntel(args []string) int {
+	if len(args) == 0 {
+		return printError("usage: intel <sources|ip|cve|kev|search|hash|domain> [value]")
+	}
+	verb := args[0]
+	rest := args[1:]
+	val := ""
+	for i := 0; i < len(rest); i++ {
+		if strings.HasPrefix(rest[i], "--") {
+			if (rest[i] == "--query" || rest[i] == "--since" || rest[i] == "--limit") && i+1 < len(rest) {
+				i++
+			}
+			continue
+		}
+		if val == "" {
+			val = rest[i]
+		}
+	}
+	switch verb {
+	case "sources":
+		return printJSONCode(intel.Sources())
+	case "ip":
+		return printJSONCode(intel.IP(val))
+	case "cve":
+		return printJSONCode(intel.CVE(val))
+	case "kev":
+		q := flagStr(rest, "--query", val)
+		lim := flagInt(rest, "--limit", 20)
+		return printJSONCode(intel.KEV(q, lim))
+	case "search":
+		q := flagStr(rest, "--query", val)
+		lim := flagInt(rest, "--limit", 10)
+		since := flagInt(rest, "--since", 0)
+		return printJSONCode(intel.Search(q, lim, since))
+	case "hash":
+		return printJSONCode(intel.Hash(val))
+	case "domain":
+		return printJSONCode(intel.Domain(val))
+	default:
+		return printError("unknown intel hub verb: " + verb)
 	}
 }
 

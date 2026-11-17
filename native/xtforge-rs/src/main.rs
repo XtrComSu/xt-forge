@@ -4,6 +4,7 @@
 mod args;
 mod calibrate;
 mod code_graph;
+mod codec;
 mod compress;
 mod flash;
 mod guard;
@@ -107,7 +108,8 @@ fn wants_hub(p: &args::Parsed) -> bool {
         ("mcp", "audit" | "proxy" | "trust") => true,
         ("mcp", "serve") => p.fbool("meta"),
         ("code", "lsp") => true,
-        ("re", "asar" | "netcap" | "apk" | "decompile" | "trace") => true,
+        ("re", "asar" | "netcap" | "apk" | "decompile" | "trace" | "checksec" | "capa") => true,
+        ("intel", "sources" | "ip" | "cve" | "kev" | "search" | "hash" | "domain") => true,
         ("research", _) => true,
         ("loop", "schedule" | "list" | "stop" | "status") => true,
         ("guard", "mode") => true,
@@ -159,6 +161,11 @@ fn run() -> i32 {
         }
         Some("scan") => {
             if let Some(code) = scan_fast::run(&p) {
+                return code;
+            }
+        }
+        Some("codec") => {
+            if let Some(code) = codec::run(&p) {
                 return code;
             }
         }

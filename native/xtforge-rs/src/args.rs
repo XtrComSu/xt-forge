@@ -22,7 +22,7 @@ const VALUE_FLAGS: &[&str] = &[
     "rva", "name", "orig", "comment", "type-decl", "format", "error-sig",
     "sig", "outcome", "binary", "reason", "threshold", "min-len", "engine",
     "server", "cmd", "prefix", "graph-db", "preset", "line", "col", "target",
-    "max-bytes", "symbol", "block",
+    "max-bytes", "symbol", "block", "algo", "scheme", "window", "max-matches",
 ];
 
 const BOOL_FLAGS: &[&str] = &[

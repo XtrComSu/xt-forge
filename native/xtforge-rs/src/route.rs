@@ -607,6 +607,432 @@ fn route_context(root: &str, token_budget: i64, file_limit: i64) -> Value {
     envelope(true, data, None, 0, false)
 }
 
+const STOPWORDS: &[&str] = &[
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "did", "do", "does",
+    "for", "from", "had", "has", "have", "how", "i", "if", "in", "into", "is", "it",
+    "its", "just", "me", "my", "no", "not", "of", "on", "or", "our", "so", "than",
+    "that", "the", "their", "them", "then", "there", "these", "this", "those", "to",
+    "too", "us", "was", "we", "were", "what", "when", "where", "which", "who", "why",
+    "will", "with", "would", "you", "your", "about", "above", "after", "again",
+    "against", "all", "am", "any", "because", "been", "before", "being", "below",
+    "between", "both", "can", "cannot", "could", "down", "during", "each", "few",
+    "further", "he", "her", "here", "hers", "herself", "him", "himself", "his",
+    "itself", "more", "most", "other", "ought", "out", "over", "own", "same", "she",
+    "should", "some", "such", "theirs", "themselves", "they", "through", "under",
+    "until", "up", "very", "while", "whom",
+];
+
+fn pack_alias(tok: &str) -> &str {
+    match tok {
+        "written" | "writing" | "wrote" | "writes" => "write",
+        "directories" | "folders" | "folder" => "directory",
+        "opened" | "opening" | "opens" => "open",
+        "connections" => "connection",
+        "attempts" => "attempt",
+        "retries" => "retry",
+        "refused" => "refuse",
+        "denied" => "deny",
+        "evicted" => "evict",
+        "latencies" => "latency",
+        "buckets" => "bucket",
+        "samples" => "sample",
+        "params" => "param",
+        "rows" => "row",
+        "dicts" => "dict",
+        "tokens" => "token",
+        _ => tok,
+    }
+}
+
+fn stem_tok(tok: &str) -> String {
+    if tok.len() > 4 && tok.ends_with("ing") {
+        tok[..tok.len() - 3].to_string()
+    } else if tok.len() > 3 && (tok.ends_with("ed") || tok.ends_with("es")) {
+        tok[..tok.len() - 2].to_string()
+    } else if tok.len() > 3 && tok.ends_with('s') && !tok.ends_with("ss") {
+        tok[..tok.len() - 1].to_string()
+    } else {
+        tok.to_string()
+    }
+}
+
+fn canon_tok(tok: &str) -> String {
+    stem_tok(pack_alias(tok))
+}
+
+fn extract_word_spans(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' {
+            let start = i;
+            i += 1;
+            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            out.push(&s[start..i]);
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+fn query_tokens(query: &str) -> Vec<String> {
+    extract_word_spans(query)
+        .into_iter()
+        .map(|w| w.to_ascii_lowercase())
+        .filter(|w| w.len() >= 2 && !STOPWORDS.contains(&w.as_str()))
+        .collect()
+}
+
+fn line_words(line: &str) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for raw in extract_word_spans(line) {
+        out.insert(raw.to_ascii_lowercase());
+        for seg in raw.split(|c| c == '_' || c == '-') {
+            if seg.is_empty() {
+                continue;
+            }
+            let chars: Vec<char> = seg.chars().collect();
+            let mut start = 0usize;
+            for idx in 1..chars.len() {
+                let prev = chars[idx - 1];
+                let cur = chars[idx];
+                if (prev.is_ascii_lowercase() || prev.is_ascii_digit()) && cur.is_ascii_uppercase() {
+                    let part: String = chars[start..idx].iter().collect();
+                    if !part.is_empty() {
+                        out.insert(part.to_ascii_lowercase());
+                    }
+                    start = idx;
+                }
+            }
+            let tail: String = chars[start..].iter().collect();
+            if !tail.is_empty() {
+                out.insert(tail.to_ascii_lowercase());
+            }
+        }
+    }
+    out
+}
+
+#[derive(Clone)]
+struct PackCandidate {
+    path: String,
+    line: usize,
+    score: f64,
+    error_line: bool,
+}
+
+struct PackMatchers {
+    errorish: Regex,
+    declish: Regex,
+    assignish: Regex,
+}
+
+impl PackMatchers {
+    fn new() -> Self {
+        Self {
+            errorish: Regex::new(
+                r"(?i)(Traceback \(most recent call last\)|\bfatal\b|\bsegfault\b|\bpanicked?\b|\brefused\b|\bdenied\b|\bcrash(?:ed)?\b|\btimeout\b|\bcorrupt\b|^\s*(?:raise|throw)\b|\b[A-Za-z]*Error\b\s*:|\b[A-Za-z]*Exception\b\s*:|\b(?:failed|failure)\b)"
+            ).unwrap(),
+            declish: Regex::new(
+                r"^\s*(def|class|function|func|fn|impl|struct|type|interface|export|import|from|return|async)\b"
+            ).unwrap(),
+            assignish: Regex::new(
+                r"^\s*(?:export\s+)?(?:const\s+|let\s+|var\s+|static\s+|final\s+)?[A-Za-z_][A-Za-z0-9_]*\s*[:=][^=]"
+            ).unwrap(),
+        }
+    }
+}
+
+fn score_line_pack(line: &str, tokens: &[String], path_lower: &str, m: &PackMatchers) -> (f64, bool) {
+    if tokens.is_empty() {
+        return (0.0, false);
+    }
+    let lower = line.to_ascii_lowercase();
+    let words = line_words(line);
+    let canon_words: HashSet<String> = words.iter().map(|w| canon_tok(w)).collect();
+    let mut score = 0.0f64;
+    for tok in tokens {
+        let canon = canon_tok(tok);
+        if words.contains(tok) {
+            score += 3.0;
+        } else if canon_words.contains(&canon) {
+            score += 2.0;
+        } else if tok.len() >= 4 && words.iter().any(|w| w.starts_with(tok.as_str())) {
+            score += 1.5;
+        }
+        if path_lower.contains(tok.as_str()) || (canon.len() >= 4 && path_lower.contains(canon.as_str())) {
+            score += 1.5;
+        }
+        if !words.contains(tok) && lower.contains(tok.as_str()) {
+            score += 0.5;
+        }
+    }
+    if m.declish.is_match(line) || m.assignish.is_match(line) {
+        score += 1.0;
+    }
+    let err = m.errorish.is_match(line);
+    if err {
+        score += 2.0;
+    }
+    let capped = if score > 12.0 { 12.0 } else { score };
+    ((capped * 100.0).round() / 100.0, err)
+}
+
+fn round2_fmt(score: f64) -> String {
+    let r = (score * 100.0).round() / 100.0;
+    if (r - r.trunc()).abs() < 1e-9 {
+        format!("{r:.1}")
+    } else {
+        format!("{r}")
+    }
+}
+
+fn route_pack_query(
+    p: &Parsed,
+    root: &str,
+    query: &str,
+    token_budget: i64,
+    file_limit: i64,
+    window: usize,
+    max_matches: usize,
+    use_symbols: bool,
+) -> Value {
+    let base = match guard::read_guard(root) {
+        Ok(b) => b,
+        Err(d) => return envelope(false, Value::Null, Some(format!("{}: {}", d.code, d.reason)), 0, false),
+    };
+    if !base.is_dir() {
+        return envelope(false, Value::Null, Some("not_a_directory".into()), 0, false);
+    }
+    let budget = token_budget.clamp(64, 4000) as usize;
+    let flimit = file_limit.clamp(1, 40) as usize;
+    let tokens = query_tokens(query);
+    if tokens.is_empty() {
+        return envelope(false, Value::Null, Some("empty_query".into()), 0, false);
+    }
+
+    let matchers = PackMatchers::new();
+    let base_str = base.to_string_lossy().to_string();
+    let entries = walk_py(&base_str, 8, Some(400));
+    let mut candidates: Vec<PackCandidate> = Vec::new();
+    let mut scanned = 0usize;
+
+    for entry in entries {
+        if entry.is_dir || entry.size > 2_000_000 {
+            continue;
+        }
+        if guard::is_denied_name(&entry.path).is_some() {
+            continue;
+        }
+        if scanned >= 400 {
+            break;
+        }
+        scanned += 1;
+        let Ok(canon) = guard::read_guard(&entry.path) else { continue; };
+        let Ok(bytes) = std::fs::read(&canon) else { continue; };
+        if bytes.iter().take(2000).any(|&b| b == 0) {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&bytes);
+        let path_str = entry.path;
+        let path_lower = path_str.to_ascii_lowercase();
+        for (idx, line) in splitlines_py(&text).iter().enumerate() {
+            let (score, err) = score_line_pack(line, &tokens, &path_lower, &matchers);
+            if score > 0.0 {
+                candidates.push(PackCandidate {
+                    path: path_str.clone(),
+                    line: idx + 1,
+                    score,
+                    error_line: err,
+                });
+            }
+        }
+        if candidates.len() >= 400 {
+            break;
+        }
+    }
+
+    candidates.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| a.path.cmp(&b.path))
+            .then_with(|| a.line.cmp(&b.line))
+    });
+    candidates.truncate(max_matches);
+
+    let mut graph_hits = 0usize;
+    if use_symbols {
+        let mut seen_pairs: HashSet<(String, usize)> = candidates
+            .iter()
+            .map(|c| (c.path.clone(), c.line))
+            .collect();
+        for tok in tokens.iter().take(4) {
+            if tok.len() < 3 {
+                continue;
+            }
+            if let Ok(gres) = crate::code_graph::query_graph(p, tok, &base_str, 1) {
+                let mut items: Vec<Value> = Vec::new();
+                if let Some(defs) = gres.get("definitions").and_then(|v| v.as_array()) {
+                    items.extend(defs.iter().take(4).cloned());
+                }
+                if let Some(callers) = gres.get("callers").and_then(|v| v.as_array()) {
+                    items.extend(callers.iter().take(4).cloned());
+                }
+                for item in items {
+                    let fpath = item.get("file").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let lineno = item.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                    if !fpath.is_empty() && lineno > 0 && seen_pairs.insert((fpath.clone(), lineno)) {
+                        candidates.push(PackCandidate {
+                            path: fpath,
+                            line: lineno,
+                            score: 6.5,
+                            error_line: false,
+                        });
+                        graph_hits += 1;
+                    }
+                }
+            }
+        }
+        candidates.sort_by(|a, b| {
+            b.score
+                .total_cmp(&a.score)
+                .then_with(|| a.path.cmp(&b.path))
+                .then_with(|| a.line.cmp(&b.line))
+        });
+        candidates.truncate(max_matches);
+    }
+
+    let header = vec![
+        format!("ROOT {base_str}"),
+        format!("QUERY {}", query.trim()),
+        format!("MATCHES {}", candidates.len()),
+    ];
+
+    let mut per_file: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+    for m in &candidates {
+        let centres = per_file.entry(m.path.clone()).or_default();
+        if centres.len() >= flimit {
+            continue;
+        }
+        if centres.iter().any(|&c| c.abs_diff(m.line) <= window) {
+            continue;
+        }
+        centres.push(m.line);
+    }
+
+    struct WinItem {
+        path: String,
+        line: usize,
+        score: f64,
+        body: String,
+        error_line: bool,
+    }
+
+    let mut windows: Vec<WinItem> = Vec::new();
+    for m in &candidates {
+        let Some(centres) = per_file.get(&m.path) else { continue; };
+        if !centres.contains(&m.line) {
+            continue;
+        }
+        let Some(text) = read_text_lossy(&m.path, None) else { continue; };
+        let lines = splitlines_py(&text);
+        if lines.is_empty() {
+            continue;
+        }
+        let start = m.line.saturating_sub(window).max(1);
+        let end = (m.line + window).min(lines.len());
+        let body = (start..=end)
+            .map(|n| format!("{n}: {}", lines[n - 1]))
+            .collect::<Vec<_>>()
+            .join("\n");
+        windows.push(WinItem {
+            path: m.path.clone(),
+            line: m.line,
+            score: m.score,
+            body,
+            error_line: m.error_line,
+        });
+    }
+
+    windows.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| a.path.cmp(&b.path))
+            .then_with(|| a.line.cmp(&b.line))
+    });
+
+    let mut kept: Vec<WinItem> = Vec::new();
+    let mut used = pyjson::tokens(&header.join("\n"));
+    let mut packed_files: HashSet<String> = HashSet::new();
+
+    for mut item in windows {
+        if packed_files.len() >= flimit && !packed_files.contains(&item.path) {
+            continue;
+        }
+        let cost = pyjson::tokens(&item.body);
+        if used + cost > budget {
+            if item.error_line {
+                let last_ln = item.body.lines().last().unwrap_or("");
+                let line_body = format!("{}:L{} {last_ln}", item.path, item.line);
+                let lcost = pyjson::tokens(&line_body);
+                if used + lcost > budget {
+                    continue;
+                }
+                used += lcost;
+                item.body = line_body;
+                packed_files.insert(item.path.clone());
+                kept.push(item);
+            } else {
+                continue;
+            }
+        } else {
+            used += cost;
+            packed_files.insert(item.path.clone());
+            kept.push(item);
+        }
+    }
+
+    let build_ctx = |items: &[WinItem]| -> String {
+        let mut parts = header.clone();
+        for w in items {
+            parts.push(format!("FILE {} (L{}, score {})\n{}", w.path, w.line, round2_fmt(w.score), w.body));
+        }
+        parts.join("\n\n")
+    };
+
+    let mut context = build_ctx(&kept);
+    let mut data = json!({
+        "root": base_str,
+        "query": query,
+        "context": context,
+        "token_budget": budget,
+        "estimated_tokens": 0,
+        "matches": candidates.len(),
+        "windows": kept.len(),
+        "files": packed_files.len(),
+        "evidence": kept.iter().map(|w| json!({"path": w.path, "line": w.line})).collect::<Vec<_>>(),
+    });
+    if use_symbols {
+        data["symbol_graph_hits"] = json!(graph_hits);
+    }
+    let mut estimate = payload_tokens(&mut data);
+    while estimate > budget && !kept.is_empty() {
+        kept.pop();
+        context = build_ctx(&kept);
+        data["windows"] = json!(kept.len());
+        data["evidence"] = json!(kept.iter().map(|w| json!({"path": w.path, "line": w.line})).collect::<Vec<_>>());
+        data["context"] = json!(context);
+        estimate = payload_tokens(&mut data);
+    }
+    data["estimated_tokens"] = json!(estimate);
+    data["truncated"] = json!(!candidates.is_empty() && kept.is_empty());
+    envelope(true, data, None, 0, false)
+}
+
 fn route_batch_peek(paths: &[String], token_budget: i64, lines_per_file: i64) -> Value {
     let budget = token_budget.clamp(32, 4000) as usize;
     let line_cap = lines_per_file.clamp(1, 200) as usize;
@@ -838,13 +1264,18 @@ pub fn run(p: &Parsed) -> Option<i32> {
             envelope_tool(true, Value::Array(out), None)
         }
         "context" => {
-            if p.fstr("query").is_some() || p.fbool("symbols") {
-                return None;
-            }
             let root = p.pos(0).unwrap_or(".");
             let budget = p.fint("token-budget", 1200);
             let file_limit = p.fint("file-limit", 12);
-            route_context(root, budget, file_limit)
+            if let Some(q) = p.fstr("query") {
+                let win = p.fint("window", 2).max(0) as usize;
+                let max_m = p.fint("max-matches", 40).max(1) as usize;
+                route_pack_query(p, root, &q, budget, file_limit, win, max_m, p.fbool("symbols"))
+            } else if p.fbool("symbols") {
+                return None;
+            } else {
+                route_context(root, budget, file_limit)
+            }
         }
         "batch-peek" => {
             let mut paths = p.flist("paths");

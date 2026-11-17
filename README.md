@@ -118,6 +118,24 @@ xt-forge mcp audit --server upstream --cmd "npx -y @org/server" --trust-on-first
 
 ---
 
+## Native Performance
+
+Hot CLI paths run directly in Rust (`xtforge-native`) and Go (`xtforge-hub`), delivering 10x to 25x speedups over `XT_FORCE_PYTHON=1` on cold subprocess invocations (median of 5 runs):
+
+| Workload | Native Engine | Native (ms) | Python (ms) | Speedup |
+| --- | --- | ---: | ---: | ---: |
+| `scan secrets xtforge` | Rust | 28.2 | 327.2 | 11.6x |
+| `route context xtforge --symbols` | Rust | 15.3 | 162.8 | 10.7x |
+| `code index xtforge` | Rust | 6.9 | 122.9 | 17.9x |
+| `codec entropy <elf>` | Rust | 7.7 | 197.5 | 25.8x |
+| `re checksec <elf>` | Go | 8.8 | 120.6 | 13.7x |
+| `re capa <elf>` | Go | 18.3 | 313.9 | 17.2x |
+| `intel sources` | Go | 6.0 | 109.3 | 18.2x |
+
+Full dispatch details live in [docs/ARCHITECTURE-RUST-GO.md](docs/ARCHITECTURE-RUST-GO.md).
+
+---
+
 ## Documentation
 
 ![XT-Forge Hybrid Architecture](docs/assets/architecture-rust-go.png)
