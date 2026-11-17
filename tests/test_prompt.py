@@ -57,8 +57,13 @@ class TestPrompts(unittest.TestCase):
     def test_build_agent_context_harness_dsh(self):
         ctx = pmod.build_agent_context(include_taste=False, include_flash=False, harness="dsh")
         self.assertIn('<harness_context type="dsh">', ctx)
-        self.assertIn('mcp__memos__mem_put', ctx)
         self.assertIn('dsh-context', ctx)
+        # The harness block must describe the profile that is mounted, so the
+        # one thing it may never contain is a server name that was hardcoded
+        # here rather than read from the config. `memos` used to be asserted
+        # below, which is how a prompt describing a harness nobody ran stayed
+        # green; see tests/test_prompt_harness_truth.py for the behaviour.
+        self.assertNotIn('mcp__memos__', ctx)
 
     def test_token_budget_truncation(self):
         self.fl.set("A" * 200, key="long_pin", pin=True)

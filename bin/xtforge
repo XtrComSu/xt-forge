@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 # portable xt-forge launcher — native-first dispatch, python fallback.
 # XT_FORCE_PYTHON=1 forces the Python reference path.
 # Self-locating: resolves ROOT from this script's location (repo root above bin/).

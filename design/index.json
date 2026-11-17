@@ -1,0 +1,80 @@
+{
+  "schema": "xt.design/1",
+  "generated_by": "xtforge knowledge design-index",
+  "note": "Every entry is code/asset with documented deps, not a screenshot.",
+  "entries": [
+    {
+      "id": "console-stream",
+      "kind": "pattern",
+      "path": "patterns/console-stream.md",
+      "name": "Streaming console / log timeline",
+      "purpose": "Watch long-running work and find the one line that explains a failure.",
+      "stack": "html+css, react",
+      "dependencies": "none",
+      "license": "MIT",
+      "provenance": "authored for XT-Forge, 2026-11-03",
+      "states": [
+        "loading",
+        "empty",
+        "partial",
+        "error",
+        "permission",
+        "offline"
+      ],
+      "severity": null
+    },
+    {
+      "id": "editor",
+      "kind": "pattern",
+      "path": "patterns/editor.md",
+      "name": "Split editor with live preview",
+      "purpose": "Edit structured or rendered content while seeing the result.",
+      "stack": "html+css, react",
+      "dependencies": "none",
+      "license": "MIT",
+      "provenance": "authored for XT-Forge, 2026-11-03",
+      "states": [
+        "loading",
+        "empty",
+        "partial",
+        "error",
+        "permission",
+        "offline"
+      ],
+      "severity": null
+    },
+    {
+      "id": "search-results",
+      "kind": "pattern",
+      "path": "patterns/search-results.md",
+      "name": "Dense search results",
+      "purpose": "Let a user scan many matches and refine quickly.",
+      "stack": "html+css, react",
+      "dependencies": "none",
+      "license": "MIT",
+      "provenance": "authored for XT-Forge, 2026-11-03",
+      "states": [
+        "loading",
+        "empty",
+        "partial",
+        "error",
+        "permission",
+        "offline"
+      ],
+      "severity": null
+    },
+    {
+      "id": "card-everything",
+      "kind": "anti",
+      "path": "anti/card-everything.md",
+      "name": "Card-everything layout",
+      "purpose": null,
+      "stack": null,
+      "dependencies": null,
+      "license": "MIT",
+      "provenance": "authored for XT-Forge, 2026-11-03",
+      "states": [],
+      "severity": "high"
+    }
+  ]
+}

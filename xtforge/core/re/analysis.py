@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ..route import guard
+from .annotate import overlay_map_for_binary
 from .native import _run, sniff_format
 
 CONDITIONAL_BRANCHES = {
@@ -358,6 +359,17 @@ def build_cfg(
     fn_name = symbol or (hex(rva) if rva else "function")
     cfg = parse_blocks_from_disasm(out, fn_name, base_addr=rva, max_instructions=max_instructions)
     cfg["path"] = str(canon)
+    ov = overlay_map_for_binary(canon)
+    if ov["count"] > 0:
+        cfg["overlay_applied"] = ov["count"]
+        if fn_name in ov["renames_by_orig"]:
+            cfg["symbol_renamed"] = ov["renames_by_orig"][fn_name]
+        for b in cfg.get("blocks") or []:
+            hx = str(b.get("start_rva", "")).lower()
+            if hx in ov["renames_by_rva"]:
+                b["renamed"] = ov["renames_by_rva"][hx]
+            if hx in ov["comments_by_rva"]:
+                b["comment"] = ov["comments_by_rva"][hx]
     return cfg
 
 
@@ -405,10 +417,17 @@ def find_xrefs(target: str | Path, target_addr_or_symbol: int | str) -> dict[str
         return {"ok": False, "err": "disassembly failed"}
 
     xrefs = parse_xrefs_from_disasm(out, target_addr_or_symbol)
+    ov = overlay_map_for_binary(canon)
+    if ov["count"] > 0:
+        for xr in xrefs:
+            fn = xr.get("caller") or xr.get("function") or ""
+            if fn in ov["renames_by_orig"]:
+                xr["caller_renamed"] = ov["renames_by_orig"][fn]
     return {
         "ok": True,
         "path": str(canon),
         "target": str(target_addr_or_symbol),
         "count": len(xrefs),
         "xrefs": xrefs,
+        "overlay_applied": ov["count"],
     }

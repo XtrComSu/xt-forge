@@ -17,6 +17,25 @@ def project_root() -> Path:
     return _ROOT
 
 
+def _installed_metadata() -> dict[str, str]:
+    """Version from the installed distribution's metadata, if present.
+
+    A wheel does not carry the repo's `VERSION` file, so an installed copy must
+    read its own metadata or it reports 0.0.0 - which is what happened on the
+    first clean-install test.
+    """
+    try:
+        from importlib.metadata import version as _v, metadata as _m
+        data = {"version": _v("xt-forge")}
+        try:
+            data["name"] = _m("xt-forge").get("Name", "xt-forge").lower()
+        except Exception:  # noqa: BLE001
+            data["name"] = "xt-forge"
+        return data
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _read_version_file() -> dict[str, str]:
     vf = _ROOT / "VERSION"
     data: dict[str, str] = {}
@@ -27,6 +46,10 @@ def _read_version_file() -> dict[str, str]:
                 continue
             k, v = line.split("=", 1)
             data[k.strip()] = v.strip()
+    if not data.get("version"):
+        # Running from an installed package (no repo root): fall back to the
+        # distribution metadata so `xtforge version` is never a lie.
+        data.update({k: v for k, v in _installed_metadata().items() if v})
     return data
 
 

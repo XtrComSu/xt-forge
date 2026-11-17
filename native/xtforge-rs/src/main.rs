@@ -3,13 +3,16 @@
 
 mod args;
 mod calibrate;
+mod code_graph;
 mod compress;
 mod flash;
 mod guard;
 mod mem;
 mod paths;
 mod pyjson;
+mod re_fast;
 mod route;
+mod scan_fast;
 mod util;
 
 use serde_json::json;
@@ -23,12 +26,28 @@ fn version_cmd(p: &args::Parsed) -> i32 {
     util::out(p, &obj, Some(format!("{name} {full} (XT_HOME={xt_home})")))
 }
 
+fn resolve_python() -> String {
+    if let Ok(py) = std::env::var("XT_PYTHON") {
+        if !py.is_empty() {
+            return py;
+        }
+    }
+    for candidate in &[
+        "/usr/bin/python3",
+        "/data/data/com.termux/files/usr/bin/python3",
+    ] {
+        if std::path::Path::new(candidate).exists() {
+            return candidate.to_string();
+        }
+    }
+    "python3".to_string()
+}
+
 fn python_fallback(argv: &[String]) -> i32 {
     use std::os::unix::process::CommandExt;
 
     let root = paths::repo_root();
-    let python = std::env::var("XT_PYTHON")
-        .unwrap_or_else(|_| "/data/data/com.termux/files/usr/bin/python3".to_string());
+    let python = resolve_python();
     let mut cmd = std::process::Command::new(python);
     cmd.arg("-m").arg("xtforge.cli").args(argv);
     cmd.current_dir(&root);
@@ -48,9 +67,60 @@ fn python_fallback(argv: &[String]) -> i32 {
     127
 }
 
+fn resolve_hub() -> Option<std::path::PathBuf> {
+    if std::env::var("XT_NATIVE_HUB").ok().as_deref() == Some("0") {
+        return None;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let beside = dir.join("xtforge-hub");
+            if beside.is_file() {
+                return Some(beside);
+            }
+        }
+    }
+    let root = paths::repo_root();
+    let built = root.join("native/xtforge-go/xtforge-hub");
+    if built.is_file() {
+        return Some(built);
+    }
+    None
+}
+
+fn hub_fallback(argv: &[String]) -> ! {
+    use std::os::unix::process::CommandExt;
+    if let Some(hub) = resolve_hub() {
+        let mut cmd = std::process::Command::new(hub);
+        cmd.args(argv);
+        if std::env::var_os("XT_HOME").is_none() {
+            cmd.env("XT_HOME", paths::home().join(".xt-forge"));
+        }
+        let _ = cmd.exec();
+    }
+    std::process::exit(python_fallback(argv));
+}
+
+fn wants_hub(p: &args::Parsed) -> bool {
+    let noun = p.noun.as_deref().unwrap_or("");
+    let verb = p.verb.as_deref().unwrap_or("");
+    match (noun, verb) {
+        ("mcp", "audit" | "proxy" | "trust") => true,
+        ("mcp", "serve") => p.fbool("meta"),
+        ("code", "lsp") => true,
+        ("re", "asar" | "netcap" | "apk" | "decompile" | "trace") => true,
+        ("research", _) => true,
+        ("loop", "schedule" | "list" | "stop" | "status") => true,
+        ("guard", "mode") => true,
+        _ => false,
+    }
+}
+
 fn run() -> i32 {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let p = args::parse(&argv);
+    if wants_hub(&p) && resolve_hub().is_some() {
+        hub_fallback(&argv);
+    }
     match p.noun.as_deref() {
         Some("flash") => {
             if let Some(code) = flash::run(&p) {
@@ -69,6 +139,21 @@ fn run() -> i32 {
         }
         Some("mem") => {
             if let Some(code) = mem::run(&p) {
+                return code;
+            }
+        }
+        Some("code") => {
+            if let Some(code) = code_graph::run(&p) {
+                return code;
+            }
+        }
+        Some("re") => {
+            if let Some(code) = re_fast::run(&p) {
+                return code;
+            }
+        }
+        Some("scan") => {
+            if let Some(code) = scan_fast::run(&p) {
                 return code;
             }
         }

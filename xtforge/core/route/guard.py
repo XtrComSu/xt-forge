@@ -6,6 +6,7 @@ Nothing else in xt-forge touches the filesystem without going through here.
 from __future__ import annotations
 
 import fnmatch
+import json
 import os
 import re
 import secrets
@@ -48,6 +49,14 @@ def _expand(p: str) -> Path:
     return Path(os.path.expandvars(p)).expanduser()
 
 
+def user_home() -> Path:
+    h = Path.home()
+    for p in h.parents:
+        if p.name == ".dsh":
+            return p.parent
+    return h
+
+
 def roots() -> list[Path]:
     env = os.environ.get("XT_ROOTS")
     raw = env.split(",") if env else DEFAULT_ROOTS
@@ -62,6 +71,9 @@ def roots() -> list[Path]:
         if "$" in str(expanded) or str(expanded) in ("/", "", "."):
             continue
         out.append(expanded)
+    uh = user_home()
+    if uh != Path.home() and uh not in out:
+        out.insert(0, uh)
     return out
 
 
@@ -174,3 +186,67 @@ def check_command(cmd: str) -> str | None:
         if re.search(pat, cmd, re.IGNORECASE):
             return reason
     return None
+
+
+PERM_MODES = ("explore", "ask", "auto")
+
+
+def perm_mode() -> str:
+    """Return active permission mode (env XT_PERM_MODE > state file > 'ask')."""
+    env = (os.environ.get("XT_PERM_MODE") or "").strip().lower()
+    if env in PERM_MODES:
+        return env
+    from ...version import xt_home
+    p = xt_home() / "guard_mode.txt"
+    if p.is_file():
+        val = p.read_text(encoding="utf-8", errors="replace").strip().lower()
+        if val in PERM_MODES:
+            return val
+    return "ask"
+
+
+def set_perm_mode(mode: str) -> str:
+    """Persist permission mode to XT_HOME/guard_mode.txt."""
+    m = mode.strip().lower()
+    if m not in PERM_MODES:
+        raise ValueError(f"invalid mode {mode!r}; expected one of {PERM_MODES}")
+    from ...version import xt_home
+    p = xt_home() / "guard_mode.txt"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(m + "\n", encoding="utf-8")
+    audit_log(tool="guard.mode", args={"mode": m}, outcome="ok", mode=m)
+    return m
+
+
+def check_write_mode(confirm_token: str | None = None) -> None:
+    """Enforce XT_PERM_MODE write policy before mutating disk or state."""
+    mode = perm_mode()
+    if mode == "explore":
+        audit_log(tool="guard.write", args={}, outcome="denied_explore_mode", mode=mode)
+        raise Denied("XT_PERM_MODE=explore forbids write/exec mutations", "explore_mode")
+    if mode == "ask" and not confirm_token:
+        # Caller may still enforce issue_token; when confirm_token is explicitly required it raises.
+        return
+
+
+def audit_log(*, tool: str, args: dict[str, Any] | None = None,
+              outcome: str = "ok", mode: str | None = None,
+              token_cost: int = 0) -> None:
+    """Append a structured JSONL audit event under XT_HOME/audit/YYYY-MM-DD.jsonl."""
+    try:
+        from ...version import xt_home
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        adir = xt_home() / "audit"
+        adir.mkdir(parents=True, exist_ok=True)
+        ev = {
+            "ts": int(time.time()),
+            "mode": mode or perm_mode(),
+            "tool": tool,
+            "args": args or {},
+            "outcome": outcome,
+            "tokens": int(token_cost),
+        }
+        with (adir / f"{day}.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(ev, ensure_ascii=False) + "\n")
+    except OSError:
+        pass

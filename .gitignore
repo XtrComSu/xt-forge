@@ -1,5 +1,12 @@
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+*.bak
+*.bak-*
 native/xtforge-rs/target/
+native/xtforge-go/xtforge-hub
+dist/
 *.db-shm
+*.db-wal
 .DS_Store

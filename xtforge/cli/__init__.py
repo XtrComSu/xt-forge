@@ -31,8 +31,9 @@ from .intel_cmd import cmd_intel, cmd_hub
 from .eval_cmd import cmd_eval
 from .taste_cmd import cmd_taste
 from .plugin_cmd import cmd_plugin
+from .research_cmd import cmd_research
 from .device_cmd import (cmd_route, cmd_phone, cmd_compress, cmd_ascii,
-                         cmd_version, cmd_doctor, cmd_code)
+                         cmd_version, cmd_doctor, cmd_code, cmd_guard)
 from .prompt_cmd import cmd_prompt
 
 
@@ -40,7 +41,8 @@ def _add_mem(sub) -> None:
     m = sub.add_parser("mem", help="universal memory")
     m.add_argument("mem_verb", choices=["put", "get", "search", "list", "forget",
                                         "review", "purge", "export", "import", "sync",
-                                        "link", "links", "unlink", "capture"])
+                                        "link", "links", "unlink", "capture",
+                                        "consolidate", "record-failure"])
     m.add_argument("value", nargs="?", default=None,
                    help="positional shorthand: id for get/forget, query for "
                         "search, body for put, path for export/import/sync")
@@ -81,6 +83,12 @@ def _add_mem(sub) -> None:
     m.add_argument("--embed-mode", default="auto",
                    choices=["auto", "hash", "off"],
                    help="embedding backend for hybrid search")
+    m.add_argument("--error-sig", dest="error_sig", help="record-failure: error signature")
+    m.add_argument("--sig", help="record-failure: alias for --error-sig")
+    m.add_argument("--outcome", default="failed", help="record-failure: outcome tag")
+    m.add_argument("--threshold", type=float, default=0.55, help="consolidate: Jaccard similarity threshold")
+    m.add_argument("--dry-run", dest="dry_run", action="store_true", help="consolidate: preview merges without writing")
+    m.add_argument("--limit", type=int, default=250, help="consolidate: max candidates to inspect")
     m.set_defaults(func=cmd_mem)
 
 
@@ -109,7 +117,7 @@ def _add_goal(sub) -> None:
     g = sub.add_parser("goal", help="bounded goal loop")
     g.add_argument("goal_verb", nargs="?", default="status",
                    choices=["status", "pause", "resume", "stop", "extend", "log",
-                            "run", "start", "verify"])
+                            "run", "start", "verify", "check"])
     g.add_argument("objective", nargs="?")
     g.add_argument("--run-id")
     g.add_argument("--rounds", type=int, default=8)
@@ -125,6 +133,8 @@ def _add_goal(sub) -> None:
                         "(repeatable; --verify is always approved)")
     g.add_argument("--workdir", default=".",
                    help="verify: workspace that evidence must stay inside")
+    g.add_argument("--interactive", action="store_true",
+                   help="check: prompt on TTY before proceeding when warnings exist")
     g.set_defaults(func=cmd_goal)
 
 
@@ -178,6 +188,8 @@ def _add_route(sub) -> None:
     r.add_argument("--count", type=int, default=50)
     r.add_argument("--top", type=int, default=15)
     r.add_argument("--minutes", type=int, default=60)
+    r.add_argument("--symbols", action="store_true",
+                   help="context: expand matches along the code call/definition graph")
     r.set_defaults(func=cmd_route)
 
 
@@ -236,14 +248,19 @@ def _add_tools(sub) -> None:
 
 
 def _add_code(sub) -> None:
-    c = sub.add_parser("code", help="code structure: symbols, outline, refs, syntax")
-    c.add_argument("code_verb", choices=["symbols", "outline", "refs", "syntax"])
+    c = sub.add_parser("code", help="code structure: symbols, outline, refs, syntax, index, graph, lsp")
+    c.add_argument("code_verb", choices=["symbols", "outline", "refs", "syntax", "index", "graph", "lsp"])
     c.add_argument("value", nargs="?", default=None,
-                   help="symbol name for refs, or path for symbols/outline/syntax")
+                   help="symbol name for refs/graph, action for lsp, or path for symbols/outline/syntax/index")
     c.add_argument("path", nargs="?", default=None,
                    help="file or directory (default: .)")
-    c.add_argument("--name", help="symbol name for refs")
+    c.add_argument("--name", help="symbol name for refs/graph")
     c.add_argument("--limit", type=int, default=50)
+    c.add_argument("--depth", type=int, default=2, help="graph: BFS depth")
+    c.add_argument("--graph-db", dest="graph_db", help="override code_graph.db path")
+    c.add_argument("--line", type=int, default=1, help="lsp: 1-based line")
+    c.add_argument("--col", type=int, default=1, help="lsp: 1-based column")
+    c.add_argument("--symbol", help="lsp: optional symbol filter")
     c.set_defaults(func=cmd_code)
 
 
@@ -272,7 +289,9 @@ def _add_re(sub) -> None:
                                        "ioc", "disasm", "graph",
                                        "pe", "cfg", "block", "view", "xrefs",
                                        "checksec", "hooks", "patch", "rtti", "diff",
-                                       "capa", "crash"])
+                                       "capa", "crash",
+                                       "annotate", "asar", "netcap", "apk",
+                                       "decompile", "trace"])
     r.add_argument("value", nargs="?", default=None,
                    help="binary path or subverb (same as --path)")
     r.add_argument("path", nargs="?", default=None)
@@ -299,6 +318,15 @@ def _add_re(sub) -> None:
     r.add_argument("--offset", help="patch: hex or decimal file offset to modify")
     r.add_argument("--patch-bytes", dest="patch_bytes", help="patch: hex bytes to write (e.g. 9090 or c3)")
     r.add_argument("--orig-bytes", dest="orig_bytes", help="patch: expected original hex bytes to verify")
+    r.add_argument("--name", help="annotate: replacement symbol name")
+    r.add_argument("--orig", help="annotate: original symbol name")
+    r.add_argument("--comment", help="annotate: analyst note at RVA")
+    r.add_argument("--type-decl", dest="type_decl", help="annotate: C type declaration at RVA")
+    r.add_argument("--confidence", type=float, default=1.0, help="annotate: confidence score")
+    r.add_argument("--format", default="json", choices=["json", "r2", "ghidra"], help="annotate export format")
+    r.add_argument("--grep", help="asar: filter archived paths")
+    r.add_argument("--reveal", action="store_true", help="netcap: unmask sensitive headers")
+    r.add_argument("--confirm", help="trace: confirm token")
     r.set_defaults(func=cmd_re)
 
 
@@ -345,7 +373,7 @@ def _add_hub(sub) -> None:
 
 def _add_scan(sub) -> None:
     s = sub.add_parser("scan", help="static safety scan (read-only)")
-    s.add_argument("scan_verb", choices=["secrets", "patterns", "deps", "injection"])
+    s.add_argument("scan_verb", choices=["secrets", "patterns", "deps", "injection", "mcp"])
     s.add_argument("value", nargs="?", default=None,
                    help="file or directory (same as --path)")
     s.add_argument("path", nargs="?", default=None)
@@ -386,10 +414,12 @@ def _add_taste(sub) -> None:
 def _add_loop(sub) -> None:
     l = sub.add_parser("loop", help="loop grammar and scheduling policy")
     l.add_argument("loop_verb", choices=["parse", "normalize", "markers", "next",
-                                         "policy"])
+                                         "policy", "schedule", "list", "stop"])
     l.add_argument("value", nargs="?", default=None,
-                   help="command text, interval, or marker text")
+                   help="command text, interval, marker text, or loop id")
     l.add_argument("--body", help="next: the iteration's marker text")
+    l.add_argument("--cmd", help="schedule: command to run")
+    l.add_argument("--id", help="stop: scheduled task id")
     l.add_argument("--base", type=int, default=300,
                    help="next: base delay in seconds (default 300)")
     l.add_argument("--quiet", type=int, default=0,
@@ -628,9 +658,9 @@ def _add_tool(sub) -> None:
 
 
 def _add_mcp(sub) -> None:
-    m = sub.add_parser("mcp", help="MCP servers the harness mounts, and what they cost")
+    m = sub.add_parser("mcp", help="MCP servers, audit, trust pinning, proxy, and gateway")
     m.add_argument("mcp_verb", nargs="?", default="status",
-                   choices=["status", "advice", "configs"])
+                   choices=["status", "advice", "configs", "serve", "audit", "proxy", "trust"])
     m.add_argument("--profile", help="only read this profile's cordis patch "
                                      "(default: every profile)")
     m.add_argument("--probe", action="store_true",
@@ -638,7 +668,31 @@ def _add_mcp(sub) -> None:
                         "real tools/list payload (opt-in: this spawns processes)")
     m.add_argument("--timeout", type=float, default=20.0,
                    help="probe: seconds allowed per server")
+    m.add_argument("--meta", action="store_true",
+                   help="serve: expose 4-tool meta-gateway (~1.4KB) instead of 56 pinned tools")
+    m.add_argument("--server", help="audit/proxy/trust: logical server name")
+    m.add_argument("--cmd", help="audit/proxy/trust: stdio command for child server")
+    m.add_argument("--trust-on-first", dest="trust_on_first", action="store_true",
+                   help="audit/proxy: pin SHA-256 baseline on first inspection")
     m.set_defaults(func=cmd_mcp)
+
+
+def _add_research(sub) -> None:
+    r = sub.add_parser("research", help="parallel multi-source research dossier fan-out")
+    r.add_argument("topic", nargs="?", default=None, help="research topic")
+    r.add_argument("--query", "-q", help="alias for topic")
+    r.add_argument("--path", default=".", help="workspace path for code evidence")
+    r.add_argument("--k", "-k", type=int, default=5, help="hits per store")
+    r.add_argument("--save", action="store_true", help="persist markdown dossier to XT_HOME/research")
+    r.add_argument("--web", action="store_true", help="enable live web fan-out in native hub")
+    r.set_defaults(func=cmd_research)
+
+
+def _add_guard(sub) -> None:
+    g = sub.add_parser("guard", help="permission mode (explore|ask|auto) and audit policy")
+    g.add_argument("guard_verb", nargs="?", default="mode", choices=["mode"])
+    g.add_argument("value", nargs="?", default=None, help="optional mode to set: explore|ask|auto")
+    g.set_defaults(func=cmd_guard)
 
 
 def _add_swarm(sub) -> None:
@@ -674,6 +728,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_knowledge(sub)
     _add_design(sub)
     _add_mcp(sub)
+    _add_research(sub)
+    _add_guard(sub)
     _add_swarm(sub)
     _add_session(sub)
     _add_flash(sub)

@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xt-forge"
+version = "0.4.0"
+description = "Harness-agnostic agent toolkit: memory, navigation, verification, design"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "XtrCom" }]
+keywords = ["agents", "memory", "mcp", "tooling"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: POSIX :: Linux",
+]
+
+# Deliberately empty: the core is stdlib-only. Optional integrations read their
+# own configuration and are never imported at package import time.
+dependencies = []
+
+[project.optional-dependencies]
+yaml = ["PyYAML>=6"]
+
+[project.scripts]
+xtforge = "xtforge.cli:main"
+
+[tool.setuptools]
+packages = [
+  "xtforge",
+  "xtforge.adapters",
+  "xtforge.cli",
+  "xtforge.core",
+  "xtforge.core.build",
+  "xtforge.core.code",
+  "xtforge.core.codec",
+  "xtforge.core.compress",
+  "xtforge.core.docs",
+  "xtforge.core.eval",
+  "xtforge.core.goal",
+  "xtforge.core.hub",
+  "xtforge.core.intel",
+  "xtforge.core.log",
+  "xtforge.core.loop",
+  "xtforge.core.mcp",
+  "xtforge.core.mem",
+  "xtforge.core.plugin",
+  "xtforge.core.re",
+  "xtforge.core.recon",
+  "xtforge.core.repos",
+  "xtforge.core.route",
+  "xtforge.core.scan",
+  "xtforge.core.swarm",
+  "xtforge.core.taste",
+  "xtforge.core.tools",
+]
+
+[tool.setuptools.package-data]
+xtforge = ["../design/**/*"]

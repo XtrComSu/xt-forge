@@ -19,11 +19,15 @@ const VALUE_FLAGS: &[&str] = &[
     "title", "body", "body-file", "kind", "source", "confidence", "session",
     "workflow", "project", "k", "budget", "conflicts", "style", "by", "on",
     "level", "from", "to", "var", "workdir", "phase", "id", "objective",
+    "rva", "name", "orig", "comment", "type-decl", "format", "error-sig",
+    "sig", "outcome", "binary", "reason", "threshold", "min-len", "engine",
+    "server", "cmd", "prefix", "graph-db", "preset", "line", "col", "target",
+    "max-bytes", "symbol", "block",
 ];
 
 const BOOL_FLAGS: &[&str] = &[
     "json", "all", "pin-only", "stats", "legend", "dry-run", "check", "force",
-    "status", "explain", "pin",
+    "status", "explain", "pin", "symbols", "reveal", "xor", "web", "trust-on-first",
 ];
 
 pub fn parse(argv: &[String]) -> Parsed {

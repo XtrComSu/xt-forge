@@ -138,6 +138,40 @@ def cmd_mem(args):
         if args.mem_verb == "sync":
             return _out(args, memexport.sync(st, args.path or value,
                                              conflict_log=args.conflicts))
+        if args.mem_verb == "consolidate":
+            scope_arg = (args.scope or "").strip()
+            sc = None if scope_arg in ("", "global", "*") else scope_arg
+            res = st.consolidate(
+                scope=sc,
+                threshold=float(getattr(args, "threshold", 0.55) or 0.55),
+                dry_run=bool(getattr(args, "dry_run", False)),
+                limit=int(getattr(args, "limit", 250) or 250),
+            )
+            return _out(args, res,
+                        f"clusters={res['clusters']} merged={res['merged']} "
+                        f"created={res['created']} dry_run={res['dry_run']}")
+        if args.mem_verb == "record-failure":
+            try:
+                from_file = _read_file_arg(args, "body_file")
+            except OSError as e:
+                return _out(args, {"ok": False, "error": str(e)}, str(e), code=1)
+            body = ((from_file if from_file is not None else args.body) or "").strip() \
+                or (value or "").strip()
+            if not body:
+                return _out(args, {"ok": False, "error": "mem record-failure requires --body or --body-file"},
+                            "mem record-failure requires --body or --body-file", code=1)
+            sig = getattr(args, "error_sig", None) or getattr(args, "sig", None) or ""
+            outcome = getattr(args, "outcome", None) or "failed"
+            res = st.record_failure(
+                scope=args.scope,
+                title=args.title or "failed attempt",
+                body=body,
+                error_sig=sig,
+                outcome=outcome,
+                tags=args.tag or [],
+                source=args.source or "cli",
+            )
+            return _out(args, res, f"recorded failure {res['id']} sig={sig}")
     finally:
         st.close()
     return 1

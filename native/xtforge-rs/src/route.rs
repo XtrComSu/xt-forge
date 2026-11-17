@@ -838,6 +838,9 @@ pub fn run(p: &Parsed) -> Option<i32> {
             envelope_tool(true, Value::Array(out), None)
         }
         "context" => {
+            if p.fstr("query").is_some() || p.fbool("symbols") {
+                return None;
+            }
             let root = p.pos(0).unwrap_or(".");
             let budget = p.fint("token-budget", 1200);
             let file_limit = p.fint("file-limit", 12);

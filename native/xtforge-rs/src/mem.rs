@@ -1,5 +1,6 @@
 //! Universal memory (mirrors xtforge/core/mem/{store,search,export,write_policy,scopes}.py).
 
+use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -18,6 +19,7 @@ use crate::util;
 pub const KINDS: &[&str] = &[
     "fact", "preference", "decision", "procedure", "snippet",
     "artifact_ref", "error_pattern", "person", "device",
+    "failed_attempt", "anti_pattern",
 ];
 
 const MIGRATION: &str = r#"
@@ -38,7 +40,9 @@ CREATE TABLE IF NOT EXISTS mem(
   confidence REAL NOT NULL DEFAULT 1.0,
   supersedes TEXT,
   body_hash TEXT NOT NULL DEFAULT '',
-  pending INT NOT NULL DEFAULT 0
+  pending INT NOT NULL DEFAULT 0,
+  error_sig TEXT NOT NULL DEFAULT '',
+  outcome TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_mem_scope ON mem(scope);
 CREATE INDEX IF NOT EXISTS idx_mem_kind ON mem(kind);
@@ -47,6 +51,14 @@ CREATE INDEX IF NOT EXISTS idx_mem_pending ON mem(pending);
 CREATE TABLE IF NOT EXISTS links(src TEXT, dst TEXT, rel TEXT);
 CREATE INDEX IF NOT EXISTS idx_links_src ON links(src);
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS consolidation_log(
+  id TEXT PRIMARY KEY,
+  ts INT NOT NULL,
+  scope TEXT NOT NULL DEFAULT '',
+  merged INT NOT NULL DEFAULT 0,
+  created INT NOT NULL DEFAULT 0,
+  notes TEXT NOT NULL DEFAULT ''
+);
 "#;
 
 const FTS_SCHEMA: &str = r#"
@@ -224,6 +236,35 @@ fn collect_rows(conn: &Connection, sql: &str, params: impl rusqlite::Params) -> 
     out
 }
 
+const ADDITIVE_COLUMNS: &[(&str, &str)] = &[
+    ("status", "TEXT"),
+    ("evidence", "TEXT"),
+    ("verification", "TEXT"),
+    ("author", "TEXT"),
+    ("target", "TEXT"),
+    ("project", "TEXT"),
+    ("versions", "TEXT"),
+    ("environment", "TEXT"),
+    ("error_sig", "TEXT NOT NULL DEFAULT ''"),
+    ("outcome", "TEXT NOT NULL DEFAULT ''"),
+];
+
+fn ensure_columns(conn: &Connection) {
+    let mut have: HashSet<String> = HashSet::new();
+    if let Ok(mut stmt) = conn.prepare("PRAGMA table_info(mem)") {
+        if let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(1)) {
+            for col in rows.flatten() {
+                have.insert(col);
+            }
+        }
+    }
+    for (name, decl) in ADDITIVE_COLUMNS {
+        if !have.contains(*name) {
+            let _ = conn.execute(&format!("ALTER TABLE mem ADD COLUMN {name} {decl}"), []);
+        }
+    }
+}
+
 pub struct Store {
     pub conn: Connection,
     pub fts: bool,
@@ -240,6 +281,7 @@ impl Store {
         )
         .map_err(|e| e.to_string())?;
         conn.execute_batch(MIGRATION).map_err(|e| e.to_string())?;
+        ensure_columns(&conn);
         let fts = match use_fts {
             Some(b) => b,
             None => conn
@@ -257,7 +299,7 @@ impl Store {
         }
         let mode = if fts { "fts5" } else { "like_trigram" };
         let _ = conn.execute(
-            "INSERT INTO meta(k,v) VALUES('schema_version','1') \
+            "INSERT INTO meta(k,v) VALUES('schema_version','3') \
              ON CONFLICT(k) DO UPDATE SET v=excluded.v", []);
         let _ = conn.execute(
             "INSERT INTO meta(k,v) VALUES('fts_mode',?) \
@@ -457,6 +499,217 @@ impl Store {
     pub fn link(&self, src: &str, dst: &str, rel: &str) {
         let _ = self.conn.execute(
             "INSERT INTO links(src,dst,rel) VALUES(?,?,?)", params![src, dst, rel]);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_failure(
+        &self,
+        scope: &str,
+        title: &str,
+        body: &str,
+        error_sig: &str,
+        outcome: &str,
+        tags: &[String],
+        source: &str,
+    ) -> Result<Value, String> {
+        let (clean_sig, _) = redact(error_sig);
+        let outcome_val = if outcome.trim().is_empty() { "failed" } else { outcome.trim() };
+        let res = self.put(scope, "failed_attempt", title, body, tags, source, 1.0, false, None)?;
+        if let Some(id) = res.get("id").and_then(|v| v.as_str()) {
+            let _ = self.conn.execute(
+                "UPDATE mem SET error_sig=?, outcome=? WHERE id=?",
+                params![clean_sig, outcome_val, id],
+            );
+        }
+        let mut obj = res.as_object().cloned().unwrap_or_default();
+        obj.insert("error_sig".into(), json!(clean_sig));
+        obj.insert("outcome".into(), json!(outcome_val));
+        obj.insert("kind".into(), json!("failed_attempt"));
+        Ok(Value::Object(obj))
+    }
+
+    pub fn consolidate(
+        &self,
+        scope: Option<&str>,
+        threshold: f64,
+        dry_run: bool,
+        limit: usize,
+    ) -> Result<Value, String> {
+        let mut sql = String::from(
+            "SELECT id, scope, kind, title, body, tags, confidence, pending, updated \
+             FROM mem WHERE kind IN ('fact','snippet','procedure','error_pattern') \
+             AND (supersedes IS NULL OR supersedes='') AND source != 'consolidate'",
+        );
+        let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if let Some(sc) = scope {
+            if !sc.is_empty() && sc != "*" {
+                sql.push_str(" AND scope=?");
+                args.push(Box::new(sc.to_string()));
+            }
+        }
+        sql.push_str(" ORDER BY updated DESC LIMIT ?");
+        args.push(Box::new(limit.max(2) as i64));
+        let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
+        let rows = collect_rows(&self.conn, &sql, refs.as_slice());
+
+        let toks: Vec<HashSet<String>> = rows
+            .iter()
+            .map(|r| {
+                let text = format!(
+                    "{} {}",
+                    r.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                    r.get("body").and_then(|v| v.as_str()).unwrap_or("")
+                );
+                tokenize(&text)
+            })
+            .collect();
+
+        let n = rows.len();
+        let mut used = vec![false; n];
+        let mut clusters: Vec<Vec<usize>> = Vec::new();
+        for i in 0..n {
+            if used[i] || toks[i].is_empty() {
+                continue;
+            }
+            let mut group = vec![i];
+            for j in (i + 1)..n {
+                if used[j] {
+                    continue;
+                }
+                let si = rows[i].get("scope").and_then(|v| v.as_str()).unwrap_or("");
+                let sj = rows[j].get("scope").and_then(|v| v.as_str()).unwrap_or("");
+                if si != sj {
+                    continue;
+                }
+                if jaccard(&toks[i], &toks[j]) >= threshold {
+                    group.push(j);
+                    used[j] = true;
+                }
+            }
+            if group.len() >= 2 {
+                used[i] = true;
+                clusters.push(group);
+            }
+        }
+
+        let mut merged_count = 0usize;
+        let mut created_count = 0usize;
+        let mut summaries: Vec<Value> = Vec::new();
+
+        for grp in &clusters {
+            let primary = &rows[grp[0]];
+            let grp_scope = primary.get("scope").and_then(|v| v.as_str()).unwrap_or("global");
+            let grp_kind = primary.get("kind").and_then(|v| v.as_str()).unwrap_or("fact");
+            let base_title = primary.get("title").and_then(|v| v.as_str()).unwrap_or("consolidated");
+            let member_ids: Vec<String> = grp
+                .iter()
+                .filter_map(|&idx| rows[idx].get("id").and_then(|v| v.as_str()).map(String::from))
+                .collect();
+
+            let mut merged_lines: Vec<String> = Vec::new();
+            let mut seen_lines: HashSet<String> = HashSet::new();
+            let mut tag_set: Vec<String> = vec!["consolidated".to_string()];
+            for &idx in grp {
+                if let Some(t) = rows[idx].get("tags").and_then(|v| v.as_str()) {
+                    for part in t.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                        if !tag_set.contains(&part.to_string()) {
+                            tag_set.push(part.to_string());
+                        }
+                    }
+                }
+                let b = rows[idx].get("body").and_then(|v| v.as_str()).unwrap_or("").trim();
+                if !b.is_empty() && seen_lines.insert(b.to_string()) {
+                    merged_lines.push(b.to_string());
+                }
+            }
+            let merged_body = merged_lines.join("\n---\n");
+            let sum_title = if base_title.is_empty() {
+                format!("consolidated ({})", member_ids.len())
+            } else {
+                format!("{base_title} [consolidated]")
+            };
+
+            if dry_run {
+                summaries.push(json!({
+                    "scope": grp_scope,
+                    "kind": grp_kind,
+                    "title": sum_title,
+                    "members": member_ids,
+                }));
+                merged_count += grp.len();
+                created_count += 1;
+                continue;
+            }
+
+            let sum_id = new_id();
+            let ts = now();
+            let (clean_body, _, _) = self.policy(&merged_body, &sum_title, grp_scope, grp_kind);
+            tag_set.sort();
+            tag_set.dedup();
+            let tag_str = tag_set.join(",");
+            self.conn
+                .execute(
+                    "INSERT INTO mem(id,scope,kind,title,body,tags,source,created,updated,\
+                     last_used,uses,pin,ttl,confidence,supersedes,body_hash,pending) \
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)",
+                    params![
+                        sum_id,
+                        grp_scope,
+                        grp_kind,
+                        sum_title,
+                        clean_body,
+                        tag_str,
+                        "consolidate",
+                        ts,
+                        ts,
+                        0,
+                        0,
+                        0,
+                        Option::<i64>::None,
+                        1.0f64,
+                        member_ids.first().cloned(),
+                        body_hash(&clean_body)
+                    ],
+                )
+                .map_err(|e| e.to_string())?;
+            self.index(&sum_id, &sum_title, &clean_body, &tag_str);
+
+            for mid in &member_ids {
+                self.link(&sum_id, mid, "derived_from");
+                let _ = self.conn.execute(
+                    "UPDATE mem SET supersedes=?, updated=? WHERE id=?",
+                    params![sum_id, ts, mid],
+                );
+            }
+            merged_count += member_ids.len();
+            created_count += 1;
+            summaries.push(json!({
+                "id": sum_id,
+                "scope": grp_scope,
+                "title": sum_title,
+                "members": member_ids,
+            }));
+        }
+
+        if !dry_run && created_count > 0 {
+            let log_id = new_id();
+            let ts = now();
+            let notes = format!("threshold={threshold:.2}");
+            let _ = self.conn.execute(
+                "INSERT INTO consolidation_log(id,ts,scope,merged,created,notes) VALUES(?,?,?,?,?,?)",
+                params![log_id, ts, scope.unwrap_or("*"), merged_count as i64, created_count as i64, notes],
+            );
+        }
+
+        Ok(json!({
+            "dry_run": dry_run,
+            "scope": scope.unwrap_or("*"),
+            "threshold": threshold,
+            "clusters": clusters.len(),
+            "merged": merged_count,
+            "created": created_count,
+            "summaries": summaries,
+        }))
     }
 }
 
@@ -663,10 +916,27 @@ pub fn search(store: &Store, query: &str, scopes: Option<Vec<String>>, k: usize,
             break;
         }
     }
+    let mut warnings: Vec<Value> = Vec::new();
+    for item in &results {
+        if let Some(rec) = item.get("record") {
+            let k_val = rec.get("kind").and_then(|v| v.as_str()).unwrap_or("");
+            let out_val = rec.get("outcome").and_then(|v| v.as_str()).unwrap_or("");
+            if k_val == "failed_attempt" || k_val == "anti_pattern" || out_val == "failed" {
+                warnings.push(json!({
+                    "id": rec.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                    "kind": k_val,
+                    "title": rec.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                    "error_sig": rec.get("error_sig").and_then(|v| v.as_str()).unwrap_or(""),
+                    "outcome": out_val,
+                }));
+            }
+        }
+    }
     json!({
         "results": results, "tokens_used": used,
         "fts_mode": if store.fts { "fts5" } else { "like_trigram" },
-        "scopes": order, "truncated": scored.len() > results.len()
+        "scopes": order, "truncated": scored.len() > results.len(),
+        "warnings": warnings,
     })
 }
 
@@ -896,7 +1166,7 @@ fn open_store(p: &Parsed) -> Result<Store, String> {
 pub fn run(p: &Parsed) -> Option<i32> {
     let verb = p.verb.as_deref()?;
     if !matches!(verb, "put" | "get" | "search" | "list" | "forget" | "review"
-        | "purge" | "export" | "import" | "sync") {
+        | "purge" | "export" | "import" | "sync" | "consolidate" | "record-failure") {
         return None;
     }
     let store = match open_store(p) {
@@ -918,6 +1188,8 @@ pub fn run(p: &Parsed) -> Option<i32> {
         "export" => cmd_export(p, &store),
         "import" => cmd_import(p, &store),
         "sync" => cmd_sync(p, &store),
+        "consolidate" => cmd_consolidate(p, &store),
+        "record-failure" => cmd_record_failure(p, &store, &scope),
         _ => return None,
     })
 }
@@ -1052,5 +1324,115 @@ fn cmd_sync(p: &Parsed, store: &Store) -> i32 {
     match sync(store, &path, log.as_deref()) {
         Ok(res) => util::out(p, &res, None),
         Err(e) => util::fail(p.json, &e, 1),
+    }
+}
+
+fn cmd_consolidate(p: &Parsed, store: &Store) -> i32 {
+    let scope = p.fstr("scope");
+    let threshold = p.fstr("threshold")
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.55);
+    let dry_run = p.fbool("dry-run");
+    let limit = p.fint("limit", 250).max(2) as usize;
+    match store.consolidate(scope.as_deref(), threshold, dry_run, limit) {
+        Ok(res) => {
+            let human = format!(
+                "clusters={} merged={} created={} dry_run={}",
+                res.get("clusters").and_then(|v| v.as_u64()).unwrap_or(0),
+                res.get("merged").and_then(|v| v.as_u64()).unwrap_or(0),
+                res.get("created").and_then(|v| v.as_u64()).unwrap_or(0),
+                dry_run
+            );
+            util::out(p, &res, Some(human))
+        }
+        Err(e) => util::fail(p.json, &e, 1),
+    }
+}
+
+fn cmd_record_failure(p: &Parsed, store: &Store, scope: &str) -> i32 {
+    let mut body = String::new();
+    if let Some(src) = p.fstr("body-file") {
+        match read_body_file(&src) {
+            Ok(t) => body = t,
+            Err(e) => return util::fail(p.json, &e, 1),
+        }
+    }
+    if body.trim().is_empty() {
+        if let Some(b) = p.fstr("body") {
+            body = b;
+        } else if let Some(v) = p.pos(0) {
+            body = v.to_string();
+        }
+    }
+    let body = body.trim().to_string();
+    if body.is_empty() {
+        let msg = "mem record-failure requires --body or --body-file";
+        return util::out_with(p, &json!({"ok": false, "error": msg}), Some(msg.into()), 1);
+    }
+    let title = p.fstr("title").unwrap_or_else(|| "failed attempt".into());
+    let sig = p.fstr("error-sig").or_else(|| p.fstr("sig")).unwrap_or_default();
+    let outcome = p.fstr("outcome").unwrap_or_else(|| "failed".into());
+    let source = p.fstr("source").unwrap_or_else(|| "cli".into());
+    let tags = p.flist("tag");
+    match store.record_failure(scope, &title, &body, &sig, &outcome, &tags, &source) {
+        Ok(res) => {
+            let human = format!(
+                "recorded failure {} sig={}",
+                res.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                sig
+            );
+            util::out(p, &res, Some(human))
+        }
+        Err(e) => util::fail(p.json, &e, 1),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_failure_and_consolidate() {
+        let dir = std::env::temp_dir().join(format!("xt_mem_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_path = dir.join("mem.db");
+        let _ = std::fs::remove_file(&db_path);
+        let store = Store::open(db_path.to_str().unwrap(), Some(false)).unwrap();
+
+        let f = store.record_failure(
+            "global",
+            "Bad TLS flag",
+            "Passing --insecure breaks corporate proxy verification",
+            "ERR_TLS_CERT",
+            "failed",
+            &["tls".into()],
+            "test",
+        ).unwrap();
+        assert_eq!(f["kind"], "failed_attempt");
+        assert_eq!(f["error_sig"], "ERR_TLS_CERT");
+
+        let _ = store.put(
+            "global", "fact", "Auth retry flow",
+            "OAuth token refresh endpoint retry flow enforces circuit breaker",
+            &[], "test", 1.0, false, None,
+        ).unwrap();
+        let _ = store.put(
+            "global", "fact", "Auth retry flow",
+            "OAuth token refresh endpoint retry flow uses jitter timeout",
+            &[], "test", 1.0, false, None,
+        ).unwrap();
+
+        let dry = store.consolidate(Some("global"), 0.5, true, 50).unwrap();
+        assert_eq!(dry["clusters"], 1);
+        assert_eq!(dry["created"], 1);
+
+        let applied = store.consolidate(Some("global"), 0.5, false, 50).unwrap();
+        assert_eq!(applied["clusters"], 1);
+        assert_eq!(applied["merged"], 2);
+
+        let s = search(&store, "oauth", None, 5, 800, None, None, None, false, None, false);
+        assert!(!s["results"].as_array().unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

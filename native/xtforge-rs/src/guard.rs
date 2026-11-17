@@ -15,7 +15,13 @@ pub const DENY_GLOBS: &[&str] = &[
     "*/id_rsa*", "*/shadow", "*/.git-credentials",
 ];
 
-const DEFAULT_ROOTS: &[&str] = &["$HOME", "$HOME/storage/shared", "$HOME/sample-app"];
+const DEFAULT_ROOTS: &[&str] = &[
+    "$HOME", "$HOME/storage/shared", "$HOME/sample-app",
+    "/tmp", "/var/tmp",
+    "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/lib64",
+    "/lib", "/lib64", "/opt",
+    "${PREFIX}/bin", "${PREFIX}/sbin", "${PREFIX}/lib", "${PREFIX}/share",
+];
 
 pub fn expand_vars(p: &str) -> String {
     let chars: Vec<char> = p.chars().collect();
@@ -68,10 +74,30 @@ pub fn roots() -> Vec<PathBuf> {
         Ok(env) if !env.is_empty() => env.split(',').map(|s| s.to_string()).collect(),
         _ => DEFAULT_ROOTS.iter().map(|s| s.to_string()).collect(),
     };
-    raw.iter()
+    let mut out: Vec<PathBuf> = raw.iter()
         .filter(|r| !r.trim().is_empty())
         .map(|r| PathBuf::from(expand_vars(r.trim())))
-        .collect()
+        .filter(|p| {
+            let s = p.to_string_lossy();
+            !s.contains('$') && s != "/" && s != "" && s != "."
+        })
+        .collect();
+    let h = paths::home();
+    let mut cur = h.as_path();
+    while let Some(parent) = cur.parent() {
+        if cur.file_name().map_or(false, |n| n == ".dsh") {
+            if !out.contains(&parent.to_path_buf()) {
+                out.insert(0, parent.to_path_buf());
+            }
+            break;
+        }
+        cur = parent;
+    }
+    let repo = paths::repo_root();
+    if !out.contains(&repo) {
+        out.push(repo);
+    }
+    out
 }
 
 /// Resolve symlinks and `..` as far as the path exists (os.path.realpath).

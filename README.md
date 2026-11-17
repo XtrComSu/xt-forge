@@ -1,159 +1,103 @@
 # xt-forge
 
-Harness-agnostic agent toolkit for Termux/Android. Two implementations of one
-tool surface: a Python reference (`xtforge/`) and a native Rust CLI
-(`native/xtforge-rs/`), plus an MCP server and slash-command passthrough.
+A fast, harness-agnostic agent toolkit built as a three-tier runtime: a **Rust native CLI** (`native/xtforge-rs/`) for sub-5ms storage, indexing, and binary triage; a **Go concurrency hub** (`native/xtforge-go/`) for stdio MCP gateways, LSP bridges, and container unpacking; and a **zero-dependency Python reference core** (`xtforge/`) with full parity fallback.
 
-**Version:** `0.3.0-Damascus`. The root `VERSION` file is the single source of
-truth (`name= / version= / codename=`) — read by `xtforge/version.py` and by
-`xtforge version`.
+**Version:** `0.4.0-Damascus`. The root `VERSION` file is the single source of truth (`name= / version= / codename=`), read by `xtforge/version.py` and `xtforge version`.
 
-## What's inside
+![XT-Forge 0.4.0 Hybrid Execution Architecture](docs/assets/architecture-rust-go.png)
 
-- **cli** — unified dispatcher (`xtforge <group> <verb>`) + slash passthrough
-- **mcp** — stdio MCP server exposing the full tool surface (51 tools)
-- **taste** — deterministic preference learning: `taste learn|ingest|search|show|
-  review|forget|export|import|inject|stats|prune|repair`, contradictions flagged
-  not overwritten. Drives the `/taste` command and system-block injection in the
-  OpenCode plugin (`plugins/xt-native/`, installed to
-  `~/.config/opencode/plugins/xt-native/`)
-- **plugin** — the OpenCode plugin is source in this repo (`plugins/xt-native/`)
-  and `xtforge plugin install|status|uninstall|manifest` puts it on a machine:
-  install copies the source, stamps the paths the plugin needs and registers
-  it in the OpenCode config; `status` reports drift between the installed copy
-  and the source. `xtforge sync` asks the same code to do the work
-- **repos** — bundled top-repos catalog, offline (list/search/show/domains/suggest/plan/stats/export)
-- **flash** — sub-50ms key/value notes (#tags, TTLs, pins)
-- **mem** — universal SQLite WAL + FTS5 memory: hybrid BM25 + embedding search,
-  typed links, and a review queue for staged candidates
-- **goal** — bounded autonomous rounds with hard stop conditions, plus the
-  `<goal-done>` completion protocol: evidence is replayed and re-checked, and
-  unproven "done" claims are rejected (5/5 fabrications caught in tests)
-- **build** — staged pipeline: schema, DAG, per-phase fresh context, handoffs
-- **route** — bounded filesystem/process inspection (tree/find/grep/peek/…),
-  plus ranked grep and query-aware context packing (`route context --query`)
-- **code** — structure extraction: `code symbols|outline|refs`, real AST for
-  Python and conservative declaration heuristics elsewhere
-- **scan** — static safety scan: `scan secrets|patterns|deps`; matched values
-  are masked unless you pass `--reveal`
-- **re** — binary inspection and native RE: `re info|needed|sections|symbols|
-  strings|entropy|pack|ioc|disasm|graph`. `ioc` extracts indicators with
-  credentials masked; `graph` maps imports, exports and call sites — the
-  native alternative to a 200-tool RE server
-- **docs** — live library documentation (`docs search|resolve|show`), from
-  Context7's HTTP API as one verb instead of two MCP schemas
-- **intel** — keyless threat intel (`intel ip|domain|cve|kev|search|hash`):
-  Shodan InternetDB, GreyNoise, NVD, EPSS, CISA KEV, CIRCL and native DNS in
-  one verb, including SPF/DMARC spoofability. VirusTotal and MalwareBazaar
-  join automatically when `XT_VT_KEY` / `XT_ABUSECH_KEY` are set
-- **hub** — HuggingFace (`hub models|datasets|show|files`): what exists, how
-  big each quantisation is, what a model is based on
-- **codec** — hash, encode/decode, round-trip check, entropy, and `inspect`
-  that identifies JWT, PEM, UUID, semver, timestamps, URLs and more
-- **recon** — scoped findings ledger (`new note finding list report stats`)
-  whose report regenerates byte-identical from the ledger
-- **eval** — benchmark runs (`record list show compare report`); `compare`
-  calls regressions by direction and exits non-zero, so a bench can gate a
-  release
-- **skills** — 67 agent skills in `~/.config/opencode/skills/`: 7 for this
-  toolkit, 21 software, 8 engineering-process, 7 AI/ML and 24 harvested
-  security skills (Apache-2.0, licence-clean). One skill per job, enforced by
-  the generators. Harvest record and context budget: `docs/SKILLS.md`
-- **integrations** — MCP/plugin survey with decisions in `docs/INTEGRATIONS.md`.
-  Installed `context7` (2 tools, live library docs). Tool schemas cost context
-  every step, so the rule is "does this earn its schema?" — which rejected a
-  200-tool RE server in favour of folding its capability into `re`
-- **loop** — scheduled work with a real grammar: `xtforge loop parse|normalize|
-  markers|next|policy`, plus `/loop`, `/loops`, `/loop-stop` in the plugin.
-  Self-paced iterations end in `<loop-next>`/`<loop-done>`; a missing marker
-  gets one safety check, not a guess
-- **compress** — L0–L3 squeezers that never drop error lines
-- **calibrate** — reboot recalibration (WAL checkpoint, expiry purge, caps)
-- **guard** — write-op safety gates (allowlist roots, confirm tokens)
+## Documentation
 
-## Planning artifacts
+Start with the walkthrough guide if this is your first time running `xt-forge`, or jump straight to the deep dive you need:
 
-- **`catalog/top-repos/`** — rebuilt corpus: 4,810 unique repos across 65
-  sections, scored and grouped by CS domain. Start with `ANALYSIS.md` or the
-  short `TOP-IDEAS.md`.
-- **`docs/plan-top-repos-learning.md`** — 12-round proposal for turning the
-  catalog into capability families, with acceptance criteria and open questions.
-- **`docs/OPENCODE-NATIVE-TASTE-LOOP.md`** — native OpenCode design for taste
-  learning, `/goal` and `/loop`, including budgets, verification and privacy.
+- **[Getting Started Guide](docs/GUIDE.md)**: installation, `bin/xtforge` routing, everyday commands, `XT_PERM_MODE` (`explore|ask|auto`), and troubleshooting.
+- **[Rust + Go Architecture](docs/ARCHITECTURE-RUST-GO.md)**: dispatcher priority (`Rust -> Go Hub -> Python`), zero-dependency binaries, shared SQLite schemas (`mem.db`, `code_graph.db`, `re_overlay.db`), and spill caching.
+- **[Reverse Engineering Workbench](docs/RE-WORKBENCH.md)**: stateful `re_overlay.db` annotations, block Shannon entropy, single-byte XOR recovery, native Mach-O headers, Electron ASAR, HAR/SAZ netcaps, APK triage, and confirm-gated dynamic tracing.
+- **[MCP Gateway and LLM Steering](docs/MCP-GATEWAY-AND-STEERING.md)**: 4-tool `--meta` gateway vs 56-tool pinned mode, `mcp audit` and SHA-256 rug-pull locking, `mcp proxy`, negative memory (`failed_attempt`), and `goal check` drift detection.
+- **[0.4.0 Release Preview Notes](docs/RELEASE-0.4.0.md)**: changelog summary, local preview artifact contents, and verification checklist.
+
+## Key Capabilities in 0.4.0
+
+- **Three-tier execution**: `./bin/xtforge` automatically routes hot verbs to `xtforge-native` (Rust), gateway/network/container verbs to `xtforge-hub` (Go), and everything else to Python stdlib. Force pure Python anytime with `XT_FORCE_PYTHON=1`.
+- **Token-lean MCP server (`adapters/mcp/server.py`)**: keeps all `56` pinned tools intact by default, or runs in `--meta` mode exposing just `xt_discover`, `xt_schema`, `xt_call`, and `xt_batch` (`0.90 KB` vs `15.1 KB`, `94.1%` smaller upfront prompt footprint).
+
+![MCP Prompt Schema Overhead](docs/assets/mcp-token-savings.png)
+
+- **Security and anti-drift steering**: `mcp audit`, `scan mcp`, and `mcp trust --trust-on-first` detect prompt injections and schema rug-pulls; `guard mode` (`explore|ask|auto`) enforces read-only exploration vs gated writes with JSONL audit logs; `mem record-failure` + `mem consolidate` + `goal check` stop repeated blind alleys.
+
+![Goal Check and Negative Memory](docs/assets/goal-vibe-check.gif)
+
+- **Symbol-aware navigation and RE workbench**: `code index` + `code graph` + `route context --symbols` pull structural callers and callees instead of raw grep noise, while `re` covers ELF/PE/Mach-O, XOR recovery, ASAR, HAR/SAZ, APK, and stateful `re_overlay.db` renames/comments.
+
+![RE Workbench Demo](docs/assets/re-workbench.gif)
+
+## Core Tool Surface
+
+- **cli**: unified dispatcher (`xtforge <group> <verb>`) + slash command passthrough
+- **mcp**: stdio MCP server (`56` pinned tools or 4-tool `--meta` gateway), `mcp audit`, `mcp trust`, `mcp proxy`, `mcp status|advice`
+- **mem & flash**: sub-50ms `flash` notes + SQLite WAL/FTS5 v3 `mem` store with `record-failure`, `consolidate`, typed links, and `knowledge`
+- **code & route**: AST/regex `code_graph.db` (`code index|graph|symbols|outline|refs|lsp`) and symbol-aware `route context --symbols`
+- **goal & loop**: bounded autonomous execution with `goal check` drift detection, `<goal-done>` evidence replay (`goal verify`), and `loop schedule|list|stop|status`
+- **re & scan**: `re info|sections|symbols|strings|entropy|annotate|asar|netcap|apk|decompile|trace` plus `scan secrets|patterns|deps|mcp|injection`
+- **repos, docs, intel, hub, eval, recon**: offline 4,810-repo catalog, library docs, keyless threat intel, HuggingFace metadata, benchmark gates, and reproducible findings ledgers
 
 ## Layout
 
-```
-xt_forge/
-├── VERSION                  # name=xt-forge / version= / codename=
+```text
+xt-forge/
+├── VERSION                  # name=xt-forge / version=0.4.0 / codename=Damascus
 ├── bin/
-│   ├── xtforge              # portable self-locating launcher (this repo)
-│   └── xtforge-termux       # original absolute-path launcher (reference)
-├── xtforge/                 # Python reference implementation
-│   ├── cli/  core/  adapters/
-│   └── version.py           # reads VERSION from repo root
-├── native/xtforge-rs/       # Rust CLI (source + bench harness)
-│   ├── src/                 # args calibrate compress flash guard main mem paths pyjson route util
-│   └── bench-home/ bench.jsonl
-├── adapters/mcp/server.py   # MCP server (44 tools) + snippets/ for new surfaces
-├── adapters/generic/        # AGENTS.md template for shell-only harnesses
-├── plugins/xt-native/       # the OpenCode plugin: source, its own tests
-│   ├── index.ts  package.json
-│   └── test/                # node --test plugins/xt-native/test/
-├── catalog/top-repos/       # 4,810-repo corpus: index.json, ANALYSIS.md, TOP-IDEAS.md
-├── scripts/                 # catalog_top_repos, analyze_catalog, validate_catalog,
-│                            # scaffold_tool, bench_mem_recall, bench_context_pack,
-│                            # bench_secret_scan
-├── tests/                   # contract tests: python3 -m unittest discover -s tests
-├── docs/                    # plan-top-repos-learning.md, OPENCODE-NATIVE-TASTE-LOOP.md, specs/
-├── data/                    # live-store snapshot from the origin phone
-│   ├── mem.db  mem.db-wal   # SQLite WAL + FTS5 store
-│   ├── flash/  cache/  runs/
-└── AGENTS-BOOTSTRAP.md      # generated agent bootstrap doc (origin)
+│   ├── xtforge              # portable self-locating launcher (Rust -> Go -> Python)
+│   └── xtforge-termux       # original Termux reference launcher
+├── native/
+│   ├── xtforge-rs/          # Rust native CLI (SQLite WAL/FTS5, code_graph, re, scan)
+│   └── xtforge-go/          # Go concurrency hub (mcp --meta/proxy/audit, lsp, re, research, loop)
+├── xtforge/                 # Zero-dependency Python stdlib implementation (full parity)
+├── adapters/
+│   ├── mcp/server.py        # 56-tool default MCP server + --meta 4-tool mode
+│   └── generic/             # AGENTS.md template for shell-only harnesses
+├── plugins/xt-native/       # OpenCode plugin + Node tests
+├── catalog/top-repos/       # Offline 4,810-repo catalog
+├── docs/                    # Guides, architecture deep dives, and docs/assets/ visuals
+└── tests/                   # Contract & integration test suites
 ```
 
-## Run
+## Quick Start
 
 ```sh
-./bin/xtforge version
-./bin/xtforge flash set "note #demo"
-./bin/xtforge mem search "WAL" --k 3 --json
-./bin/xtforge route tree .
-./bin/xtforge repos suggest memory --limit 5
-./bin/xtforge repos plan mem0ai/mem0 --ns mem --tool-verb recall
-./bin/xtforge code symbols xtforge/core/mem/search.py
-./bin/xtforge route context . --query "where is the write guard"
-./bin/xtforge scan secrets . --limit 20
-./bin/xtforge re info /bin/ls
-./bin/xtforge plugin install     # ship the OpenCode plugin
-./bin/xtforge plugin status      # installed? registered? still current?
+# Check active version, runtimes, and store health
+./bin/xtforge version --json
+./bin/xtforge doctor --json
+
+# Index call/import symbols and pack symbol-aware context
+./bin/xtforge code index .
+./bin/xtforge route context . --query "write guard" --symbols
+
+# Record a negative lesson and search with failure warnings
+./bin/xtforge mem record-failure --title "Skip TLS verify" --error-sig ERR_TLS --body "Fails pinning check"
+./bin/xtforge mem search "TLS" --k 3 --json
+
+# Audit an MCP schema and start the 4-tool meta gateway
+./bin/xtforge mcp audit adapters/mcp/server.py
+./bin/xtforge mcp serve --meta
+
+# Inspect binaries safely
+./bin/xtforge re info /bin/ls --json
+./bin/xtforge re entropy /bin/ls --block 4096 --json
+./bin/xtforge re strings sample.bin --xor --json
+```
+
+## Build & Run Tests
+
+```sh
+# Optional: rebuild native tiers (zero external Go/Rust network dependencies)
+cd native/xtforge-rs && cargo test && cargo build --release && cd ../..
+cd native/xtforge-go && go test -race ./... && go build -ldflags="-s -w" -o xtforge-hub ./cmd/xtforge-hub && cd ../..
+
+# Full Python contract test suite & benchmark probes
 python3 -m unittest discover -s tests
-node --test plugins/xt-native/test/            # the plugin's own tests
-python3 scripts/bench_mem_recall.py && python3 scripts/bench_context_pack.py \
-  && python3 scripts/bench_secret_scan.py
+python3 test_artifact.py && python3 test_dedup_matrix.py && python3 test_knowledge.py && python3 test_recall.py
+python3 scripts/bench_mem_recall.py && python3 scripts/bench_context_pack.py && python3 scripts/bench_secret_scan.py
 ```
 
-Native build (optional, faster): `cd native/xtforge-rs && cargo build --release`.
-The launcher prefers `target/release/xtforge-native` when present and falls
-back to `python3 -m xtforge.cli`; `XT_FORCE_PYTHON=1` forces Python. If any
-tool invocation fails because of a stripped harness PATH, set
-`export PATH="/data/data/com.termux/files/usr/bin:/data/data/com.termux/files/home/bin:$PATH"`
-first.
-
-## Data
-
-Runtime state lives in `$XT_HOME` (default `~/.xt-forge`): `mem.db` (+WAL),
-`flash/`, `cache/`, `runs/`. `data/` here is a snapshot of the live store from
-the origin phone — copy it to `~/.xt-forge` to resume identical state, or point
-the launcher at it directly:
-
-```sh
-XT_HOME="$PWD/data" ./bin/xtforge mem search "campaign" --k 5
-```
-
-## Notes
-
-- Python package is stdlib-only (no pip deps).
-- `native/xtforge-rs` needs a Rust toolchain to build; source syncs are manual.
-- Slash commands (`/m` `/mg` `/ml` `/mp` `/mx` `/mc` `/mw` `/mu` `/help`) run
-  via `xtforge slash` and need no model call.
+Native dispatch runs automatically when `native/xtforge-rs/target/release/xtforge-native` and `native/xtforge-go/xtforge-hub` exist. Set `XT_FORCE_PYTHON=1` to force pure-Python execution, `XT_NATIVE_HUB=0` to disable only the Go hub, or `XT_PERM_MODE=explore|ask|auto` to lock write safety globally.

@@ -97,10 +97,11 @@ class TestCliEval(unittest.TestCase):
         else:
             os.environ["XT_HOME"] = self._old
 
-    def run_cli(self, *args, expect_ok: bool = True):
+    def run_cli(self, *args, expect_ok: bool = True, input_data: str = ""):
         proc = subprocess.run(
             [sys.executable, "-m", "xtforge.cli", "eval", *args],
-            capture_output=True, text=True, cwd=str(ROOT), timeout=60)
+            capture_output=True, text=True, cwd=str(ROOT), timeout=60,
+            input=input_data)
         if expect_ok:
             self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
         return proc

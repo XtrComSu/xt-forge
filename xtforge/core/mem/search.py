@@ -223,7 +223,20 @@ def search(store: Store, query: str, scopes: list[str] | None = None, k: int = 5
         results.append({"record": rec, "line": line, "tokens": cost})
         if len(results) >= k:
             break
+    warnings = [
+        {
+            "id": item["record"].get("id", ""),
+            "kind": item["record"].get("kind", ""),
+            "title": item["record"].get("title", ""),
+            "error_sig": item["record"].get("error_sig") or "",
+            "outcome": item["record"].get("outcome") or "",
+        }
+        for item in results
+        if item["record"].get("kind") in ("failed_attempt", "anti_pattern")
+        or item["record"].get("outcome") == "failed"
+    ]
     return {"results": results, "tokens_used": used,
             "fts_mode": "fts5" if store.fts else "like_trigram",
             "hybrid": use_hybrid, "embed_mode": embedder.backend,
-            "scopes": order, "truncated": len(scored) > len(results)}
+            "scopes": order, "truncated": len(scored) > len(results),
+            "warnings": warnings}

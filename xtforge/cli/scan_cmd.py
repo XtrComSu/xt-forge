@@ -33,8 +33,9 @@ def cmd_re(args):
     verb = args.re_verb
     path = args.path or args.value
 
-    # Handle 'pe' subverb routing: e.g. xtforge re pe info <path>
+    # Handle 'pe' and 'annotate' subverb routing: e.g. xtforge re annotate rename <path>
     pe_subverb = "info"
+    ann_subverb = "list"
     if verb == "pe":
         if args.value in ("info", "sections", "imports", "exports", "tls"):
             pe_subverb = args.value
@@ -42,6 +43,14 @@ def cmd_re(args):
             path = args.path or (extra[0] if extra else None)
         else:
             pe_subverb = "info"
+            path = args.path or args.value
+    elif verb == "annotate":
+        if args.value in ("rename", "comment", "type", "list", "export"):
+            ann_subverb = args.value
+            extra = getattr(args, "extra", [])
+            path = args.path or (extra[0] if extra else None)
+        else:
+            ann_subverb = "list"
             path = args.path or args.value
 
     if not path:
@@ -182,6 +191,31 @@ def cmd_re(args):
         elif verb == "crash":
             from ..core.re.crash import parse_crash
             res = parse_crash(path)
+        elif verb == "annotate":
+            from ..core.re.annotate import annotate
+            res = annotate(
+                action=ann_subverb,
+                binary=path,
+                rva=getattr(args, "rva", None) or 0,
+                name=getattr(args, "name", None) or "",
+                orig=getattr(args, "orig", None) or "",
+                comment=getattr(args, "comment", None) or "",
+                type_decl=getattr(args, "type_decl", None) or "",
+                confidence=float(getattr(args, "confidence", 1.0) or 1.0),
+                fmt=getattr(args, "format", None) or "json",
+            )
+        elif verb in ("asar", "netcap", "apk", "decompile", "trace"):
+            from ..core.re import runtimes as rt
+            if verb == "asar":
+                res = rt.inspect_asar(path, grep=getattr(args, "grep", None) or "", limit=args.limit)
+            elif verb == "netcap":
+                res = rt.inspect_netcap(path, reveal=bool(getattr(args, "reveal", False)), limit=args.limit)
+            elif verb == "apk":
+                res = rt.inspect_apk(path)
+            elif verb == "decompile":
+                res = rt.decompile(path, target=getattr(args, "symbol", None) or getattr(args, "target", None) or "main")
+            else:
+                res = rt.trace_binary(path, confirm=getattr(args, "confirm", None))
         else:
             return _out(args, {"ok": False, "error": f"unknown verb: {verb}"},
                         f"error: unknown verb {verb}", code=2)
@@ -357,6 +391,10 @@ def cmd_re(args):
         for item in res.get("imports", [])[:6]:
             lines.append(f"  import  {item['symbol']}")
         human = "\n".join(lines)
+    elif verb in ("annotate", "asar", "netcap", "apk", "decompile", "trace"):
+        human = res.get("script") or res.get("code") or (
+            f"{verb} ok={res.get('ok')} count={res.get('count', len(res.get('files', res.get('annotations', []))))}"
+        )
     else:
         human = (f"entropy {res['entropy']}  {res['verdict']}  "
                  f"({res['bytes']} bytes)")
@@ -374,6 +412,27 @@ def cmd_scan(args):
     reveal = bool(getattr(args, "reveal", False))
     glob = getattr(args, "glob", None)
     target = Path(raw)
+
+    if verb == "mcp":
+        import json as _json
+        from ..core import mcp_audit as auditmod
+        from ..core.route import guard
+        try:
+            canon = guard.read_guard(target)
+        except guard.Denied as exc:
+            return _out(args, {"ok": False, "err": f"{exc.code}: {exc.reason}"}, f"{exc.code}: {exc.reason}", code=1)
+        text = canon.read_text(encoding="utf-8", errors="replace")
+        try:
+            doc = _json.loads(text)
+            tools = doc.get("tools", doc) if isinstance(doc, dict) else doc
+            if isinstance(tools, dict):
+                tools = [tools]
+        except Exception:
+            tools = [{"name": canon.name, "description": text}]
+        rep = auditmod.evaluate_tools(canon.name, list(tools))
+        rep["path"] = str(canon)
+        return _out(args, rep, f"mcp scan: ok={rep['ok']} findings={len(rep['findings'])}",
+                    code=0 if rep["ok"] else 1)
 
     if verb == "deps":
         if target.is_file():

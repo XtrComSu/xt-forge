@@ -22,6 +22,8 @@ survive the shell round-trip.
 
 | Task | Command |
 | --- | --- |
+| Search everywhere | `<bin> search "X"` (code + memory + web + CVEs + tools) |
+| On-demand tools (CAD/photo/OCR) | `<bin> tool list`, `<bin> tool run SERVER TOOL '{"arg": "val"}'` |
 | Where is X? | `<bin> route context . --query "X" --token-budget 1200` |
 | Find a string | `<bin> route grep . --pattern "X" --rank --limit 10` |
 | Symbols / callers | `<bin> code symbols .`, `code refs NAME .`, `code outline FILE` |
@@ -39,6 +41,7 @@ survive the shell round-trip.
 | Prompt injection scan | `<bin> scan injection FILE` (detects prompt-injection attempts) |
 | System context prompt | `<bin> prompt inject` (renders enforced taste + agent directives) |
 | Long log | `<bin> compress L1 --path FILE` (never drops error lines) |
+| MCP inventory | `<bin> mcp status` (mounted servers + cost), `mcp advice` (proxy worth it?), `mcp status --probe` (measure for real) |
 | Health | `<bin> doctor`, `<bin> sync --dry-run`, `<bin> tools status` |
 | After reboot | `<bin> calibrate` |
 

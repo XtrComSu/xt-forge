@@ -153,6 +153,8 @@ def rank_lines(root: Path, query: str, limit: int = 20,
     for entry in ref.walk_py(root, max_depth=8, limit=MAX_FILES_SCANNED):
         if entry.get("dir"):
             continue
+        if entry.get("size", 0) > 2_000_000:
+            continue
         path = Path(entry["path"])
         if guard.is_denied_name(str(path)):
             continue
@@ -191,7 +193,7 @@ def _windows(path: Path, lines: list[str], center: int, radius: int) -> str:
 
 def pack(root: str, query: str, token_budget: int = 1200,
          file_limit: int = 12, window: int = 2,
-         max_matches: int = 40) -> dict[str, Any]:
+         max_matches: int = 40, use_symbols: bool = False) -> dict[str, Any]:
     """Budget-packed context around the lines that answer the query."""
     try:
         base = guard.read_guard(root)
@@ -205,6 +207,31 @@ def pack(root: str, query: str, token_budget: int = 1200,
         return tools.envelope(False, err="empty_query")
 
     candidates = rank_lines(base, query, limit=max_matches)
+    graph_hits = 0
+    if use_symbols:
+        from ..code.graph import query_graph
+        seen_pairs = {(c["path"], c["line"]) for c in candidates}
+        for tok in tokens[:4]:
+            if len(tok) < 3:
+                continue
+            gres = query_graph(tok, root=base, depth=1)
+            for item in (gres.get("definitions") or [])[:4] + (gres.get("callers") or [])[:4]:
+                fpath = item.get("file") or ""
+                lineno = int(item.get("line") or 0)
+                if fpath and lineno > 0 and (fpath, lineno) not in seen_pairs:
+                    seen_pairs.add((fpath, lineno))
+                    try:
+                        text_ln = Path(fpath).read_text(encoding="utf-8", errors="replace").splitlines()[lineno - 1]
+                    except (OSError, IndexError):
+                        text_ln = tok
+                    candidates.append({
+                        "path": fpath, "line": lineno,
+                        "text": text_ln.strip()[:200], "score": 6.5,
+                        "error_line": False,
+                    })
+                    graph_hits += 1
+        candidates.sort(key=lambda m: (-m["score"], m["path"], m["line"]))
+        candidates = candidates[:max_matches]
     header = [f"ROOT {base}", f"QUERY {query.strip()}", f"MATCHES {len(candidates)}"]
 
     # Group candidate windows per file, keeping only the best centre per
@@ -280,4 +307,6 @@ def pack(root: str, query: str, token_budget: int = 1200,
         estimate = _payload_tokens(data)
     data["estimated_tokens"] = estimate
     data["truncated"] = bool(candidates) and not kept
+    if use_symbols:
+        data["symbol_graph_hits"] = graph_hits
     return tools.envelope(True, data)

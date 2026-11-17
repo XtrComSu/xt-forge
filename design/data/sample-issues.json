@@ -1,0 +1,10 @@
+{
+  "_demo": true,
+  "_note": "Demonstration data only. Never load in production.",
+  "issues": [
+    {"id": "XT-104", "title": "Parser drops last row on truncated XER", "severity": "high", "state": "open", "age_days": 3},
+    {"id": "XT-098", "title": "Report totals differ between PDF and deck", "severity": "critical", "state": "investigating", "age_days": 11},
+    {"id": "XT-091", "title": "Timezone assumed UTC in calendar math", "severity": "medium", "state": "open", "age_days": 24},
+    {"id": "XT-077", "title": "Slow query on large import", "severity": "low", "state": "closed", "age_days": 41}
+  ]
+}

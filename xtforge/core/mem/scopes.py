@@ -12,6 +12,7 @@ GLOBAL = "global"
 KINDS = (
     "fact", "preference", "decision", "procedure", "snippet",
     "artifact_ref", "error_pattern", "person", "device",
+    "failed_attempt", "anti_pattern",
 )
 VALID_KINDS = frozenset(KINDS)
 

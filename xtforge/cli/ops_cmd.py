@@ -42,6 +42,22 @@ def cmd_goal(args):
         return _out(args, res, human,
                     code=0 if res.get("ok") else 1)
 
+    if verb == "check":
+        from ..core.goal import check as checkmod
+        criteria = [c.strip() for c in (args.criteria or "").split(";") if c.strip()]
+        res = checkmod.check_progress(
+            objective=objective,
+            run_id=args.run_id,
+            plan_text=getattr(args, "body", "") or "",
+            criteria=criteria or None,
+            root=getattr(args, "workdir", ".") or ".",
+            interactive=bool(getattr(args, "interactive", False)),
+        )
+        lines = [f"status={res['status']} touched={res['touched_count']} warnings={res['negative_warnings']}"]
+        for f in res.get("findings") or []:
+            lines.append(f"  [{f['severity']}] {f['kind']}: {f.get('message') or f.get('title')}")
+        return _out(args, res, "\n".join(lines), code=0 if res.get("ok") else 1)
+
     if verb == "status" and objective:
         verb = "run"
     if verb in {"run", "start"}:
@@ -142,6 +158,33 @@ def cmd_loop(args):
         }
         human = "\n".join(f"{k:<18} {v}" for k, v in payload.items())
         return _out(args, payload, human)
+
+    if verb == "schedule":
+        from ..core.loop import daemon as loopd
+        interval = args.value or getattr(args, "interval", None) or "5m"
+        cmd_text = getattr(args, "cmd", None) or args.body or ""
+        if not cmd_text:
+            return _out(args, {"ok": False, "error": "loop schedule requires --cmd"},
+                        "error: loop schedule requires --cmd", code=2)
+        res = loopd.schedule_task(interval, cmd_text)
+        return _out(args, res, f"scheduled {res.get('task', {}).get('id', '')} ({interval})" if res.get("ok") else res.get("err", ""),
+                    code=0 if res.get("ok") else 1)
+
+    if verb == "list":
+        from ..core.loop import daemon as loopd
+        res = loopd.list_tasks()
+        lines = [f"{t['id']}  {t['interval']:<6} {t['cmd']}" for t in res.get("tasks") or []]
+        return _out(args, res, "\n".join(lines) or "(no scheduled loops)")
+
+    if verb == "stop":
+        from ..core.loop import daemon as loopd
+        tid = args.value or getattr(args, "id", None) or ""
+        if not tid:
+            return _out(args, {"ok": False, "error": "loop stop requires <id>"},
+                        "error: loop stop requires <id>", code=2)
+        res = loopd.stop_task(tid)
+        return _out(args, res, f"stopped {tid}" if res.get("ok") else f"not found: {tid}",
+                    code=0 if res.get("ok") else 1)
 
     return _out(args, {"ok": False, "error": f"unknown verb: {verb}"},
                 f"error: unknown verb {verb}", code=2)

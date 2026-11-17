@@ -689,7 +689,93 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}], "isError": is_error}
 
 
-def _handle(message: dict[str, Any]) -> dict[str, Any] | None:
+META_TOOLS = [
+    {
+        "name": "xt_discover",
+        "description": "Search XT-Forge tools & CLI capabilities by keyword (~1.4KB gateway mode).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}, "limit": {"type": "integer", "default": 12}},
+        },
+    },
+    {
+        "name": "xt_schema",
+        "description": "Inspect the full JSON inputSchema for one named XT-Forge tool.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "xt_call",
+        "description": "Execute any XT-Forge MCP tool or CLI subcommand through the meta-gateway.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "arguments": {"type": "object"},
+                "argv": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    },
+    {
+        "name": "xt_batch",
+        "description": "Run up to 10 XT-Forge calls in one round trip and return clipped/spilled results.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"calls": {"type": "array", "items": {"type": "object"}}},
+            "required": ["calls"],
+        },
+    },
+]
+
+_TOOL_MAP = {t["name"]: t for t in TOOLS}
+
+
+def _handle_meta_call(name: str | None, arguments: dict[str, Any]) -> dict[str, Any]:
+    from xtforge.core.compress import clip_or_spill
+    if name == "xt_discover":
+        q = str(arguments.get("query") or "").lower().strip()
+        lim = int(arguments.get("limit") or 12)
+        matches = [
+            {"name": t["name"], "description": t["description"]}
+            for t in TOOLS
+            if not q or q in t["name"].lower() or q in t["description"].lower()
+        ][:lim]
+        return {"content": [{"type": "text", "text": json.dumps({
+            "ok": True, "count": len(matches), "total_catalog": len(TOOLS), "tools": matches,
+        })}], "isError": False}
+    if name == "xt_schema":
+        tname = str(arguments.get("name") or "")
+        t = _TOOL_MAP.get(tname)
+        if not t:
+            return {"content": [{"type": "text", "text": json.dumps({"ok": False, "err": f"unknown tool: {tname}"})}], "isError": True}
+        return {"content": [{"type": "text", "text": json.dumps({"ok": True, "tool": t})}], "isError": False}
+    if name == "xt_call":
+        target = str(arguments.get("name") or "")
+        if target in _TOOL_MAP:
+            return _call_tool(target, arguments.get("arguments") or {})
+        argv = list(arguments.get("argv") or [])
+        if not argv and target:
+            argv = target.split(".", 1) if "." in target else target.split(" ", 1)
+        if argv:
+            text, is_err = _run(_xtforge_cmd() + argv + ["--json"])
+            return {"content": [{"type": "text", "text": text}], "isError": is_err}
+        return {"content": [{"type": "text", "text": json.dumps({"ok": False, "err": f"unknown tool or empty argv: {target}"})}], "isError": True}
+    if name == "xt_batch":
+        calls = list(arguments.get("calls") or [])[:10]
+        outs = []
+        for c in calls:
+            if isinstance(c, dict):
+                res = _handle_meta_call("xt_call", c)
+                txt = (res.get("content") or [{}])[0].get("text", "")
+                outs.append(clip_or_spill({"output": txt, "isError": res.get("isError", False)}))
+        return {"content": [{"type": "text", "text": json.dumps({"ok": True, "results": outs})}], "isError": False}
+    raise RpcError(-32601, f"unknown meta tool: {name}")
+
+
+def _handle(message: dict[str, Any], meta_mode: bool = False) -> dict[str, Any] | None:
     method = message.get("method")
     msg_id = message.get("id")
     if not isinstance(method, str) or msg_id is None:
@@ -701,18 +787,22 @@ def _handle(message: dict[str, Any]) -> dict[str, Any] | None:
             "protocolVersion": requested if isinstance(requested, str)
             else PROTOCOL_FALLBACK,
             "capabilities": {"tools": {"listChanged": False}},
-            "serverInfo": {"name": "xt-forge", "version": _version()},
+            "serverInfo": {"name": "xt-forge" + ("-meta" if meta_mode else ""), "version": _version()},
         }
     elif method == "ping":
         result = {}
     elif method == "tools/list":
+        src = META_TOOLS if meta_mode else TOOLS
         result = {"tools": [{"name": tool["name"],
                              "description": tool["description"],
                              "inputSchema": tool["inputSchema"]}
-                            for tool in TOOLS]}
+                            for tool in src]}
     elif method == "tools/call":
         params = message.get("params") or {}
-        result = _call_tool(params.get("name"), params.get("arguments") or {})
+        if meta_mode:
+            result = _handle_meta_call(params.get("name"), params.get("arguments") or {})
+        else:
+            result = _call_tool(params.get("name"), params.get("arguments") or {})
     elif method == "shutdown":
         result = None
     else:
@@ -720,7 +810,9 @@ def _handle(message: dict[str, Any]) -> dict[str, Any] | None:
     return {"jsonrpc": "2.0", "id": msg_id, "result": result}
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    cli_args = list(sys.argv[1:] if argv is None else argv)
+    meta_mode = "--meta" in cli_args
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -736,7 +828,7 @@ def main() -> int:
         if message.get("method") == "exit":
             break
         try:
-            reply = _handle(message)
+            reply = _handle(message, meta_mode=meta_mode)
         except RpcError as exc:
             reply = {"jsonrpc": "2.0", "id": message.get("id"),
                      "error": {"code": exc.code, "message": exc.message}}

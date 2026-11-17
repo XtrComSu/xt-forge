@@ -54,7 +54,7 @@ const EXPECTED = new Set([
 const ENFORCED = "python|ruff linting python"
 const ENFORCED_BLOCK =
   '<taste source="xt-forge" enforcement="enforced only">\n' +
-  '  <rule category="python" confidence="0.88">use ruff for linting Python</rule>\n' +
+  '  <rule category="python" confidence="0.88">always use ruff for linting Python</rule>\n' +
   "</taste>"
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

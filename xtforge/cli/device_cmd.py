@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 from .common import _out, _store
 
@@ -75,7 +76,8 @@ def _cmd_route_shortcut(args, shortcuts):
             result = packmod.pack(args.path or ".", query,
                                   token_budget=args.token_budget,
                                   file_limit=args.file_limit,
-                                  window=max(1, args.context))
+                                  window=max(1, args.context),
+                                  use_symbols=bool(getattr(args, "symbols", False)))
         else:
             result = shortcuts.route_context(args.path or ".", args.token_budget,
                                              args.file_limit)
@@ -162,6 +164,41 @@ def cmd_code(args):
                     lines.append(f"    {err['snippet']}")
             human = "\n".join(lines)
         return _out(args, info, human, code=0 if info.get("ok") else 1)
+    if verb == "index":
+        from ..core.code import graph as cg
+        target_path = args.path or args.value or "."
+        db_ov = Path(args.graph_db) if getattr(args, "graph_db", None) else None
+        info = cg.index_workspace(target_path, db_path=db_ov)
+        human = f"indexed {info['files_seen']} files ({info['total_symbols']} symbols, {info['total_edges']} edges) in {info['ms']}ms"
+        return _out(args, info, human)
+    if verb == "graph":
+        from ..core.code import graph as cg
+        sym = args.name or args.value
+        if not sym:
+            return _out(args, {"ok": False, "error": "code graph needs <symbol>"},
+                        "error: code graph needs <symbol>", code=2)
+        db_ov = Path(args.graph_db) if getattr(args, "graph_db", None) else None
+        info = cg.query_graph(sym, root=args.path or ".", depth=getattr(args, "depth", 2), db_path=db_ov)
+        lines = [f"defs={len(info['definitions'])} callers={len(info['callers'])} callees={len(info['callees'])}"]
+        for d in info["definitions"][:6]:
+            lines.append(f"  def {d['file']}:{d['line']} {d['signature']}")
+        for c in info["callers"][:8]:
+            lines.append(f"  <- {c['caller']} ({c['file']}:{c['line']})")
+        for c in info["callees"][:8]:
+            lines.append(f"  -> {c['target']} ({c['file']}:{c['line']})")
+        return _out(args, info, "\n".join(lines))
+    if verb == "lsp":
+        from ..core.code import lsp as lspmod
+        action = args.value or "def"
+        target_path = args.path or "."
+        info = lspmod.query_lsp(
+            action=action,
+            target=target_path,
+            line=int(getattr(args, "line", 1) or 1),
+            col=int(getattr(args, "col", 1) or 1),
+            symbol=getattr(args, "symbol", "") or "",
+        )
+        return _out(args, info, f"lsp {action} ({info['server']}): {len(info['definitions'])} defs, {len(info['references'])} refs")
     return _out(args, {"ok": False, "error": f"unknown verb: {verb}"},
                 f"error: unknown verb {verb}", code=2)
 
@@ -199,3 +236,16 @@ def cmd_doctor(args):
     from ..core import diagnostics
     checks = diagnostics.checks()
     return _out(args, checks, json.dumps(checks, indent=2, default=str))
+
+
+def cmd_guard(args):
+    from ..core.route import guard
+    verb = getattr(args, "guard_verb", "mode")
+    if verb == "mode":
+        new_mode = getattr(args, "value", None)
+        if new_mode:
+            mode = guard.set_perm_mode(new_mode)
+            return _out(args, {"ok": True, "mode": mode, "engine": "python"}, f"guard mode set to {mode}")
+        cur = guard.perm_mode()
+        return _out(args, {"ok": True, "mode": cur, "engine": "python"}, f"guard mode: {cur}")
+    return _out(args, {"ok": False, "error": f"unknown verb: {verb}"}, f"error: unknown verb {verb}", code=2)

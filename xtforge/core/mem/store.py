@@ -14,7 +14,82 @@ from . import scopes as sc
 from . import links as linkmod
 from .write_policy import body_hash, jaccard, redact, tokenize
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
+
+
+KNOWLEDGE_COLUMNS = (
+    ("status", "TEXT"), ("evidence", "TEXT"), ("verification", "TEXT"),
+    ("author", "TEXT"), ("target", "TEXT"), ("project", "TEXT"),
+    ("versions", "TEXT"), ("environment", "TEXT"),
+    ("error_sig", "TEXT"), ("outcome", "TEXT"),
+)
+
+
+def _ensure_columns(conn) -> None:
+    """Add the knowledge columns to an existing database.
+
+    SQLite has no `ADD COLUMN IF NOT EXISTS`, and a migration that throws on
+    re-run would make every open fail once the columns exist. So inspect
+    PRAGMA table_info and add only what is missing. Purely additive: no row is
+    rewritten and a v1 database keeps working untouched.
+    """
+    have = {row[1] for row in conn.execute("PRAGMA table_info(mem)")}
+    for name, decl in KNOWLEDGE_COLUMNS:
+        if name in have:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE mem ADD COLUMN {name} {decl}")
+        except Exception:  # noqa: BLE001 - concurrent open already added it
+            pass
+    conn.commit()
+
+
+def _body_identity(body: str) -> str | None:
+    """The machine identity a record declares, or None for prose records.
+
+    Records written by an agent layer (error patterns, task records) carry a
+    `signature` or `identity` field that names exactly which thing they describe.
+    When present, two records are only the same when those match - structural
+    similarity is not evidence of sameness for this class of record.
+    """
+    if not body or not body.strip().startswith("{"):
+        return None
+    try:
+        import json as _json
+        data = _json.loads(body)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    for key in ("signature", "identity"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    # A record may scope its identity to a project or target without carrying a
+    # signature (a finding, say). Treat the pair as the identity rather than
+    # letting structural similarity merge two projects' findings together.
+    target = data.get("target")
+    project = data.get("project")
+    if isinstance(target, str) and target.strip():
+        scope = project.strip() if isinstance(project, str) and project.strip() else ""
+        return f"target:{scope}:{target.strip()}"
+    if isinstance(project, str) and project.strip():
+        return f"project:{project.strip()}"
+    return None
+
+MIGRATION_002 = """
+-- Additive: knowledge records carry lifecycle status, scope identity, evidence
+-- and relations. Existing rows keep NULL and behave exactly as before, so this
+-- migration is safe to run on a live database.
+ALTER TABLE mem ADD COLUMN status TEXT;
+ALTER TABLE mem ADD COLUMN evidence TEXT;
+ALTER TABLE mem ADD COLUMN verification TEXT;
+ALTER TABLE mem ADD COLUMN author TEXT;
+ALTER TABLE mem ADD COLUMN target TEXT;
+ALTER TABLE mem ADD COLUMN project TEXT;
+ALTER TABLE mem ADD COLUMN versions TEXT;
+ALTER TABLE mem ADD COLUMN environment TEXT;
+"""
 
 MIGRATION_001 = """
 CREATE TABLE IF NOT EXISTS mem(
@@ -117,6 +192,7 @@ class Store:
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(MIGRATION_001)
         self.conn.executescript(LINKS_MIGRATION)
+        _ensure_columns(self.conn)
         self.fts = has_fts5(self.conn) if use_fts is None else use_fts
         if self.fts:
             self.conn.executescript(FTS_SCHEMA)
@@ -158,7 +234,20 @@ class Store:
 
     def _policy(self, body: str, title: str, scope: str, kind: str,
                 near_dup_threshold: float = 0.8) -> tuple[str, list[str]]:
-        """Apply redaction + dedupe. Returns (final_body, notes)."""
+        """Apply redaction + dedupe. Returns (final_body, notes).
+
+        Near-duplicate detection compares body tokens with Jaccard. That is the
+        right test for prose records, where two bodies being 80% similar means
+        they really are the same note.
+
+        It is the wrong test for records that carry a machine identity. Two
+        error patterns from *different* tools share almost all their tokens -
+        the same JSON keys, the same guidance wording - and score ~0.86, so a
+        distinct signature was silently superseded into an unrelated record and
+        its recovery history was lost. When a body declares a `signature` (or
+        `identity`), structural similarity no longer implies sameness: the
+        identity must match too.
+        """
         clean_body, kinds = redact(body or "")
         clean_title, t_kinds = redact(title or "")
         redact_kinds = kinds + [k for k in t_kinds if k not in kinds]
@@ -170,11 +259,17 @@ class Store:
             "SELECT id FROM mem WHERE body_hash=? AND scope=? LIMIT 1", (bh, scope)).fetchone()
         if exact:
             return clean_body, notes + [f"dedupe_exact:{exact['id']}"]
+
+        own_identity = _body_identity(clean_body)
         toks = tokenize(clean_body)
         rows = self.conn.execute(
             "SELECT id, body FROM mem WHERE scope=? AND kind=? AND pending=0 LIMIT 200",
             (scope, kind)).fetchall()
         for r in rows:
+            if own_identity is not None:
+                # Identity-bearing record: only the same identity may merge.
+                if _body_identity(r["body"]) != own_identity:
+                    continue
             if jaccard(toks, tokenize(r["body"])) >= near_dup_threshold:
                 return clean_body, notes + [f"near_dup:{r['id']}"]
         return clean_body, notes
@@ -366,6 +461,127 @@ class Store:
                 break
             frontier = nxt
         return sorted(seen - {rec_id})
+
+    def record_failure(self, *, scope: str = "global", title: str = "failed attempt",
+                       body: str, error_sig: str = "", outcome: str = "failed",
+                       tags: list[str] | tuple[str, ...] = (),
+                       source: str = "cli") -> dict[str, Any]:
+        """Store an indexed negative constraint (`failed_attempt`) with error signature."""
+        clean_sig, _ = redact(error_sig)
+        out_val = outcome.strip() or "failed"
+        res = self.put(scope=scope, kind="failed_attempt", title=title, body=body,
+                       tags=tags, source=source, confidence=1.0, pending=False)
+        rec_id = res["id"]
+        self.conn.execute(
+            "UPDATE mem SET error_sig=?, outcome=? WHERE id=?",
+            (clean_sig, out_val, rec_id))
+        self.conn.commit()
+        return {**res, "kind": "failed_attempt", "error_sig": clean_sig, "outcome": out_val}
+
+    def consolidate(self, *, scope: str | None = None, threshold: float = 0.55,
+                    dry_run: bool = False, limit: int = 250) -> dict[str, Any]:
+        """Cluster near-similar active notes in a scope and write summary records."""
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS consolidation_log("
+            "id TEXT PRIMARY KEY, ts INT NOT NULL, scope TEXT NOT NULL DEFAULT '', "
+            "merged INT NOT NULL DEFAULT 0, created INT NOT NULL DEFAULT 0, "
+            "notes TEXT NOT NULL DEFAULT '')")
+        sql = (
+            "SELECT id, scope, kind, title, body, tags, updated FROM mem "
+            "WHERE kind IN ('fact','snippet','procedure','error_pattern') "
+            "AND (supersedes IS NULL OR supersedes='') AND source != 'consolidate'"
+        )
+        args: list[Any] = []
+        if scope and scope != "*":
+            sql += " AND scope=?"
+            args.append(scope)
+        sql += " ORDER BY updated DESC LIMIT ?"
+        args.append(max(2, int(limit)))
+        rows = [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+        toks = [tokenize(f"{r.get('title', '')} {r.get('body', '')}") for r in rows]
+
+        used = [False] * len(rows)
+        clusters: list[list[int]] = []
+        for i in range(len(rows)):
+            if used[i] or not toks[i]:
+                continue
+            grp = [i]
+            for j in range(i + 1, len(rows)):
+                if used[j] or rows[i]["scope"] != rows[j]["scope"]:
+                    continue
+                if jaccard(toks[i], toks[j]) >= threshold:
+                    grp.append(j)
+                    used[j] = True
+            if len(grp) >= 2:
+                used[i] = True
+                clusters.append(grp)
+
+        summaries: list[dict[str, Any]] = []
+        merged_count = 0
+        created_count = 0
+        for grp in clusters:
+            primary = rows[grp[0]]
+            grp_scope = primary["scope"]
+            grp_kind = primary["kind"]
+            base_title = primary.get("title") or "consolidated"
+            member_ids = [rows[idx]["id"] for idx in grp]
+            lines: list[str] = []
+            seen_lines: set[str] = set()
+            tags: set[str] = {"consolidated"}
+            for idx in grp:
+                for t in (rows[idx].get("tags") or "").split(","):
+                    if t.strip():
+                        tags.add(t.strip())
+                b = (rows[idx].get("body") or "").strip()
+                if b and b not in seen_lines:
+                    seen_lines.add(b)
+                    lines.append(b)
+            sum_title = f"{base_title} [consolidated]"
+            merged_body = "\n---\n".join(lines)
+            if dry_run:
+                summaries.append({
+                    "scope": grp_scope, "kind": grp_kind,
+                    "title": sum_title, "members": member_ids,
+                })
+                merged_count += len(member_ids)
+                created_count += 1
+                continue
+
+            sum_id = new_id()
+            ts = now()
+            clean_body, _ = redact(merged_body)
+            tag_str = ",".join(sorted(tags))
+            self.conn.execute(
+                "INSERT INTO mem(id,scope,kind,title,body,tags,source,created,updated,"
+                "last_used,uses,pin,ttl,confidence,supersedes,body_hash,pending) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)",
+                (sum_id, grp_scope, grp_kind, sum_title, clean_body, tag_str,
+                 "consolidate", ts, ts, 0, 0, 0, None, 1.0,
+                 member_ids[0], body_hash(clean_body)))
+            self._index(sum_id, sum_title, clean_body, tag_str)
+            for mid in member_ids:
+                self.link(sum_id, mid, "derived_from")
+                self.conn.execute(
+                    "UPDATE mem SET supersedes=?, updated=? WHERE id=?",
+                    (sum_id, ts, mid))
+            merged_count += len(member_ids)
+            created_count += 1
+            summaries.append({
+                "id": sum_id, "scope": grp_scope,
+                "title": sum_title, "members": member_ids,
+            })
+
+        if not dry_run and created_count > 0:
+            self.conn.execute(
+                "INSERT INTO consolidation_log(id,ts,scope,merged,created,notes) VALUES(?,?,?,?,?,?)",
+                (new_id(), now(), scope or "*", merged_count, created_count,
+                 f"threshold={threshold:.2f}"))
+        self.conn.commit()
+        return {
+            "dry_run": dry_run, "scope": scope or "*", "threshold": threshold,
+            "clusters": len(clusters), "merged": merged_count,
+            "created": created_count, "summaries": summaries,
+        }
 
     def close(self) -> None:
         try:
