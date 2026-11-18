@@ -143,6 +143,7 @@ def _dynamic(data: bytes, header: dict[str, Any],
     soname = None
     rpath = None
     runpath = None
+    bind_now = False
     fmt = header["endian"] + ("qQ" if header["bits"] == 64 else "iI")
     ent = 16 if header["bits"] == 64 else 8
     for section in sections:
@@ -163,9 +164,15 @@ def _dynamic(data: bytes, header: dict[str, Any],
                 soname = _cstr(strtab, val)
             elif tag == 15:
                 rpath = _cstr(strtab, val)
+            elif tag == 24:  # DT_BIND_NOW
+                bind_now = True
             elif tag == 29:
                 runpath = _cstr(strtab, val)
-    return {"needed": needed, "soname": soname, "rpath": rpath, "runpath": runpath}
+            elif tag == 30 and (val & 0x8):  # DT_FLAGS & DF_BIND_NOW
+                bind_now = True
+            elif tag == 0x6FFFFFFB and (val & 0x1):  # DT_FLAGS_1 & DF_1_NOW
+                bind_now = True
+    return {"needed": needed, "soname": soname, "rpath": rpath, "runpath": runpath, "bind_now": bind_now}
 
 
 def _build_id(data: bytes, programs: list[dict[str, Any]],
@@ -445,7 +452,12 @@ def checksec(path: str | Path) -> dict[str, Any]:
 
     has_relro = any(p.get("type") == 0x6474E552 for p in progs)
     dyn = _dynamic(data, hdr, secs)
-    relro_status = "Partial" if has_relro else "No"
+    if has_relro and dyn.get("bind_now"):
+        relro_status = "Full"
+    elif has_relro:
+        relro_status = "Partial"
+    else:
+        relro_status = "No"
 
     try:
         sym_res = symbols(resolved)

@@ -71,6 +71,13 @@ ENTROPY_MIN_LEN = 20
 ENTROPY_MIN_BITS = 3.6
 _ENTROPY_CANDIDATE = re.compile(r"['\"]([A-Za-z0-9+/=_\-]{%d,})['\"]" % ENTROPY_MIN_LEN)
 
+
+def _looks_like_snake_or_kebab_ident(value: str) -> bool:
+    if "_" not in value and "-" not in value:
+        return False
+    parts = [p for p in re.split(r"[_-]+", value) if p]
+    return len(parts) >= 2 and all(p.isascii() and p.islower() and p.isalpha() for p in parts)
+
 # (id, severity, pattern, description)
 PATTERN_RULES: list[tuple[str, str, re.Pattern[str], str]] = [
     ("eval", "high", re.compile(r"\beval\s*\("), "dynamic code execution"),
@@ -242,7 +249,7 @@ def scan_text(text: str, path: str = "<text>", reveal: bool = False,
         for match in _ENTROPY_CANDIDATE.finditer(text):
             value = match.group(1)
             start, end = match.start(1), match.end(1)
-            if overlaps(start, end) or shannon(value) < ENTROPY_MIN_BITS:
+            if overlaps(start, end) or _looks_like_snake_or_kebab_ident(value) or shannon(value) < ENTROPY_MIN_BITS:
                 continue
             covered.append((start, end))
             line_no = text.count("\n", 0, start) + 1

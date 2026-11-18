@@ -161,13 +161,17 @@ def build_index(roots: list[str], incremental: bool = True) -> dict[str, Any]:
     conn.commit()
     seen = 0
     added = 0
+    seen_paths: set[str] = set()
+    canon_roots: list[str] = []
     for r in roots:
         try:
             canon = guard.read_guard(r)
         except guard.Denied:
             continue
+        canon_roots.append(str(canon))
         for e in ref.walk_py(canon, limit=200_000):
             seen += 1
+            seen_paths.add(e["path"])
             row = conn.execute("SELECT mtime FROM files WHERE path=?",
                                (e["path"],)).fetchone()
             if incremental and row and row[0] == e["mtime"]:
@@ -179,6 +183,10 @@ def build_index(roots: list[str], incremental: bool = True) -> dict[str, Any]:
             added += 1
             if added % 5000 == 0:
                 conn.commit()
+    for (p,) in list(conn.execute("SELECT path FROM files")):
+        under = any(p == cr or p.startswith(cr.rstrip("/\\") + os.sep) for cr in canon_roots)
+        if p not in seen_paths and (under or not os.path.exists(p)):
+            conn.execute("DELETE FROM files WHERE path=?", (p,))
     conn.commit()
     total = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
     conn.close()
@@ -192,8 +200,19 @@ def route_where(filename: str, limit: int = 20) -> dict[str, Any]:
     t0 = time.perf_counter()
     conn = sqlite3.connect(str(db))
     rows = conn.execute("SELECT path,size,mtime FROM files WHERE name LIKE ? "
-                        "ORDER BY mtime DESC LIMIT ?", (f"%{filename}%", limit)).fetchall()
+                        "ORDER BY mtime DESC LIMIT ?", (f"%{filename}%", limit * 2)).fetchall()
+    data = []
+    stale = []
+    for p, s, m in rows:
+        if os.path.exists(p):
+            data.append({"path": p, "size": s, "mtime": m})
+            if len(data) >= limit:
+                break
+        else:
+            stale.append(p)
+    if stale:
+        conn.executemany("DELETE FROM files WHERE path=?", [(s,) for s in stale])
+        conn.commit()
     conn.close()
-    data = [{"path": p, "size": s, "mtime": m} for p, s, m in rows]
     return envelope(True, {"matches": data, "count": len(data)},
                     ms=int((time.perf_counter() - t0) * 1000))

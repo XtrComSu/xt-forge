@@ -2,6 +2,9 @@ package mcp
 
 import (
 	"bufio"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -238,7 +241,299 @@ func resolveUpstreamTools(pool *UpstreamPool, server string) ([]ToolDef, error) 
 	return sess.Tools(), nil
 }
 
+type callRecoveryOpts struct {
+	IdempotencyKey string
+	VerifyTool     string
+	VerifyArgs     map[string]any
+}
+
+func extractRecoveryOpts(args map[string]any) callRecoveryOpts {
+	var opts callRecoveryOpts
+	if args == nil {
+		return opts
+	}
+	if s, ok := args["idempotency_key"].(string); ok {
+		opts.IdempotencyKey = strings.TrimSpace(s)
+	}
+	if s, ok := args["verify_tool"].(string); ok {
+		opts.VerifyTool = strings.TrimSpace(s)
+	}
+	if va, ok := args["verify_args"].(map[string]any); ok {
+		opts.VerifyArgs = va
+	}
+	return opts
+}
+
+func firstNonEmptyStr(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func digestResult(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])[:20]
+}
+
+func parseVerificationCommitted(raw json.RawMessage) bool {
+	var envelope map[string]any
+	if json.Unmarshal(raw, &envelope) != nil {
+		return false
+	}
+	if isErr, ok := envelope["isError"].(bool); ok && isErr {
+		return false
+	}
+	inspectMap := func(m map[string]any) (decided bool, val bool) {
+		for _, k := range []string{"committed", "found", "exists"} {
+			if b, ok := m[k].(bool); ok {
+				return true, b
+			}
+		}
+		if st, ok := m["status"].(string); ok {
+			switch strings.ToLower(strings.TrimSpace(st)) {
+			case "not_found", "missing", "absent", "unknown", "never_started":
+				return true, false
+			case "committed", "completed", "ok", "succeeded", "success":
+				return true, true
+			}
+		}
+		if rec, ok := m["receipt"]; ok && rec != nil {
+			return true, true
+		}
+		return false, false
+	}
+	if d, v := inspectMap(envelope); d {
+		return v
+	}
+	if content, ok := envelope["content"].([]any); ok {
+		for _, item := range content {
+			cm, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			txt, _ := cm["text"].(string)
+			var inner map[string]any
+			if txt != "" && json.Unmarshal([]byte(txt), &inner) == nil {
+				if d, v := inspectMap(inner); d {
+					return v
+				}
+			}
+		}
+	}
+	return true
+}
+
+func runRecoverableUpstreamCall(
+	ctx context.Context,
+	sess *UpstreamSession,
+	auditKind, server, toolName string,
+	args map[string]any,
+	opts callRecoveryOpts,
+	maxBytes int,
+) (string, bool) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if args == nil {
+		args = map[string]any{}
+	}
+	canon := CanonicalUpstreamName(server)
+	if canon == "" && sess != nil {
+		canon = sess.Name
+	}
+	if guard.CurrentMode() == guard.ModeExplore && isMutatingToolName(toolName) {
+		guard.AuditEvent(auditKind, canon, toolName, "denied_explore", args, 1)
+		return fmt.Sprintf("denied: XT_PERM_MODE=explore forbids mutating upstream call %s:%s", canon, toolName), true
+	}
+
+	key := strings.TrimSpace(opts.IdempotencyKey)
+	digest := argsDigest(canon, toolName, args)
+	var entry JournalEntry
+
+	if key != "" {
+		if existing, found := FindJournalByKey(key); found {
+			state := NormalizeJournalState(existing.State)
+			if existing.ArgsSHA256 != "" && existing.ArgsSHA256 != digest {
+				return fmt.Sprintf("idempotency conflict for key %q: args mismatch existing call %s (%s:%s)", key, existing.CallID, existing.Server, existing.Tool), true
+			}
+			switch state {
+			case CallCompleted:
+				if !existing.IsError {
+					guard.AuditEvent(auditKind, canon, toolName, "replayed", args, 0)
+					clipped, _ := compress.ClipOrSpill(existing.Result, maxBytes, canon+"-"+toolName)
+					return clipped, false
+				}
+				entry = existing
+			case CallUnknownOutcome:
+				verifyTool := firstNonEmptyStr(opts.VerifyTool, existing.VerifyTool)
+				verifyArgs := opts.VerifyArgs
+				if verifyArgs == nil {
+					verifyArgs = existing.VerifyArgs
+				}
+				if verifyArgs == nil {
+					verifyArgs = map[string]any{"idempotency_key": key}
+				}
+				if verifyTool == "" {
+					guard.AuditEvent(auditKind, canon, toolName, "blocked_unknown_outcome", args, 1)
+					payload, _ := json.Marshal(map[string]any{
+						"ok":                  false,
+						"state":               CallUnknownOutcome,
+						"call_id":             existing.CallID,
+						"idempotency_key":     key,
+						"attempts":            existing.Attempts,
+						"cancel_notified":     existing.CancelNotified,
+						"duplicate_prevented": true,
+						"message":             fmt.Sprintf("call %s (%s:%s) interrupted with unknown outcome; verify via read-only tool or pass verify_tool before retrying", existing.CallID, canon, toolName),
+					})
+					return string(payload), true
+				}
+				vRaw, vErr, _, _, _ := sess.CallToolContext(ctx, verifyTool, verifyArgs)
+				if vErr != nil {
+					guard.AuditEvent(auditKind, canon, toolName, "verify_error", args, 1)
+					return fmt.Sprintf("unknown_outcome verification %s:%s failed (%s); duplicate write blocked", canon, verifyTool, vErr.Message), true
+				}
+				if parseVerificationCommitted(vRaw) {
+					existing.State = CallCompleted
+					existing.IsError = false
+					existing.Error = ""
+					existing.Result = string(vRaw)
+					existing.ResultSHA256 = digestResult(string(vRaw))
+					_, _ = UpsertJournalEntry(existing)
+					guard.AuditEvent(auditKind, canon, toolName, "recovered", args, 0)
+					var parsedReceipt any
+					_ = json.Unmarshal(vRaw, &parsedReceipt)
+					recPayload, _ := json.Marshal(map[string]any{
+						"ok":                  true,
+						"recovered":           true,
+						"duplicate_prevented": true,
+						"state":               CallCompleted,
+						"call_id":             existing.CallID,
+						"idempotency_key":     key,
+						"attempts":            existing.Attempts,
+						"verify_tool":         verifyTool,
+						"receipt":             parsedReceipt,
+					})
+					clipped, _ := compress.ClipOrSpill(string(recPayload), maxBytes, canon+"-"+toolName+"-recovered")
+					return clipped, false
+				}
+				entry = existing
+			case CallNeverStarted:
+				entry = existing
+			default:
+				entry = existing
+			}
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		if entry.CallID == "" {
+			entry = JournalEntry{
+				IdempotencyKey: key,
+				Server:         canon,
+				Tool:           toolName,
+				ArgsSHA256:     digest,
+				VerifyTool:     opts.VerifyTool,
+				VerifyArgs:     opts.VerifyArgs,
+			}
+		}
+		entry.State = CallNeverStarted
+		entry.Cancelled = true
+		entry.IsError = true
+		entry.Error = err.Error()
+		entry, _ = UpsertJournalEntry(entry)
+		guard.AuditEvent(auditKind, canon, toolName, "cancelled_before_start", args, 1)
+		return fmt.Sprintf("cancelled before start (%s): %v", CallNeverStarted, err), true
+	}
+
+	trackJournal := key != "" || isMutatingToolName(toolName)
+	if trackJournal {
+		if entry.CallID == "" {
+			entry = JournalEntry{
+				IdempotencyKey: key,
+				Server:         canon,
+				Tool:           toolName,
+				ArgsSHA256:     digest,
+				VerifyTool:     opts.VerifyTool,
+				VerifyArgs:     opts.VerifyArgs,
+			}
+		}
+		entry.State = CallInFlight
+		entry.Attempts++
+		entry.IsError = false
+		entry.Error = ""
+		if opts.VerifyTool != "" {
+			entry.VerifyTool = opts.VerifyTool
+		}
+		if opts.VerifyArgs != nil {
+			entry.VerifyArgs = opts.VerifyArgs
+		}
+		entry, _ = UpsertJournalEntry(entry)
+	}
+
+	resRaw, rpcErr, reqID, started, cancelNotified := sess.CallToolContext(ctx, toolName, args)
+	if rpcErr != nil {
+		isInterrupt := !started || rpcErr.Code == -32000 || rpcErr.Code == -32001 || rpcErr.Code == -32800
+		if trackJournal || isInterrupt {
+			if entry.CallID == "" {
+				entry = JournalEntry{
+					IdempotencyKey: key,
+					Server:         canon,
+					Tool:           toolName,
+					ArgsSHA256:     digest,
+					Attempts:       1,
+					VerifyTool:     opts.VerifyTool,
+					VerifyArgs:     opts.VerifyArgs,
+				}
+			}
+			entry.RequestID = reqID
+			entry.CancelNotified = entry.CancelNotified || cancelNotified
+			entry.IsError = true
+			entry.Error = rpcErr.Message
+			if !started {
+				entry.State = CallNeverStarted
+				entry.Cancelled = true
+			} else if isInterrupt {
+				entry.State = CallUnknownOutcome
+				if rpcErr.Code == -32800 {
+					entry.Cancelled = true
+				}
+			} else {
+				entry.State = CallCompleted
+			}
+			entry, _ = UpsertJournalEntry(entry)
+		}
+		guard.AuditEvent(auditKind, canon, toolName, "error", args, 1)
+		if !started {
+			return fmt.Sprintf("call cancelled before dispatch (state=%s, call_id=%s): %s", CallNeverStarted, entry.CallID, rpcErr.Message), true
+		}
+		if isInterrupt {
+			return fmt.Sprintf("interrupted call with unknown outcome (state=%s, call_id=%s, cancel_notified=%v): %s — verify effect with a read-only check before retrying", CallUnknownOutcome, entry.CallID, cancelNotified, rpcErr.Message), true
+		}
+		return rpcErr.Message, true
+	}
+
+	if trackJournal {
+		entry.RequestID = reqID
+		entry.State = CallCompleted
+		entry.IsError = false
+		entry.Error = ""
+		entry.Result = string(resRaw)
+		entry.ResultSHA256 = digestResult(string(resRaw))
+		_, _ = UpsertJournalEntry(entry)
+	}
+	guard.AuditEvent(auditKind, canon, toolName, "ok", args, 0)
+	clipped, _ := compress.ClipOrSpill(string(resRaw), maxBytes, canon+"-"+toolName)
+	return clipped, false
+}
+
 func callUpstreamTool(pool *UpstreamPool, server, toolName string, args map[string]any, maxBytes int) (string, bool) {
+	return callUpstreamToolContext(context.Background(), pool, server, toolName, args, callRecoveryOpts{}, maxBytes)
+}
+
+func callUpstreamToolContext(ctx context.Context, pool *UpstreamPool, server, toolName string, args map[string]any, opts callRecoveryOpts, maxBytes int) (string, bool) {
 	canon := CanonicalUpstreamName(server)
 	if args == nil {
 		args = map[string]any{}
@@ -247,19 +542,29 @@ func callUpstreamTool(pool *UpstreamPool, server, toolName string, args map[stri
 		guard.AuditEvent("mcp", canon, toolName, "denied_explore", args, 1)
 		return fmt.Sprintf("denied: XT_PERM_MODE=explore forbids mutating upstream call %s:%s", canon, toolName), true
 	}
+	if ctx != nil && ctx.Err() != nil {
+		if opts.IdempotencyKey != "" || isMutatingToolName(toolName) {
+			_, _ = UpsertJournalEntry(JournalEntry{
+				IdempotencyKey: opts.IdempotencyKey,
+				Server:         canon,
+				Tool:           toolName,
+				ArgsSHA256:     argsDigest(canon, toolName, args),
+				State:          CallNeverStarted,
+				Cancelled:      true,
+				IsError:        true,
+				Error:          ctx.Err().Error(),
+				VerifyTool:     opts.VerifyTool,
+				VerifyArgs:     opts.VerifyArgs,
+			})
+		}
+		return fmt.Sprintf("cancelled before start (state=%s): %v", CallNeverStarted, ctx.Err()), true
+	}
 	sess, err := pool.GetOrStart(canon)
 	if err != nil {
 		guard.AuditEvent("mcp", canon, toolName, "start_error", args, 1)
 		return err.Error(), true
 	}
-	resRaw, rpcErr := sess.CallTool(toolName, args)
-	if rpcErr != nil {
-		guard.AuditEvent("mcp", canon, toolName, "error", args, 1)
-		return rpcErr.Message, true
-	}
-	guard.AuditEvent("mcp", canon, toolName, "ok", args, 0)
-	clipped, _ := compress.ClipOrSpill(string(resRaw), maxBytes, canon+"-"+toolName)
-	return clipped, false
+	return runRecoverableUpstreamCall(ctx, sess, "mcp", canon, toolName, args, opts, maxBytes)
 }
 
 func searchUpstreamCatalogs(pool *UpstreamPool, upstreamFilter, query string, limit int) []map[string]any {
@@ -354,21 +659,21 @@ func ServeMeta(selfBin string, maxBytes int) int {
 	metaTools := []ToolDef{
 		{
 			Name:        "xt_discover",
-			Description: "Search xt-forge tools plus connected external MCPs (rea, craft-anything, or custom upstreams) by keyword.",
+			Description: "Search xt-forge and upstream MCP tools (rea, craft-anything, ...).",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"query":    map[string]any{"type": "string", "description": "Keywords or capability to find"},
-					"category": map[string]any{"type": "string", "description": "Optional filter: re|code|memory|steering|research|security|ops"},
-					"upstream": map[string]any{"type": "string", "description": "Optional server filter: xt-forge|rea|craft-anything|all"},
-					"limit":    map[string]any{"type": "integer", "description": "Max results (default 10)"},
+					"query":    map[string]any{"type": "string"},
+					"category": map[string]any{"type": "string"},
+					"upstream": map[string]any{"type": "string"},
+					"limit":    map[string]any{"type": "integer"},
 				},
 				"additionalProperties": false,
 			},
 		},
 		{
 			Name:        "xt_schema",
-			Description: "Return exact usage hints or full JSON inputSchema for an xt-forge tool or upstream <server>:<tool>.",
+			Description: "Get schema/usage for an xt-forge or <server>:<tool> name.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -380,23 +685,26 @@ func ServeMeta(selfBin string, maxBytes int) int {
 		},
 		{
 			Name:        "xt_call",
-			Description: "Execute any xt-forge command (argv) or connected upstream MCP tool (name='<server>:<tool>' or server+tool) with L1-L3 compression.",
+			Description: "Run xt-forge argv or upstream <server>:<tool> safely with journal recovery.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"argv":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"name":      map[string]any{"type": "string", "description": "Prefixed upstream tool, e.g. rea:open_binary or craft-anything:core_target_open"},
-					"server":    map[string]any{"type": "string", "description": "Explicit upstream server name (rea, craft-anything, ...)"},
-					"tool":      map[string]any{"type": "string", "description": "Tool name on server when server is given"},
-					"arguments": map[string]any{"type": "object", "description": "Arguments JSON object for upstream MCP call"},
-					"max_bytes": map[string]any{"type": "integer"},
+					"argv":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"name":            map[string]any{"type": "string"},
+					"server":          map[string]any{"type": "string"},
+					"tool":            map[string]any{"type": "string"},
+					"arguments":       map[string]any{"type": "object"},
+					"idempotency_key": map[string]any{"type": "string"},
+					"verify_tool":     map[string]any{"type": "string"},
+					"verify_args":     map[string]any{"type": "object"},
+					"max_bytes":       map[string]any{"type": "integer"},
 				},
 				"additionalProperties": false,
 			},
 		},
 		{
 			Name:        "xt_batch",
-			Description: "Run multiple read-only xt-forge or upstream MCP calls concurrently in one turn.",
+			Description: "Run multiple read-only calls concurrently.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -420,16 +728,17 @@ func ServeMeta(selfBin string, maxBytes int) int {
 		},
 	}
 
-	dispatchCall := func(args map[string]any, budget int) (string, bool) {
+	dispatchCall := func(ctx context.Context, args map[string]any, budget int) (string, bool) {
 		rawName, _ := args["name"].(string)
 		srv, _ := args["server"].(string)
 		tool, _ := args["tool"].(string)
 		toolArgs, _ := args["arguments"].(map[string]any)
+		opts := extractRecoveryOpts(args)
 		if srv != "" && tool != "" {
-			return callUpstreamTool(pool, srv, tool, toolArgs, budget)
+			return callUpstreamToolContext(ctx, pool, srv, tool, toolArgs, opts, budget)
 		}
 		if uSrv, uTool, ok := splitUpstreamToolRef(rawName); ok {
-			return callUpstreamTool(pool, uSrv, uTool, toolArgs, budget)
+			return callUpstreamToolContext(ctx, pool, uSrv, uTool, toolArgs, opts, budget)
 		}
 		rawArgv, _ := args["argv"].([]any)
 		argv := make([]string, 0, len(rawArgv))
@@ -452,7 +761,7 @@ func ServeMeta(selfBin string, maxBytes int) int {
 		return runLocalCommand(selfBin, argv, budget)
 	}
 
-	return serveLoop(metaTools, func(name string, args map[string]any) (string, bool) {
+	return serveLoop(metaTools, func(ctx context.Context, name string, args map[string]any) (string, bool) {
 		switch name {
 		case "xt_discover":
 			q, _ := args["query"].(string)
@@ -501,6 +810,12 @@ func ServeMeta(selfBin string, maxBytes int) int {
 				}
 				return fmt.Sprintf("unknown tool '%s' on upstream '%s'", toolName, srv), true
 			}
+			for _, mt := range metaTools {
+				if mt.Name == target {
+					b, _ := json.MarshalIndent(mt, "", "  ")
+					return string(b), false
+				}
+			}
 			for _, e := range FullCatalog() {
 				if e.Name == target {
 					b, _ := json.MarshalIndent(e, "", "  ")
@@ -513,7 +828,7 @@ func ServeMeta(selfBin string, maxBytes int) int {
 			if f, ok := args["max_bytes"].(float64); ok && f > 0 {
 				mb = int(f)
 			}
-			return dispatchCall(args, mb)
+			return dispatchCall(ctx, args, mb)
 		case "xt_batch":
 			rawCalls, _ := args["calls"].([]any)
 			if len(rawCalls) > 16 {
@@ -526,7 +841,7 @@ func ServeMeta(selfBin string, maxBytes int) int {
 				go func(idx int, item any) {
 					defer wg.Done()
 					m, _ := item.(map[string]any)
-					txt, isErr := dispatchCall(m, maxBytes/2)
+					txt, isErr := dispatchCall(ctx, m, maxBytes/2)
 					results[idx] = map[string]any{
 						"target":  m["name"],
 						"argv":    m["argv"],
@@ -598,19 +913,22 @@ func ServeProxy(prefix string, upstreamCmd []string, maxBytes int, trustOnFirst 
 		},
 		{
 			Name:        prefix + "_call",
-			Description: fmt.Sprintf("Execute a tool on '%s' with automatic compression and artifact spilling.", prefix),
+			Description: fmt.Sprintf("Execute a tool on '%s' with compression, spill, and journal recovery.", prefix),
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"tool":      map[string]any{"type": "string"},
-					"arguments": map[string]any{"type": "object"},
+					"tool":            map[string]any{"type": "string"},
+					"arguments":       map[string]any{"type": "object"},
+					"idempotency_key": map[string]any{"type": "string"},
+					"verify_tool":     map[string]any{"type": "string"},
+					"verify_args":     map[string]any{"type": "object"},
 				},
 				"required": []string{"tool"},
 			},
 		},
 	}
 
-	return serveLoop(proxyTools, func(name string, args map[string]any) (string, bool) {
+	return serveLoop(proxyTools, func(ctx context.Context, name string, args map[string]any) (string, bool) {
 		currentTools := sess.Tools()
 		switch name {
 		case prefix + "_search":
@@ -662,30 +980,41 @@ func ServeProxy(prefix string, upstreamCmd []string, maxBytes int, trustOnFirst 
 			if tArgs == nil {
 				tArgs = map[string]any{}
 			}
-			if guard.CurrentMode() == guard.ModeExplore && isMutatingToolName(tName) {
-				guard.AuditEvent("mcp-proxy", prefix, tName, "denied_explore", tArgs, 1)
-				return "denied: XT_PERM_MODE=explore forbids mutating proxied call " + tName, true
-			}
-			resRaw, callErr := sess.CallTool(tName, tArgs)
-			if callErr != nil {
-				guard.AuditEvent("mcp-proxy", prefix, tName, "error", tArgs, 1)
-				return callErr.Message, true
-			}
-			guard.AuditEvent("mcp-proxy", prefix, tName, "ok", tArgs, 0)
-			clipped, _ := compress.ClipOrSpill(string(resRaw), maxBytes, prefix+"-"+tName)
-			return clipped, false
+			opts := extractRecoveryOpts(args)
+			return runRecoverableUpstreamCall(ctx, sess, "mcp-proxy", prefix, tName, tArgs, opts, maxBytes)
 		default:
 			return "unknown proxy tool: " + name, true
 		}
 	})
 }
 
-func serveLoop(tools []ToolDef, handler func(string, map[string]any) (string, bool)) int {
+func normalizeRPCID(raw json.RawMessage) string {
+	return strings.Trim(strings.TrimSpace(string(raw)), `"`)
+}
+
+func serveLoop(tools []ToolDef, handler func(context.Context, string, map[string]any) (string, bool)) int {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+
+	var outMu sync.Mutex
 	writeResp := func(v any) {
 		b, _ := json.Marshal(v)
+		outMu.Lock()
 		_, _ = os.Stdout.Write(append(b, '\n'))
+		outMu.Unlock()
+	}
+
+	var activeMu sync.Mutex
+	active := map[string]context.CancelFunc{}
+	var wg sync.WaitGroup
+
+	cancelAll := func() {
+		activeMu.Lock()
+		for id, cancel := range active {
+			cancel()
+			delete(active, id)
+		}
+		activeMu.Unlock()
 	}
 
 	for scanner.Scan() {
@@ -699,9 +1028,24 @@ func serveLoop(tools []ToolDef, handler func(string, map[string]any) (string, bo
 			continue
 		}
 		if msg.Method == "exit" {
+			cancelAll()
 			break
 		}
 		if len(msg.ID) == 0 || string(msg.ID) == "null" {
+			if msg.Method == "notifications/cancelled" {
+				var params struct {
+					RequestID json.RawMessage `json:"requestId"`
+				}
+				if json.Unmarshal(msg.Params, &params) == nil {
+					key := normalizeRPCID(params.RequestID)
+					activeMu.Lock()
+					if cancel, ok := active[key]; ok {
+						cancel()
+						delete(active, key)
+					}
+					activeMu.Unlock()
+				}
+			}
 			continue
 		}
 		switch msg.Method {
@@ -720,7 +1064,7 @@ func serveLoop(tools []ToolDef, handler func(string, map[string]any) (string, bo
 				"result": map[string]any{
 					"protocolVersion": pv,
 					"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
-					"serverInfo":      map[string]any{"name": "xt-forge-hub", "version": "0.4.0"},
+					"serverInfo":      map[string]any{"name": "xt-forge-hub", "version": "0.4.2"},
 				},
 			})
 		case "ping":
@@ -736,21 +1080,42 @@ func serveLoop(tools []ToolDef, handler func(string, map[string]any) (string, bo
 			if params.Arguments == nil {
 				params.Arguments = map[string]any{}
 			}
-			text, isErr := handler(params.Name, params.Arguments)
-			writeResp(map[string]any{
-				"jsonrpc": "2.0",
-				"id":      msg.ID,
-				"result": map[string]any{
-					"content": []map[string]any{{"type": "text", "text": text}},
-					"isError": isErr,
-				},
-			})
+			reqID := append(json.RawMessage(nil), msg.ID...)
+			reqKey := normalizeRPCID(reqID)
+			ctx, cancel := context.WithCancel(context.Background())
+			activeMu.Lock()
+			active[reqKey] = cancel
+			activeMu.Unlock()
+			wg.Add(1)
+			go func(id json.RawMessage, key string, ctx context.Context, cancel context.CancelFunc, name string, args map[string]any) {
+				defer wg.Done()
+				defer func() {
+					activeMu.Lock()
+					delete(active, key)
+					activeMu.Unlock()
+					cancel()
+				}()
+				text, isErr := handler(ctx, name, args)
+				if ctx.Err() == context.Canceled {
+					return
+				}
+				writeResp(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      id,
+					"result": map[string]any{
+						"content": []map[string]any{{"type": "text", "text": text}},
+						"isError": isErr,
+					},
+				})
+			}(reqID, reqKey, ctx, cancel, params.Name, params.Arguments)
 		case "shutdown":
+			cancelAll()
 			writeResp(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "result": nil})
 		default:
 			writeResp(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "error": rpcError{Code: -32601, Message: "method not found: " + msg.Method}})
 		}
 	}
+	wg.Wait()
 	return 0
 }
 

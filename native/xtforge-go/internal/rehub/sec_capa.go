@@ -96,11 +96,25 @@ func Checksec(filePath string) map[string]any {
 		relro := "No"
 		if hasRelro {
 			relro = "Partial"
-			if dynSyms, err := f.DynamicSymbols(); err == nil {
-				_ = dynSyms
-			}
 			if vals, err := f.DynValue(elf.DT_BIND_NOW); err == nil && len(vals) > 0 {
 				relro = "Full"
+			} else if flags, err := f.DynValue(elf.DT_FLAGS); err == nil {
+				for _, v := range flags {
+					if v&uint64(elf.DF_BIND_NOW) != 0 {
+						relro = "Full"
+						break
+					}
+				}
+			}
+			if relro != "Full" {
+				if flags1, err := f.DynValue(elf.DynTag(0x6ffffffb)); err == nil { // DT_FLAGS_1
+					for _, v := range flags1 {
+						if v&0x1 != 0 { // DF_1_NOW
+							relro = "Full"
+							break
+						}
+					}
+				}
 			}
 		}
 		canary := false

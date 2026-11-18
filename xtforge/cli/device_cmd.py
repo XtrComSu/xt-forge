@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -73,11 +74,17 @@ def _cmd_route_shortcut(args, shortcuts):
         if query:
             # Query-aware packing: spend the budget on the lines that answer.
             from ..core.route import pack as packmod
-            result = packmod.pack(args.path or ".", query,
-                                  token_budget=args.token_budget,
-                                  file_limit=args.file_limit,
-                                  window=max(1, args.context),
-                                  use_symbols=bool(getattr(args, "symbols", False)))
+            result = packmod.pack(
+                args.path or ".",
+                query,
+                token_budget=args.token_budget,
+                file_limit=args.file_limit,
+                window=max(1, args.context),
+                use_symbols=bool(getattr(args, "symbols", False)),
+                diagnose=bool(getattr(args, "diagnose", False)),
+                expected_file=getattr(args, "expected_file", None),
+                expected_line=int(getattr(args, "expected_line", 0) or 0) or None,
+            )
         else:
             result = shortcuts.route_context(args.path or ".", args.token_budget,
                                              args.file_limit)
@@ -236,6 +243,49 @@ def cmd_doctor(args):
     from ..core import diagnostics
     checks = diagnostics.checks()
     return _out(args, checks, json.dumps(checks, indent=2, default=str))
+
+
+def cmd_skills(args):
+    from pathlib import Path
+    from ..version import project_root
+
+    verb = getattr(args, "skills_verb", "list") or "list"
+    skills_dir = project_root() / "skills"
+    catalog: list[dict[str, str]] = []
+    if skills_dir.is_dir():
+        for tier in ("simple", "complex", "advanced"):
+            tdir = skills_dir / tier
+            if not tdir.is_dir():
+                continue
+            for p in sorted(tdir.iterdir()):
+                if (p / "SKILL.md").is_file():
+                    catalog.append({"tier": tier, "name": p.name, "path": str(p)})
+    if verb == "path":
+        return _out(args, {"ok": True, "skills_dir": str(skills_dir), "count": len(catalog)}, str(skills_dir))
+    if verb == "install":
+        import shutil
+        home = Path(os.environ.get("HOME", str(Path.home())))
+        targets = [
+            home / ".dsh" / "skills",
+            home / ".agents" / "skills",
+            home / ".claude" / "skills",
+            home / ".config" / "opencode" / "skills",
+        ]
+        installed_dirs = []
+        for dst in targets:
+            dst.mkdir(parents=True, exist_ok=True)
+            for item in catalog:
+                shutil.copytree(item["path"], dst / item["name"], dirs_exist_ok=True)
+            installed_dirs.append(str(dst))
+        return _out(
+            args,
+            {"ok": True, "count": len(catalog), "targets": installed_dirs},
+            f"Installed {len(catalog)} skills to {len(installed_dirs)} directories",
+        )
+    human_lines = [f"{len(catalog)} XT-Forge skills ({skills_dir}):"]
+    for item in catalog:
+        human_lines.append(f"  [{item['tier']:<8}] {item['name']}")
+    return _out(args, {"ok": True, "skills_dir": str(skills_dir), "count": len(catalog), "skills": catalog}, "\n".join(human_lines))
 
 
 def cmd_guard(args):

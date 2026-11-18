@@ -273,7 +273,7 @@ class TestCliGoalVerify(unittest.TestCase):
         self.assertTrue(json.loads(proc.stdout)["ok"])
 
     def test_mcp_tool_registered(self):
-        server = (ROOT / "adapters" / "mcp" / "server.py").read_text()
+        server = (ROOT / "xtforge" / "adapters" / "mcp_server.py").read_text()
         self.assertIn('"goal_verify"', server)
 
 

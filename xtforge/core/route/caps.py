@@ -15,12 +15,26 @@ from typing import Any, Callable
 from ...version import cache_dir, project_root
 
 NATIVE_DIR = project_root() / "native" / "build"
+RUST_DIR = project_root() / "native" / "xtforge-rs" / "target" / "release"
+GO_DIR = project_root() / "native" / "xtforge-go"
 CAPS_FILE = "caps.json"
 PROBE_TIMEOUT = 10
 
 
 def native_path(name: str) -> Path:
     return NATIVE_DIR / name
+
+
+def _exe_suffix() -> str:
+    return ".exe" if os.name == "nt" else ""
+
+
+def rust_native_path() -> Path:
+    return RUST_DIR / f"xtforge-native{_exe_suffix()}"
+
+
+def go_hub_path() -> Path:
+    return GO_DIR / f"xtforge-hub{_exe_suffix()}"
 
 
 def binary_works(name: str) -> bool:
@@ -34,6 +48,10 @@ def binary_works(name: str) -> bool:
         return False
 
 
+def _bin_ready(path: Path) -> bool:
+    return path.exists() and os.access(path, os.X_OK)
+
+
 def probe(force_python: bool | None = None, use_cache: bool = True) -> dict[str, Any]:
     if force_python is None:
         force_python = os.environ.get("XT_FORCE_PYTHON") == "1"
@@ -44,17 +62,55 @@ def probe(force_python: bool | None = None, use_cache: bool = True) -> dict[str,
         boot_id = "unknown-boot"
     if use_cache:
         cached = read_caps()
-        if cached and cached.get("stamp"):
+        if cached and cached.get("stamp") and "engines" in cached:
             age = time.time() - float(cached["stamp"])
             same_boot = cached.get("boot_id") in (None, boot_id)
             if age < 3600 and cached.get("force_python") == force_python and same_boot:
                 return cached
             # else: reboot or stale -> fall through and reprobe
-    caps: dict[str, Any] = {"ts": time.time(), "force_python": force_python,
-                            "native_dir": str(NATIVE_DIR), "tools": {},
-                            "boot_id": boot_id}
+    rs_bin = rust_native_path()
+    go_bin = go_hub_path()
+    rs_ok = not force_python and _bin_ready(rs_bin)
+    go_ok = not force_python and _bin_ready(go_bin)
+    active_native_dir: str | None = None
+    if rs_ok:
+        active_native_dir = str(RUST_DIR)
+    elif go_ok:
+        active_native_dir = str(GO_DIR)
+    elif NATIVE_DIR.is_dir():
+        active_native_dir = str(NATIVE_DIR)
+    caps: dict[str, Any] = {
+        "ts": time.time(),
+        "force_python": force_python,
+        "native_dir": active_native_dir,
+        "engines": {
+            "xtforge_native": "rust" if rs_ok else "python",
+            "xtforge_hub": "go" if go_ok else "python",
+            "route_scan": "rust" if rs_ok else "python",
+            "codec": "rust" if rs_ok else "python",
+            "mcp_gateway": "go" if go_ok else "python",
+        },
+        "binaries": {
+            "rust": str(rs_bin) if rs_ok else None,
+            "go": str(go_bin) if go_ok else None,
+        },
+        "tools": {},
+        "boot_id": boot_id,
+    }
+    engine_for_legacy = {
+        "xtscan": "rust" if rs_ok else None,
+        "xtdigest": "rust" if rs_ok else None,
+        "xtsqueeze": "go" if go_ok else None,
+    }
     for tool in ("xtscan", "xtdigest", "xtsqueeze"):
-        caps["tools"][tool] = "python" if force_python or not binary_works(tool) else "native"
+        if force_python:
+            caps["tools"][tool] = "python"
+        elif binary_works(tool):
+            caps["tools"][tool] = "native"
+        elif engine_for_legacy.get(tool):
+            caps["tools"][tool] = engine_for_legacy[tool]
+        else:
+            caps["tools"][tool] = "python"
     caps["stamp"] = time.time()
     write_caps(caps)
     return caps

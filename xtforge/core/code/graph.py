@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import sqlite3
 import time
@@ -144,8 +145,10 @@ def index_workspace(root: str | Path = ".", *, db_path: Path | None = None) -> d
 
         updated = 0
         cached = 0
+        removed = 0
         new_syms = 0
         new_edges = 0
+        seen_paths: set[str] = set()
         for f in files:
             lang = EXT_LANG.get(f.suffix.lower())
             if not lang:
@@ -158,6 +161,7 @@ def index_workspace(root: str | Path = ".", *, db_path: Path | None = None) -> d
                 continue
             sha = hashlib.sha256(raw).hexdigest()
             fstr = str(f)
+            seen_paths.add(fstr)
             if existing.get(fstr) == sha:
                 cached += 1
                 continue
@@ -185,12 +189,22 @@ def index_workspace(root: str | Path = ".", *, db_path: Path | None = None) -> d
                 )
                 new_edges += 1
             updated += 1
+        canon_str = str(canon)
+        canon_prefix = canon_str.rstrip("/\\") + os.sep
+        for stale in list(existing.keys()):
+            under_root = stale == canon_str or stale.startswith(canon_prefix)
+            if stale not in seen_paths and (under_root or not Path(stale).exists()):
+                conn.execute("DELETE FROM symbols WHERE file_path=?", (stale,))
+                conn.execute("DELETE FROM edges WHERE file_path=?", (stale,))
+                conn.execute("DELETE FROM files WHERE path=?", (stale,))
+                removed += 1
         conn.commit()
         tot_s = conn.execute("SELECT COUNT(*) FROM symbols").fetchone()[0]
         tot_e = conn.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
         return {
             "ok": True, "root": str(canon),
             "files_seen": len(files), "files_updated": updated, "files_cached": cached,
+            "files_removed": removed,
             "new_symbols": new_syms, "new_edges": new_edges,
             "total_symbols": tot_s, "total_edges": tot_e,
             "ms": int((time.monotonic() - t0) * 1000),

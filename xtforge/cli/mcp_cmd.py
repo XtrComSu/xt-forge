@@ -83,9 +83,26 @@ def cmd_mcp(args) -> int:
     srv_arg = getattr(args, "server", None) or target
     cmd_arg = getattr(args, "cmd", None)
 
+    if verb == "journal":
+        from ..core import call_journal as jmod
+        key = getattr(args, "key", None) or srv_arg
+        state = getattr(args, "state", None) or ""
+        if key:
+            entry = jmod.get_entry(key)
+            return _out(
+                args,
+                {"ok": True, "journal_path": str(jmod.journal_path()), "found": entry is not None, "entry": entry},
+                f"{key}: {entry['state'] if entry else 'not found'}",
+            )
+        entries = jmod.list_entries(state)
+        return _out(
+            args,
+            {"ok": True, "journal_path": str(jmod.journal_path()), "count": len(entries), "entries": entries},
+            f"{len(entries)} call journal entries",
+        )
     if verb == "serve":
         import subprocess, sys
-        argv = [sys.executable, "-m", "adapters.mcp.server"]
+        argv = [sys.executable, "-m", "xtforge.adapters.mcp_server"]
         if getattr(args, "meta", False):
             argv.append("--meta")
         return subprocess.run(argv).returncode

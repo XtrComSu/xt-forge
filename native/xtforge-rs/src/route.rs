@@ -1,12 +1,13 @@
 //! Route CLI (mirrors xtforge/core/route/{tools,shortcuts,reference}.py and
 //! the live xtscan/xtdigest output shapes).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
 
 use regex::Regex;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use crate::args::Parsed;
 use crate::guard;
@@ -640,8 +641,35 @@ fn pack_alias(tok: &str) -> &str {
         "rows" => "row",
         "dicts" => "dict",
         "tokens" => "token",
+        "dequeued" => "dequeue",
+        "enqueued" => "enqueue",
+        "allowed" => "allow",
+        "permitted" => "permit",
         _ => tok,
     }
+}
+
+fn pack_synonyms(tok: &str) -> &'static [&'static str] {
+    match tok {
+        "record" | "recorded" => &["observe", "emit", "log", "metric"],
+        "observe" => &["record", "metric"],
+        "latency" => &["duration", "elapsed", "timing"],
+        "dequeue" => &["queue", "pop", "take", "next"],
+        "enqueue" => &["queue", "push", "add"],
+        "order" => &["priority", "sort"],
+        "allow" => &["permit", "roots", "whitelist"],
+        "connection" => &["pool", "connect"],
+        _ => &[],
+    }
+}
+
+fn is_failure_intent_tok(tok: &str) -> bool {
+    matches!(
+        tok,
+        "error" | "errors" | "err" | "fail" | "failed" | "failing" | "failure"
+            | "exception" | "traceback" | "raise" | "throw" | "crash" | "crashed"
+            | "timeout" | "refused" | "denied" | "corrupt" | "missing" | "fatal"
+    )
 }
 
 fn stem_tok(tok: &str) -> String {
@@ -718,17 +746,47 @@ fn line_words(line: &str) -> HashSet<String> {
 }
 
 #[derive(Clone)]
+struct ScoreBreakdown {
+    lexical: f64,
+    synonym: f64,
+    path: f64,
+    decl_assign: f64,
+    error_bonus: f64,
+    ref_def_bonus: f64,
+    adj_bonus: f64,
+}
+
+impl ScoreBreakdown {
+    fn to_json(&self) -> Value {
+        json!({
+            "lexical": self.lexical,
+            "synonym": self.synonym,
+            "path": self.path,
+            "decl_assign": self.decl_assign,
+            "error_bonus": self.error_bonus,
+            "ref_def_bonus": self.ref_def_bonus,
+            "adj_bonus": self.adj_bonus,
+        })
+    }
+}
+
+#[derive(Clone)]
 struct PackCandidate {
     path: String,
     line: usize,
     score: f64,
     error_line: bool,
+    digest: String,
+    breakdown: ScoreBreakdown,
 }
 
 struct PackMatchers {
     errorish: Regex,
     declish: Regex,
     assignish: Regex,
+    ident: Regex,
+    def_lhs: Regex,
+    comment_or_doc: Regex,
 }
 
 impl PackMatchers {
@@ -743,43 +801,176 @@ impl PackMatchers {
             assignish: Regex::new(
                 r"^\s*(?:export\s+)?(?:const\s+|let\s+|var\s+|static\s+|final\s+)?[A-Za-z_][A-Za-z0-9_]*\s*[:=][^=]"
             ).unwrap(),
+            ident: Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]{2,})\b").unwrap(),
+            def_lhs: Regex::new(
+                r"^\s*(?:async\s+)?(?:def|class|function|func|fn|const|let|var|export|static|final)?\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(|[:=][^=])"
+            ).unwrap(),
+            comment_or_doc: Regex::new(r#"^\s*(?:#|//|/\*|\*|"""|''')"#).unwrap(),
         }
     }
 }
 
-fn score_line_pack(line: &str, tokens: &[String], path_lower: &str, m: &PackMatchers) -> (f64, bool) {
+fn round2_f(v: f64) -> f64 {
+    (v * 100.0).round() / 100.0
+}
+
+fn score_line_pack_detail(line: &str, tokens: &[String], path_lower: &str, m: &PackMatchers) -> (f64, bool, ScoreBreakdown) {
     if tokens.is_empty() {
-        return (0.0, false);
+        return (
+            0.0,
+            false,
+            ScoreBreakdown { lexical: 0.0, synonym: 0.0, path: 0.0, decl_assign: 0.0, error_bonus: 0.0, ref_def_bonus: 0.0, adj_bonus: 0.0 },
+        );
     }
     let lower = line.to_ascii_lowercase();
     let words = line_words(line);
     let canon_words: HashSet<String> = words.iter().map(|w| canon_tok(w)).collect();
-    let mut score = 0.0f64;
+    let has_failure_intent = tokens.iter().any(|t| is_failure_intent_tok(t) || is_failure_intent_tok(&canon_tok(t)));
+
+    let mut lex = 0.0f64;
+    let mut syn = 0.0f64;
+    let mut pth = 0.0f64;
     for tok in tokens {
         let canon = canon_tok(tok);
         if words.contains(tok) {
-            score += 3.0;
+            lex += 3.0;
         } else if canon_words.contains(&canon) {
-            score += 2.0;
+            lex += 2.0;
         } else if tok.len() >= 4 && words.iter().any(|w| w.starts_with(tok.as_str())) {
-            score += 1.5;
+            lex += 1.5;
+        } else {
+            let syns = {
+                let s1 = pack_synonyms(tok);
+                if s1.is_empty() { pack_synonyms(&canon) } else { s1 }
+            };
+            if syns.iter().any(|&s| words.contains(s) || canon_words.contains(s)) {
+                syn += 1.5;
+            }
         }
         if path_lower.contains(tok.as_str()) || (canon.len() >= 4 && path_lower.contains(canon.as_str())) {
-            score += 1.5;
+            pth += 1.5;
         }
         if !words.contains(tok) && lower.contains(tok.as_str()) {
-            score += 0.5;
+            lex += 0.5;
         }
     }
-    if m.declish.is_match(line) || m.assignish.is_match(line) {
-        score += 1.0;
-    }
+    let decl_assign = if m.declish.is_match(line) || m.assignish.is_match(line) { 1.0 } else { 0.0 };
     let err = m.errorish.is_match(line);
-    if err {
-        score += 2.0;
+    let error_bonus = if err { if has_failure_intent { 2.0 } else { 0.5 } } else { 0.0 };
+    let raw = lex + syn + pth + decl_assign + error_bonus;
+    let capped = if raw > 12.0 { 12.0 } else { raw };
+    (
+        round2_f(capped),
+        err,
+        ScoreBreakdown {
+            lexical: round2_f(lex),
+            synonym: round2_f(syn),
+            path: round2_f(pth),
+            decl_assign,
+            error_bonus,
+            ref_def_bonus: 0.0,
+            adj_bonus: 0.0,
+        },
+    )
+}
+
+fn score_file_lines_rs(
+    lines: &[String],
+    tokens: &[String],
+    path_str: &str,
+    digest: &str,
+    m: &PackMatchers,
+) -> Vec<PackCandidate> {
+    let path_lower = path_str.to_ascii_lowercase();
+    let mut rows: Vec<(usize, &String, f64, bool, ScoreBreakdown)> = Vec::with_capacity(lines.len());
+    for (idx, line) in lines.iter().enumerate() {
+        let (sc, err, brk) = score_line_pack_detail(line, tokens, &path_lower, m);
+        rows.push((idx + 1, line, sc, err, brk));
     }
-    let capped = if score > 12.0 { 12.0 } else { score };
-    ((capped * 100.0).round() / 100.0, err)
+
+    let mut ref_boosts: HashMap<String, f64> = HashMap::new();
+    for &(_, line, sc, _, ref brk) in &rows {
+        if sc < 2.5 {
+            continue;
+        }
+        let sig_score = brk.lexical + brk.synonym;
+        if sig_score < 1.5 {
+            continue;
+        }
+        for cap in m.ident.captures_iter(line) {
+            let ident = &cap[1];
+            let low = ident.to_ascii_lowercase();
+            if STOPWORDS.contains(&low.as_str()) || ident.len() < 3 {
+                continue;
+            }
+            let is_upper = ident.bytes().all(|b| !b.is_ascii_lowercase());
+            let weight = if is_upper { 0.85 } else { 0.55 };
+            let boost = round2_f((sig_score * weight).min(4.0));
+            let cur = ref_boosts.get(ident).copied().unwrap_or(0.0);
+            if boost > cur {
+                ref_boosts.insert(ident.to_string(), boost);
+            }
+        }
+    }
+
+    let mut adj_boosts = vec![0.0f64; rows.len()];
+    for (idx, &(_, line, _, _, ref brk)) in rows.iter().enumerate() {
+        let lex_syn = brk.lexical + brk.synonym;
+        if lex_syn >= 2.0 && (m.comment_or_doc.is_match(line) || m.declish.is_match(line)) {
+            let bleed = round2_f((lex_syn * 0.55).min(2.5));
+            let mut step = 0usize;
+            for j in (idx + 1)..rows.len().min(idx + 6) {
+                let nxt = rows[j].1.trim();
+                if nxt.is_empty() {
+                    continue;
+                }
+                if m.declish.is_match(nxt) && j > idx + 1 {
+                    break;
+                }
+                if bleed > adj_boosts[j] {
+                    adj_boosts[j] = bleed;
+                }
+                step += 1;
+                if step >= 4 {
+                    break;
+                }
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for (idx, (lineno, line, sc, err, mut brk)) in rows.into_iter().enumerate() {
+        let ref_b = m
+            .def_lhs
+            .captures(line)
+            .and_then(|c| c.get(1))
+            .and_then(|g| ref_boosts.get(g.as_str()).copied())
+            .unwrap_or(0.0);
+        let adj_b = adj_boosts[idx];
+        let mut final_score = sc;
+        if ref_b > 0.0 || adj_b > 0.0 {
+            brk.ref_def_bonus = round2_f(ref_b);
+            brk.adj_bonus = round2_f(adj_b);
+            final_score = round2_f((sc + ref_b + adj_b).min(12.0));
+        }
+        if final_score > 0.0 {
+            out.push(PackCandidate {
+                path: path_str.to_string(),
+                line: lineno,
+                score: final_score,
+                error_line: err,
+                digest: digest.to_string(),
+                breakdown: brk,
+            });
+        }
+    }
+    out
+}
+
+fn match_expected_path(cand: &str, expected: &str) -> bool {
+    let nc = cand.replace('\\', "/");
+    let ne = expected.replace('\\', "/");
+    nc == ne || nc.ends_with(&format!("/{ne}")) || (ne.ends_with(&format!("/{}", Path::new(&nc).file_name().and_then(|s| s.to_str()).unwrap_or(""))) && nc.ends_with(&ne))
 }
 
 fn round2_fmt(score: f64) -> String {
@@ -801,6 +992,10 @@ fn route_pack_query(
     max_matches: usize,
     use_symbols: bool,
 ) -> Value {
+    let diagnose = p.fbool("diagnose") || p.fbool("explain");
+    let expected_file = p.fstr("expected-file");
+    let expected_line = p.fint("expected-line", 0).max(0) as usize;
+
     let base = match guard::read_guard(root) {
         Ok(b) => b,
         Err(d) => return envelope(false, Value::Null, Some(format!("{}: {}", d.code, d.reason)), 0, false),
@@ -818,7 +1013,8 @@ fn route_pack_query(
     let matchers = PackMatchers::new();
     let base_str = base.to_string_lossy().to_string();
     let entries = walk_py(&base_str, 8, Some(400));
-    let mut candidates: Vec<PackCandidate> = Vec::new();
+    let mut all_scored: Vec<PackCandidate> = Vec::new();
+    let mut scanned_paths: Vec<String> = Vec::new();
     let mut scanned = 0usize;
 
     for entry in entries {
@@ -837,32 +1033,22 @@ fn route_pack_query(
         if bytes.iter().take(2000).any(|&b| b == 0) {
             continue;
         }
+        let mut h = Sha256::new();
+        h.update(&bytes);
+        let digest = format!("{:x}", h.finalize());
+        scanned_paths.push(entry.path.clone());
         let text = String::from_utf8_lossy(&bytes);
-        let path_str = entry.path;
-        let path_lower = path_str.to_ascii_lowercase();
-        for (idx, line) in splitlines_py(&text).iter().enumerate() {
-            let (score, err) = score_line_pack(line, &tokens, &path_lower, &matchers);
-            if score > 0.0 {
-                candidates.push(PackCandidate {
-                    path: path_str.clone(),
-                    line: idx + 1,
-                    score,
-                    error_line: err,
-                });
-            }
-        }
-        if candidates.len() >= 400 {
-            break;
-        }
+        let file_lines = splitlines_py(&text);
+        all_scored.extend(score_file_lines_rs(&file_lines, &tokens, &entry.path, &digest, &matchers));
     }
 
-    candidates.sort_by(|a, b| {
+    all_scored.sort_by(|a, b| {
         b.score
             .total_cmp(&a.score)
             .then_with(|| a.path.cmp(&b.path))
             .then_with(|| a.line.cmp(&b.line))
     });
-    candidates.truncate(max_matches);
+    let mut candidates: Vec<PackCandidate> = all_scored.iter().take(max_matches).cloned().collect();
 
     let mut graph_hits = 0usize;
     if use_symbols {
@@ -886,11 +1072,18 @@ fn route_pack_query(
                     let fpath = item.get("file").and_then(|v| v.as_str()).unwrap_or("").to_string();
                     let lineno = item.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                     if !fpath.is_empty() && lineno > 0 && seen_pairs.insert((fpath.clone(), lineno)) {
+                        let f_digest = std::fs::read(&fpath).map(|b| {
+                            let mut h = Sha256::new();
+                            h.update(&b);
+                            format!("{:x}", h.finalize())
+                        }).unwrap_or_default();
                         candidates.push(PackCandidate {
                             path: fpath,
                             line: lineno,
                             score: 6.5,
                             error_line: false,
+                            digest: f_digest,
+                            breakdown: ScoreBreakdown { lexical: 0.0, synonym: 0.0, path: 0.0, decl_assign: 0.0, error_bonus: 0.0, ref_def_bonus: 6.5, adj_bonus: 0.0 },
                         });
                         graph_hits += 1;
                     }
@@ -912,13 +1105,17 @@ fn route_pack_query(
         format!("MATCHES {}", candidates.len()),
     ];
 
-    let mut per_file: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+    let mut per_file: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut cand_drop: HashMap<(String, usize), &'static str> = HashMap::new();
     for m in &candidates {
+        let key = (m.path.clone(), m.line);
         let centres = per_file.entry(m.path.clone()).or_default();
         if centres.len() >= flimit {
+            cand_drop.insert(key, "file_limit_exceeded");
             continue;
         }
         if centres.iter().any(|&c| c.abs_diff(m.line) <= window) {
+            cand_drop.insert(key, "window_merged");
             continue;
         }
         centres.push(m.line);
@@ -927,6 +1124,9 @@ fn route_pack_query(
     struct WinItem {
         path: String,
         line: usize,
+        start_line: usize,
+        end_line: usize,
+        digest: String,
         score: f64,
         body: String,
         error_line: bool,
@@ -952,6 +1152,9 @@ fn route_pack_query(
         windows.push(WinItem {
             path: m.path.clone(),
             line: m.line,
+            start_line: start,
+            end_line: end,
+            digest: m.digest.clone(),
             score: m.score,
             body,
             error_line: m.error_line,
@@ -970,7 +1173,9 @@ fn route_pack_query(
     let mut packed_files: HashSet<String> = HashSet::new();
 
     for mut item in windows {
+        let key = (item.path.clone(), item.line);
         if packed_files.len() >= flimit && !packed_files.contains(&item.path) {
+            cand_drop.insert(key, "file_limit_exceeded");
             continue;
         }
         let cost = pyjson::tokens(&item.body);
@@ -980,18 +1185,24 @@ fn route_pack_query(
                 let line_body = format!("{}:L{} {last_ln}", item.path, item.line);
                 let lcost = pyjson::tokens(&line_body);
                 if used + lcost > budget {
+                    cand_drop.insert(key, "token_budget_cut");
                     continue;
                 }
                 used += lcost;
                 item.body = line_body;
+                item.start_line = item.line;
+                item.end_line = item.line;
                 packed_files.insert(item.path.clone());
+                cand_drop.insert(key, "packed");
                 kept.push(item);
             } else {
+                cand_drop.insert(key, "token_budget_cut");
                 continue;
             }
         } else {
             used += cost;
             packed_files.insert(item.path.clone());
+            cand_drop.insert(key, "packed");
             kept.push(item);
         }
     }
@@ -1002,6 +1213,20 @@ fn route_pack_query(
             parts.push(format!("FILE {} (L{}, score {})\n{}", w.path, w.line, round2_fmt(w.score), w.body));
         }
         parts.join("\n\n")
+    };
+    let ev_json = |items: &[WinItem]| -> Value {
+        Value::Array(
+            items
+                .iter()
+                .map(|w| json!({
+                    "path": w.path,
+                    "line": w.line,
+                    "start_line": w.start_line,
+                    "end_line": w.end_line,
+                    "digest": w.digest,
+                }))
+                .collect(),
+        )
     };
 
     let mut context = build_ctx(&kept);
@@ -1014,22 +1239,102 @@ fn route_pack_query(
         "matches": candidates.len(),
         "windows": kept.len(),
         "files": packed_files.len(),
-        "evidence": kept.iter().map(|w| json!({"path": w.path, "line": w.line})).collect::<Vec<_>>(),
+        "evidence": ev_json(&kept),
     });
     if use_symbols {
         data["symbol_graph_hits"] = json!(graph_hits);
     }
     let mut estimate = payload_tokens(&mut data);
     while estimate > budget && !kept.is_empty() {
-        kept.pop();
+        let dropped = kept.pop().unwrap();
+        cand_drop.insert((dropped.path, dropped.line), "evicted_during_budget_trim");
         context = build_ctx(&kept);
         data["windows"] = json!(kept.len());
-        data["evidence"] = json!(kept.iter().map(|w| json!({"path": w.path, "line": w.line})).collect::<Vec<_>>());
+        data["evidence"] = ev_json(&kept);
         data["context"] = json!(context);
         estimate = payload_tokens(&mut data);
     }
     data["estimated_tokens"] = json!(estimate);
     data["truncated"] = json!(!candidates.is_empty() && kept.is_empty());
+
+    if diagnose {
+        let mut top_diag: Vec<Value> = Vec::new();
+        for (idx, c) in all_scored.iter().take(20).enumerate() {
+            let in_ctx = kept.iter().any(|w| w.path == c.path && w.start_line <= c.line && c.line <= w.end_line);
+            let reason = if in_ctx {
+                "packed"
+            } else {
+                cand_drop
+                    .get(&(c.path.clone(), c.line))
+                    .copied()
+                    .unwrap_or(if idx + 1 > max_matches { "below_max_matches" } else { "dropped" })
+            };
+            top_diag.push(json!({
+                "rank": idx + 1,
+                "path": c.path,
+                "line": c.line,
+                "score": c.score,
+                "breakdown": c.breakdown.to_json(),
+                "status": reason,
+            }));
+        }
+        let mut diag = json!({
+            "query_tokens": tokens,
+            "indexed_files_count": scanned_paths.len(),
+            "total_non_zero_candidates": all_scored.len(),
+            "top_candidates": top_diag,
+        });
+        if expected_file.is_some() || expected_line > 0 {
+            let exp_f = expected_file.as_deref().unwrap_or("");
+            let file_indexed = if exp_f.is_empty() {
+                true
+            } else {
+                scanned_paths.iter().any(|p| match_expected_path(p, exp_f))
+            };
+            let mut best_rank: Option<usize> = None;
+            let mut best_cand: Option<&PackCandidate> = None;
+            for (idx, c) in all_scored.iter().enumerate() {
+                if !exp_f.is_empty() && !match_expected_path(&c.path, exp_f) {
+                    continue;
+                }
+                if expected_line > 0 && c.line != expected_line {
+                    continue;
+                }
+                best_rank = Some(idx + 1);
+                best_cand = Some(c);
+                break;
+            }
+            let in_packed = kept.iter().any(|w| {
+                (exp_f.is_empty() || match_expected_path(&w.path, exp_f))
+                    && (expected_line == 0 || (w.start_line <= expected_line && expected_line <= w.end_line))
+            });
+            let drop_reason = if in_packed {
+                "packed"
+            } else if !file_indexed {
+                "file_not_indexed"
+            } else if best_cand.is_none() {
+                "score_zero"
+            } else if best_rank.unwrap_or(0) > max_matches {
+                "below_max_matches"
+            } else {
+                let c = best_cand.unwrap();
+                cand_drop.get(&(c.path.clone(), c.line)).copied().unwrap_or("token_budget_cut")
+            };
+            diag["target"] = json!({
+                "expected_file": expected_file,
+                "expected_line": if expected_line > 0 { json!(expected_line) } else { Value::Null },
+                "indexed": file_indexed,
+                "packed": in_packed,
+                "rank": best_rank,
+                "total_non_zero_candidates": all_scored.len(),
+                "score": best_cand.map(|c| c.score).unwrap_or(0.0),
+                "breakdown": best_cand.map(|c| c.breakdown.to_json()).unwrap_or(Value::Null),
+                "drop_reason": drop_reason,
+            });
+        }
+        data["diagnostic"] = diag;
+    }
+
     envelope(true, data, None, 0, false)
 }
 
@@ -1268,7 +1573,7 @@ pub fn run(p: &Parsed) -> Option<i32> {
             let budget = p.fint("token-budget", 1200);
             let file_limit = p.fint("file-limit", 12);
             if let Some(q) = p.fstr("query") {
-                let win = p.fint("window", 2).max(0) as usize;
+                let win = p.fint("context", p.fint("window", 2)).max(1) as usize;
                 let max_m = p.fint("max-matches", 40).max(1) as usize;
                 route_pack_query(p, root, &q, budget, file_limit, win, max_m, p.fbool("symbols"))
             } else if p.fbool("symbols") {

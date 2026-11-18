@@ -1,3 +1,23 @@
+## 0.4.2 - 2026-11-18
+
+### Added
+- **Context-Miss Diagnostics & Unseen Generalization (`route context --diagnose`)**:
+  - Added `--diagnose`, `--expected-file`, and `--expected-line` in both Rust (`xtforge-native`) and Python (`xtforge.core.route.pack`), reporting `indexed`, `rank`, `score`, `drop_reason`, and token cutoffs on missed targets (`t03`, `t06`, `t09`, `t17` resolved: **20/20** hit rate vs `3/20` repo map on `context_tasks.json`).
+  - Added held-out unseen benchmark fixture (`tests/fixtures/unseen_project/` + `tests/fixtures/context_tasks_unseen.json`, **8/8** hit rate with 54.3% token reduction).
+- **Live Evidence Freshness (`digest` + incremental cache invalidation)**:
+  - Attached SHA-256 `digest` and `start_line..end_line` provenance to packed context slices and automatically invalidated affected `code_graph.db` edges and cached results on live file rename/move/delete without manual rebuilds (`tests/test_context_freshness.py`).
+- **Crash-Safe Tool Call Recovery & MCP Cancellation**:
+  - Extended `xtforge.core.call_journal` and Go `internal/mcp/journal.go` (`pending` / `completed` / `unknown` states) with request-scoped `notifications/cancelled` propagation and automatic dead-upstream session respawn (`internal/mcp/upstreams.go`, `xtforge/adapters/mcp_server.py`), preventing duplicate commits across dropped replies (`tests/test_call_recovery.py`).
+- **Measured Discovery Cost & 3-Tier Live Harness Benchmarks**:
+  - Added `scripts/bench_discovery_cost.py` comparing direct MCP catalogs (4, 50, 229 tools) against Go (`1,384 B` / `346` tok) and Python (`1,007 B` / `252` tok) `--meta` gateways.
+  - Added `scripts/bench_three_tier.py` (`Find`, `Fix`, `Recover`) with live tool-call preflight and credential-scrubbed traces across Codex CLI, OpenCode, and DSH (`tests/test_shipped_packages.py` covering Python wheel, npm `xt-forge`/`xtf`, and `install.sh`).
+
+### Fixed
+- **Full RELRO Detection (`re checksec`)**: Fixed both Go (`internal/rehub/sec_capa.go`) and Python (`xtforge/core/re/elf.py`) to inspect `DT_FLAGS` (`BIND_NOW`) and `DT_FLAGS_1` (`NOW`) alongside legacy `DT_BIND_NOW`, matching `readelf` (`Full` on `/bin/ls`).
+- **Bundled SQLite in Rust (`native/xtforge-rs/Cargo.toml`)**: Enabled `rusqlite` `bundled` feature so Rust builds cleanly without system `libsqlite3-dev` headers.
+- **`codec` CLI & Entropy Scanner**: Fixed argparse intermixed options bug in `codec` CLI (`xtforge/cli/__init__.py`) and eliminated false-positive `high_entropy` alerts on snake/kebab identifiers and `expected.json` fixtures (`scan_fast.rs`, `xtforge/core/scan/__init__.py`).
+- **Accurate Diagnostics & Metadata**: Aligned Go hub `serverInfo` version to `0.4.2`, fixed `doctor` `native_dir` reporting and active `xtscan`/`xtdigest`/`xtsqueeze` engine tags (`xtforge/core/route/caps.py`), moved the MCP stdio implementation into wheel-included `xtforge/adapters/mcp_server.py`, and forwarded custom `env` blocks from `mcp_upstreams.json`.
+
 ## 0.4.1 - 2026-11-18
 
 ### Added

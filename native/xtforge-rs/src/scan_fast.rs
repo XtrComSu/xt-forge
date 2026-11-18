@@ -167,6 +167,14 @@ fn logical_chunks(lines: &[&str], string_line: &Regex) -> Vec<(usize, String)> {
     chunks
 }
 
+fn looks_like_snake_or_kebab_ident(value: &str) -> bool {
+    if !value.contains('_') && !value.contains('-') {
+        return false;
+    }
+    let parts: Vec<&str> = value.split(|c| c == '_' || c == '-').filter(|p| !p.is_empty()).collect();
+    parts.len() >= 2 && parts.iter().all(|p| p.bytes().all(|b| b.is_ascii_lowercase()))
+}
+
 fn scan_text(rules: &CompiledRules, text: &str, path: &str, reveal: bool, mode: &str) -> Vec<Value> {
     let mut findings = Vec::new();
     let lines: Vec<&str> = text.lines().collect();
@@ -231,7 +239,7 @@ fn scan_text(rules: &CompiledRules, text: &str, path: &str, reveal: bool, mode: 
         for cap in rules.entropy_cand.captures_iter(text) {
             if let Some(m) = cap.get(1) {
                 let val = m.as_str();
-                if overlaps(m.start(), m.end(), &covered) || shannon(val.as_bytes()) < ENTROPY_MIN_BITS {
+                if overlaps(m.start(), m.end(), &covered) || looks_like_snake_or_kebab_ident(val) || shannon(val.as_bytes()) < ENTROPY_MIN_BITS {
                     continue;
                 }
                 covered.push((m.start(), m.end()));

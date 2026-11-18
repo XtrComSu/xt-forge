@@ -5,7 +5,7 @@ import argparse
 import json
 import sys
 
-from ..version import app_name
+from ..version import app_name, version_str
 from .mem_cmd import cmd_mem
 from .flash_cmd import cmd_flash
 from .ops_cmd import cmd_goal, cmd_build, cmd_loop
@@ -32,7 +32,8 @@ from .taste_cmd import cmd_taste
 from .plugin_cmd import cmd_plugin
 from .research_cmd import cmd_research
 from .device_cmd import (cmd_route, cmd_phone, cmd_compress, cmd_ascii,
-                         cmd_version, cmd_doctor, cmd_code, cmd_guard)
+                         cmd_version, cmd_doctor, cmd_code, cmd_guard,
+                         cmd_skills)
 from .prompt_cmd import cmd_prompt
 
 
@@ -189,6 +190,12 @@ def _add_route(sub) -> None:
     r.add_argument("--minutes", type=int, default=60)
     r.add_argument("--symbols", action="store_true",
                    help="context: expand matches along the code call/definition graph")
+    r.add_argument("--diagnose", "--explain", dest="diagnose", action="store_true",
+                   help="context: explain ranking, index status, and budget/limit drop reasons")
+    r.add_argument("--expected-file", dest="expected_file",
+                   help="context --diagnose: optional expected file path to inspect")
+    r.add_argument("--expected-line", dest="expected_line", type=int, default=0,
+                   help="context --diagnose: optional expected line number to inspect")
     r.set_defaults(func=cmd_route)
 
 
@@ -630,8 +637,11 @@ def _add_tool(sub) -> None:
 def _add_mcp(sub) -> None:
     m = sub.add_parser("mcp", help="MCP servers, connect, audit, trust pinning, proxy, and gateway")
     m.add_argument("mcp_verb", nargs="?", default="status",
-                   choices=["status", "advice", "configs", "serve", "audit", "proxy", "trust", "connect"])
+                   choices=["status", "advice", "configs", "serve", "audit",
+                            "proxy", "trust", "connect", "journal"])
     m.add_argument("mcp_target", nargs="?", help="optional server name/alias (e.g. rea, craft-anything)")
+    m.add_argument("--state", help="journal: filter by state (never_started|unknown_outcome|completed)")
+    m.add_argument("--key", help="journal: look up idempotency key")
     m.add_argument("--profile", help="only read this profile's cordis patch "
                                      "(default: every profile)")
     m.add_argument("--probe", action="store_true",
@@ -679,15 +689,29 @@ def _add_swarm(sub) -> None:
 
 
 def _add_session(sub) -> None:
-    s = sub.add_parser("session", help="session checkpointing (fork and rewind state)")
-    s.add_argument("session_verb", choices=["fork", "rewind", "list", "delete"], default="list", nargs="?")
-    s.add_argument("target", nargs="?", default=None, help="checkpoint id or snapshot name")
+    s = sub.add_parser("session", help="session checkpointing and recoverable call journal")
+    s.add_argument("session_verb",
+                   choices=["fork", "rewind", "list", "delete", "journal", "recover", "begin-call", "resolve-call"],
+                   default="list", nargs="?")
+    s.add_argument("target", nargs="?", default=None, help="checkpoint id, call_id, or idempotency key")
     s.add_argument("--name", help="descriptive name for checkpoint")
+    s.add_argument("--state", help="journal: filter state (never_started|unknown_outcome|completed)")
+    s.add_argument("--key", help="idempotency key")
+    s.add_argument("--server", help="upstream server name")
+    s.add_argument("--tool", help="upstream tool name")
+    s.add_argument("--verify-tool", dest="verify_tool", help="read-only verification tool name")
     s.set_defaults(func=cmd_session)
+
+
+def _add_skills(sub) -> None:
+    sk = sub.add_parser("skills", help="list or install XT-Forge XTF-* skills")
+    sk.add_argument("skills_verb", nargs="?", default="list", choices=["list", "path", "install"])
+    sk.set_defaults(func=cmd_skills)
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=app_name())
+    p.add_argument("-V", "--version", action="version", version=f"{app_name()} {version_str()}")
     p.add_argument("--json", action="store_true", help="print raw JSON")
     p.add_argument("--db", help="path to mem.db")
     p.add_argument("--flash-base", help="flash storage directory override")
@@ -704,6 +728,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_guard(sub)
     _add_swarm(sub)
     _add_session(sub)
+    _add_skills(sub)
     _add_flash(sub)
     _add_goal(sub)
     _add_build(sub)
@@ -744,6 +769,39 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _parse_cli_args(parser: argparse.ArgumentParser, argv: list[str]) -> argparse.Namespace:
+    if any(h in argv for h in ("-h", "--help")):
+        return parser.parse_args(argv)
+    sub_action = next((a for a in parser._actions if isinstance(a, argparse._SubParsersAction)), None)
+    if sub_action is not None:
+        prefix: list[str] = []
+        i = 0
+        while i < len(argv):
+            tok = argv[i]
+            if tok == "--json":
+                prefix.append(tok)
+                i += 1
+            elif tok in ("--db", "--flash-base") and i + 1 < len(argv):
+                prefix.extend([tok, argv[i + 1]])
+                i += 2
+            elif tok.startswith("--db=") or tok.startswith("--flash-base="):
+                prefix.append(tok)
+                i += 1
+            else:
+                break
+        if i < len(argv) and argv[i] in sub_action.choices:
+            noun = argv[i]
+            sub_p = sub_action.choices[noun]
+            root_ns = parser.parse_args(prefix)
+            sub_ns = sub_p.parse_intermixed_args(argv[i + 1:])
+            merged = argparse.Namespace(**vars(root_ns))
+            merged.noun = noun
+            for k, v in vars(sub_ns).items():
+                setattr(merged, k, v)
+            return merged
+    return parser.parse_args(argv)
+
+
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     # Shortcut: `xtforge --meta` or `xt-forge --meta` launches the sub-1KB MCP gateway directly.
@@ -755,7 +813,7 @@ def main(argv=None) -> int:
     if force_json:
         argv = [argv[0]] + [a for a in argv[1:] if a != "--json"]
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = _parse_cli_args(parser, argv)
     if force_json:
         args.json = True
     if not getattr(args, "noun", None):

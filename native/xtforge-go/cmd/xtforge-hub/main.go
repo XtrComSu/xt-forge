@@ -27,7 +27,7 @@ func run(args []string) int {
 		printJSON(map[string]any{
 			"ok":      true,
 			"service": "xtforge-hub",
-			"version": "0.4.0",
+			"version": "0.4.2",
 			"nouns":   []string{"mcp", "code", "re", "research", "loop", "guard"},
 		})
 		return 0
@@ -97,7 +97,7 @@ func resolveHubUpstream(serverName, cmdStr string) (string, []string, error) {
 
 func handleMCP(args []string) int {
 	if len(args) == 0 {
-		return printError("mcp requires a verb: serve|proxy|audit|trust|connect")
+		return printError("mcp requires a verb: serve|proxy|audit|trust|connect|journal")
 	}
 	verb := args[0]
 	rest := args[1:]
@@ -221,6 +221,31 @@ func handleMCP(args []string) int {
 			return 1
 		}
 		return 0
+	case "journal":
+		state := flagStr(rest, "--state", "")
+		key := flagStr(rest, "--key", "")
+		if key != "" {
+			if e, ok := mcp.FindJournalByKey(key); ok {
+				return printJSON(map[string]any{
+					"ok":           true,
+					"journal_path": mcp.JournalPath(),
+					"found":        true,
+					"entry":        e,
+				})
+			}
+			return printJSON(map[string]any{
+				"ok":           true,
+				"journal_path": mcp.JournalPath(),
+				"found":        false,
+			})
+		}
+		entries := mcp.ListJournalEntries(state)
+		return printJSON(map[string]any{
+			"ok":           true,
+			"journal_path": mcp.JournalPath(),
+			"count":        len(entries),
+			"entries":      entries,
+		})
 	default:
 		return printError("unknown mcp hub verb: " + verb)
 	}

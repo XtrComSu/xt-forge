@@ -389,6 +389,12 @@ def execute_tool(server_name: str, tool_name: str, arguments: dict[str, Any] | N
         return {"ok": False, "error": f"server executable not found: {cmd[0]}"}
     cmd = [resolved_bin, *cmd[1:]]
 
+    proc_env = os.environ.copy()
+    saved = load_upstreams()
+    entry = saved.get(canonical_upstream_name(server_name)) or saved.get(server_name) or {}
+    if isinstance(entry.get("env"), dict):
+        for k, v in entry["env"].items():
+            proc_env[str(k)] = str(v)
     deadline = time.monotonic() + max(timeout, 5)
     proc: subprocess.Popen[str] | None = None
     try:
@@ -399,6 +405,7 @@ def execute_tool(server_name: str, tool_name: str, arguments: dict[str, Any] | N
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            env=proc_env,
         )
         assert proc.stdin is not None and proc.stdout is not None
         proc.stdin.write(json.dumps({
@@ -406,7 +413,7 @@ def execute_tool(server_name: str, tool_name: str, arguments: dict[str, Any] | N
             "id": 1,
             "method": "initialize",
             "params": {"protocolVersion": "2025-06-18", "capabilities": {},
-                       "clientInfo": {"name": "xt-forge", "version": "0.4.0"}},
+                       "clientInfo": {"name": "xt-forge", "version": "0.4.2"}},
         }) + "\n")
         proc.stdin.flush()
         init_resp, _ = _read_rpc_by_id(proc.stdout, 1, deadline)

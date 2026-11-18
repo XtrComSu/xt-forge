@@ -6,15 +6,15 @@
   <p><strong>Local agent workbench for call-graph context, offline reverse engineering, keyless CVE intel, and sub-1KB MCP routing.</strong></p>
   <p>Built in <strong>Rust</strong>, <strong>Go</strong>, and zero-dependency <strong>Python 3.11+</strong> by <a href="https://xtrcom.xyz">XtrComSu</a>.</p>
   <p>
-    <a href="https://github.com/XtrComSu/xt-forge/releases/tag/v0.4.1-Damascus"><img src="https://img.shields.io/badge/release-v0.4.1--Damascus-FF2E2E?style=flat-square&logo=github" alt="Release v0.4.1-Damascus" /></a>
+    <a href="https://github.com/XtrComSu/xt-forge/releases/tag/v0.4.2-Damascus"><img src="https://img.shields.io/badge/release-v0.4.2--Damascus-FF2E2E?style=flat-square&logo=github" alt="Release v0.4.2-Damascus" /></a>
     <img src="https://img.shields.io/badge/engines-Rust%20%2B%20Go%20%2B%20Python%203.11%2B-111116?style=flat-square" alt="Rust + Go + Python" />
-    <img src="https://img.shields.io/badge/MCP%20schema-0.90%20KB%20(--meta)-22C55E?style=flat-square" alt="0.90 KB MCP Schema" />
+    <img src="https://img.shields.io/badge/MCP%20schema-1.35%20KB%20(--meta)-22C55E?style=flat-square" alt="1.35 KB MCP Schema" />
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3B82F6?style=flat-square" alt="MIT License" /></a>
   </p>
 </div>
 
 <p align="center">
-  <img src="docs/assets/overview-showcase.gif" alt="XT-Forge v0.4.1-Damascus Overview Showcase" width="100%" />
+  <img src="docs/assets/overview-showcase.gif" alt="XT-Forge v0.4.2-Damascus Overview Showcase" width="100%" />
 </p>
 
 ---
@@ -25,7 +25,7 @@ Most coding and security agent setups burn thousands of context tokens on massiv
 
 | Everyday Problem | What `xt-forge` Gives You | Command / Guide |
 | --- | --- | --- |
-| Bloated MCP catalogs eat 10K–40K+ tokens upfront | `--meta` gateway exposes 4 meta-tools (`0.90 KB`) across local tools + external MCPs | `xt-forge --meta` |
+| Bloated MCP catalogs eat 10K–40K+ tokens upfront | `--meta` gateway exposes 4 meta-tools (`1,384 B` Go / `1,007 B` Python) across local tools + external MCPs | `xt-forge --meta` |
 | Massive RE/IDE MCPs (`rea`, `craft-anything`) break context limits | Connect once (`mcp connect`), SHA-256 trust-pin, and route stateful stdio calls lazily | `xt-forge mcp connect rea` |
 | Regex grep misses callers, callees, and definitions | Incremental `code_graph.db` call graph + LSP multiplexer pack structural slices | `xt-forge code index .` |
 | Binary triage usually drags in heavy GUI tools | Offline ELF/PE/Mach-O headers, `checksec`, `capa`, RTTI, CFG, XOR, ASAR, APK, HAR | [CVE & RE Guide](docs/CVE-AND-REVERSE-ENGINEERING.md) |
@@ -67,12 +67,12 @@ irm https://raw.githubusercontent.com/XtrComSu/xt-forge/main/install.ps1 | iex
 git clone https://github.com/XtrComSu/xt-forge.git; cd xt-forge; .\install.ps1
 ```
 
-Both `install.sh` and `install.ps1` compile Rust (`xtforge-native`) and Go (`xtforge-hub`) when toolchains are installed and fall back cleanly to zero-dependency Python 3.11+ (`XT_FORCE_PYTHON=1` forces Python anytime). Prebuilt release tarballs, npm packages, and stdlib wheels live on [Releases](https://github.com/XtrComSu/xt-forge/releases).
+Both `install.sh` and `install.ps1` compile Rust (`xtforge-native`, requires **Cargo 1.78+** with bundled SQLite — no `libsqlite3-dev` headers required) and Go (`xtforge-hub`, requires **Go 1.24+**) when toolchains are present, and fall back to zero-dependency Python 3.11+ (`XT_FORCE_PYTHON=1` forces Python anytime) with CLI workflow parity while native binaries accelerate hot paths 10x–25x. Prebuilt release tarballs, npm packages (`xt-forge`, `xtf`), and stdlib wheels (`xtforge`) live on [Releases](https://github.com/XtrComSu/xt-forge/releases).
 
 ```sh
 xt-forge --meta        # stdio MCP gateway (xt_discover, xt_schema, xt_call, xt_batch)
 xt-forge doctor        # inspect workspace health, guard mode, and native engines
-xt-forge skills        # list the 18 bundled XTF-* workflow skills
+npx xt-forge skills    # list the 18 bundled XTF-* workflow skills
 ```
 
 ---
@@ -87,7 +87,7 @@ Want an AI coding agent (Claude Code, Codex CLI, OpenCode, DSH, Cursor) to insta
 
 ## Lean MCP Setup + REA & Craft Anything
 
-Wire `xt-forge` once using `--meta`. Models discover tools on demand (`xt_discover` -> `xt_schema` -> `xt_call` or `xt_batch`), keeping initial prompt schema size at **0.90 KB** (`94%` smaller than mounting all 50 individual schemas upfront) and spilling oversized responses cleanly to `$XT_HOME/cache/artifacts/`.
+Wire `xt-forge` once using `--meta`. Models discover tools on demand (`xt_discover` -> `xt_schema` -> `xt_call` or `xt_batch`), keeping initial prompt schema size at **1,384 bytes (346 tokens)** in Go (`1,007 B / 252 tok` in Python) — **93.1% smaller** on 50-tool catalogs and **98.5% smaller** on 229-tool catalogs (`Direct` remains leaner on tiny 1–4 tool catalogs) — and spilling oversized responses cleanly to `$XT_HOME/cache/artifacts/`.
 
 <p align="center">
   <img src="docs/assets/mcp-rea-craft.gif" alt="Connecting REA and Craft Anything through XT-Forge --meta Gateway" width="100%" />
@@ -226,6 +226,18 @@ Hot CLI paths run directly in Rust (`xtforge-native`) and Go (`xtforge-hub`), de
 
 ---
 
+## Benchmarks & Reproducibility
+
+`v0.4.2-Damascus` validates context precision, MCP discovery overhead, and crash recovery end-to-end:
+
+| Suite | Scope | Result | Command |
+| --- | --- | --- | --- |
+| **Context Packing** | `context_tasks.json` (20 tasks) + held-out `context_tasks_unseen.json` (8 tasks) | **20/20** (`608.4` mean tok, `88.8%` cut vs `3/20` map) · **8/8** unseen (`566.4` mean tok) | `python3 scripts/bench_context_pack.py --json` |
+| **Discovery Cost** | Direct vs `--meta` on 4, 50, and 229 tools | Direct wins 1-turn on 4 tools (`450` vs `1,591` tok); `--meta` saves `93.1%` (50) & `98.5%` (229, `4.2 ms` first call) | `python3 scripts/bench_discovery_cost.py --json` |
+| **3-Tier Live Suite** | `Find` / `Fix` / `Recover` (Codex, OpenCode, DSH) | Crash-safe `Recover`: **3/3 pass** with `xt-forge` (`1` commit, `0` duplicates) vs `0/3` baseline | `python3 scripts/bench_three_tier.py --self-test` |
+
+---
+
 ## Documentation
 
 - [Field Guide & Architecture Walkthrough](docs/GUIDE.md)
@@ -234,16 +246,15 @@ Hot CLI paths run directly in Rust (`xtforge-native`) and Go (`xtforge-hub`), de
 - [MCP Meta-Gateway and Steering](docs/MCP-GATEWAY-AND-STEERING.md)
 - [Rust + Go Hybrid Runtime Details](docs/ARCHITECTURE-RUST-GO.md)
 - [RE Workbench Details](docs/RE-WORKBENCH.md)
-- [Changelog (`v0.4.1-Damascus`)](CHANGELOG.md) · [Architecture Release Notes](docs/RELEASE-0.4.0.md)
+- [Changelog (`v0.4.2-Damascus`)](CHANGELOG.md) · [Architecture Release Notes](docs/RELEASE-0.4.0.md)
 
 ## Tests
 
 ```sh
-cd native/xtforge-rs && cargo test && cd ../..
-cd native/xtforge-go && go test -race ./... && cd ../..
+cd native/xtforge-rs && cargo test && cargo build --release && cd ../..
+cd native/xtforge-go && go test -race ./... && go build -o xtforge-hub ./cmd/xtforge-hub && cd ../..
 python3 -m unittest discover -s tests
 node --test plugins/xt-native/test/*.test.mjs
-python3 scripts/verify_artifact.py && python3 scripts/verify_dedup_matrix.py && python3 scripts/verify_knowledge.py && python3 scripts/verify_recall.py
 ```
 
 [MIT Licensed](LICENSE) · [xtrcom.xyz](https://xtrcom.xyz)

@@ -247,9 +247,11 @@ pub fn index_workspace(p: &Parsed, root_raw: &str) -> Result<Value, String> {
         }
     }
 
+    let mut seen_paths: HashSet<String> = HashSet::new();
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     let mut updated_files = 0usize;
     let mut skipped_files = 0usize;
+    let mut removed_files = 0usize;
     let mut total_syms = 0usize;
     let mut total_edges = 0usize;
 
@@ -259,10 +261,11 @@ pub fn index_workspace(p: &Parsed, root_raw: &str) -> Result<Value, String> {
         if bytes.len() > 1_000_000 {
             continue;
         }
+        let fstr = f.to_string_lossy().to_string();
+        seen_paths.insert(fstr.clone());
         let mut h = Sha256::new();
         h.update(&bytes);
         let sha = format!("{:x}", h.finalize());
-        let fstr = f.to_string_lossy().to_string();
         if existing.get(&fstr) == Some(&sha) {
             skipped_files += 1;
             continue;
@@ -300,6 +303,19 @@ pub fn index_workspace(p: &Parsed, root_raw: &str) -> Result<Value, String> {
         }
         updated_files += 1;
     }
+
+    // Invalidate & prune deleted, renamed, or moved files cleanly without manual rebuilds.
+    let canon_str = canon.to_string_lossy().to_string();
+    let canon_prefix = format!("{}/", canon_str.trim_end_matches('/'));
+    for stale in existing.keys() {
+        let under_root = stale == &canon_str || stale.starts_with(&canon_prefix);
+        if !seen_paths.contains(stale) && (under_root || !Path::new(stale).exists()) {
+            let _ = tx.execute("DELETE FROM symbols WHERE file_path=?", params![stale]);
+            let _ = tx.execute("DELETE FROM edges WHERE file_path=?", params![stale]);
+            let _ = tx.execute("DELETE FROM files WHERE path=?", params![stale]);
+            removed_files += 1;
+        }
+    }
     tx.commit().map_err(|e| e.to_string())?;
 
     let db_syms: i64 = conn.query_row("SELECT COUNT(*) FROM symbols", [], |r| r.get(0)).unwrap_or(0);
@@ -311,6 +327,7 @@ pub fn index_workspace(p: &Parsed, root_raw: &str) -> Result<Value, String> {
         "files_seen": files.len(),
         "files_updated": updated_files,
         "files_cached": skipped_files,
+        "files_removed": removed_files,
         "new_symbols": total_syms,
         "new_edges": total_edges,
         "total_symbols": db_syms,

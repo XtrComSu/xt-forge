@@ -1,0 +1,14 @@
+{
+  "note": "8 held-out packing tasks covering the t03/t06/t09/t17 failure families plus error/security paths.",
+  "project": "unseen_project",
+  "tasks": [
+    {"id": "u01", "query": "where is checkout timing tracked", "evidence": "self.sink.record_span(\"checkout.duration\", (self.clock() - t0) * 1000.0)"},
+    {"id": "u02", "query": "how many outbound webhooks can run concurrently", "evidence": "MAX_INFLIGHT_WEBHOOKS = 8"},
+    {"id": "u03", "query": "where may artifact bundles be written", "evidence": "ALLOWLISTED_EXPORT_TARGETS = (\"/var/exports\", \"/tmp/bundles\")"},
+    {"id": "u04", "query": "what sequence are pending outbox events picked in", "evidence": "\"ORDER BY scheduled_at ASC, weight DESC LIMIT 1\""},
+    {"id": "u05", "query": "how is retry wait computed", "evidence": "return min(INITIAL_WAIT_S * (2 ** retry_index), CAP_WAIT_S)"},
+    {"id": "u06", "query": "when does the webhook circuit breaker trip", "evidence": "raise CircuitOpenError(\"upstream webhook breaker tripped\")"},
+    {"id": "u07", "query": "which sqlite synchronous mode is configured", "evidence": "conn.execute(\"PRAGMA synchronous=NORMAL\")"},
+    {"id": "u08", "query": "what happens when hmac signature verification fails", "evidence": "raise PermissionError(\"invalid hmac signature\")"}
+  ]
+}

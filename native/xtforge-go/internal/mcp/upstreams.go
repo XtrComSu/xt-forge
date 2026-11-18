@@ -3,6 +3,7 @@ package mcp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -366,17 +367,25 @@ func mcpCallTimeout() time.Duration {
 	return 45 * time.Second
 }
 
+type upstreamLine struct {
+	line []byte
+	err  error
+}
+
 // UpstreamSession manages a persistent stdio JSON-RPC connection to one child MCP server.
 type UpstreamSession struct {
-	Name   string
-	Cmd    []string
-	proc   *exec.Cmd
-	in     io.WriteCloser
-	reader *bufio.Reader
-	mu     sync.Mutex
-	nextID int
-	tools  []ToolDef
-	dirty  bool // set when notifications/tools/list_changed arrives
+	Name    string
+	Cmd     []string
+	proc    *exec.Cmd
+	in      io.WriteCloser
+	reader  *bufio.Reader
+	lines   chan upstreamLine
+	done    chan struct{}
+	mu      sync.Mutex
+	writeMu sync.Mutex
+	nextID  int
+	tools   []ToolDef
+	dirty   bool // set when notifications/tools/list_changed arrives
 }
 
 // StartUpstreamSession spawns an upstream stdio MCP server, completes initialize +
@@ -386,6 +395,20 @@ func StartUpstreamSession(name string, argv []string) (*UpstreamSession, error) 
 		return nil, fmt.Errorf("empty upstream command for %s", name)
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
+	savedUp := LoadUpstreams()
+	var customEnv map[string]string
+	if cfg, ok := savedUp[CanonicalUpstreamName(name)]; ok && len(cfg.Env) > 0 {
+		customEnv = cfg.Env
+	} else if cfg, ok := savedUp[name]; ok && len(cfg.Env) > 0 {
+		customEnv = cfg.Env
+	}
+	if len(customEnv) > 0 {
+		envMap := os.Environ()
+		for k, v := range customEnv {
+			envMap = append(envMap, k+"="+v)
+		}
+		cmd.Env = envMap
+	}
 	upIn, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -405,13 +428,16 @@ func StartUpstreamSession(name string, argv []string) (*UpstreamSession, error) 
 		proc:   cmd,
 		in:     upIn,
 		reader: bufio.NewReaderSize(upOut, 1024*1024),
+		lines:  make(chan upstreamLine, 32),
+		done:   make(chan struct{}),
 		nextID: 1,
 	}
+	go s.readLoop()
 
 	if _, rpcErr := s.callLocked("initialize", map[string]any{
 		"protocolVersion": ProtocolVersion,
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "xtforge-hub", "version": "0.4.0"},
+		"clientInfo":      map[string]any{"name": "xtforge-hub", "version": "0.4.2"},
 	}); rpcErr != nil {
 		s.Close()
 		return nil, fmt.Errorf("initialize %s: %s", s.Name, rpcErr.Message)
@@ -474,19 +500,87 @@ func (s *UpstreamSession) RefreshTools() ([]ToolDef, error) {
 	return append([]ToolDef{}, s.tools...), nil
 }
 
+// Alive reports whether the upstream child process and stdio reader are still running.
+func (s *UpstreamSession) Alive() bool {
+	if s == nil || s.done == nil {
+		return false
+	}
+	select {
+	case <-s.done:
+		return false
+	default:
+		return true
+	}
+}
+
+func (s *UpstreamSession) readLoop() {
+	defer close(s.done)
+	defer close(s.lines)
+	for {
+		b, err := s.reader.ReadBytes('\n')
+		s.lines <- upstreamLine{line: b, err: err}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// SendCancel emits an MCP notifications/cancelled message for requestID.
+func (s *UpstreamSession) SendCancel(requestID int, reason string) bool {
+	if s == nil || s.in == nil || requestID <= 0 {
+		return false
+	}
+	params := map[string]any{"requestId": requestID}
+	if strings.TrimSpace(reason) != "" {
+		params["reason"] = reason
+	}
+	b, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "notifications/cancelled",
+		"params":  params,
+	})
+	s.writeMu.Lock()
+	_, err := s.in.Write(append(b, '\n'))
+	s.writeMu.Unlock()
+	return err == nil
+}
+
 func (s *UpstreamSession) CallTool(toolName string, args map[string]any) (json.RawMessage, *rpcError) {
+	res, rpcErr, _, _, _ := s.CallToolContext(context.Background(), toolName, args)
+	return res, rpcErr
+}
+
+// CallToolContext invokes toolName on the upstream session while respecting ctx cancellation
+// and reporting whether the request was written to the wire (started) and whether
+// notifications/cancelled was sent (cancelNotified).
+func (s *UpstreamSession) CallToolContext(ctx context.Context, toolName string, args map[string]any) (json.RawMessage, *rpcError, int, bool, bool) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, &rpcError{Code: -32800, Message: "request cancelled before dispatch: " + err.Error()}, 0, false, false
+	}
 	s.mu.Lock()
-	res, rpcErr := s.callLocked("tools/call", map[string]any{"name": toolName, "arguments": args})
+	res, rpcErr, reqID, started, cancelNotified := s.callLockedContext(ctx, "tools/call", map[string]any{"name": toolName, "arguments": args})
 	needRefresh := s.dirty || toolName == "enable_toolset" || toolName == "disable_toolset"
 	s.mu.Unlock()
 
 	if rpcErr == nil && needRefresh {
 		_, _ = s.RefreshTools()
 	}
-	return res, rpcErr
+	return res, rpcErr, reqID, started, cancelNotified
 }
 
 func (s *UpstreamSession) callLocked(method string, params any) (json.RawMessage, *rpcError) {
+	res, rpcErr, _, _, _ := s.callLockedContext(context.Background(), method, params)
+	return res, rpcErr
+}
+
+func (s *UpstreamSession) callLockedContext(ctx context.Context, method string, params any) (json.RawMessage, *rpcError, int, bool, bool) {
+	if err := ctx.Err(); err != nil {
+		return nil, &rpcError{Code: -32800, Message: "request cancelled before dispatch: " + err.Error()}, 0, false, false
+	}
+
 	id := s.nextID
 	s.nextID++
 	expectedID := strconv.Itoa(id)
@@ -499,32 +593,31 @@ func (s *UpstreamSession) callLocked(method string, params any) (json.RawMessage
 		Params:  pBytes,
 	}
 	line, _ := json.Marshal(req)
-	if _, err := s.in.Write(append(line, '\n')); err != nil {
-		return nil, &rpcError{Code: -32000, Message: err.Error()}
+	s.writeMu.Lock()
+	_, wErr := s.in.Write(append(line, '\n'))
+	s.writeMu.Unlock()
+	if wErr != nil {
+		return nil, &rpcError{Code: -32000, Message: wErr.Error()}, id, false, false
 	}
 
-	type readResult struct {
-		line []byte
-		err  error
-	}
 	timeout := mcpCallTimeout()
-	deadline := time.Now().Add(timeout)
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 
 	for {
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			return nil, &rpcError{Code: -32001, Message: "upstream timeout waiting for " + method}
-		}
-		ch := make(chan readResult, 1)
-		go func() {
-			b, err := s.reader.ReadBytes('\n')
-			ch <- readResult{line: b, err: err}
-		}()
-		var res readResult
+		var res upstreamLine
+		var ok bool
 		select {
-		case res = <-ch:
-		case <-time.After(remaining):
-			return nil, &rpcError{Code: -32001, Message: "upstream timeout waiting for " + method}
+		case res, ok = <-s.lines:
+			if !ok {
+				return nil, &rpcError{Code: -32000, Message: "upstream closed stdout waiting for " + method}, id, true, false
+			}
+		case <-ctx.Done():
+			notified := s.SendCancel(id, "caller cancelled: "+ctx.Err().Error())
+			return nil, &rpcError{Code: -32800, Message: "request cancelled waiting for " + method}, id, true, notified
+		case <-timer.C:
+			notified := s.SendCancel(id, "upstream timeout waiting for "+method)
+			return nil, &rpcError{Code: -32001, Message: "upstream timeout waiting for " + method}, id, true, notified
 		}
 
 		trimmed := bytes.TrimSpace(res.line)
@@ -536,18 +629,18 @@ func (s *UpstreamSession) callLocked(method string, params any) (json.RawMessage
 						s.dirty = true
 					}
 					if res.err != nil {
-						return nil, &rpcError{Code: -32000, Message: res.err.Error()}
+						return nil, &rpcError{Code: -32000, Message: res.err.Error()}, id, true, false
 					}
 					continue
 				}
 				gotID := strings.Trim(strings.TrimSpace(string(msg.ID)), `"`)
 				if gotID == expectedID {
-					return msg.Result, msg.Error
+					return msg.Result, msg.Error, id, true, false
 				}
 			}
 		}
 		if res.err != nil {
-			return nil, &rpcError{Code: -32000, Message: res.err.Error()}
+			return nil, &rpcError{Code: -32000, Message: res.err.Error()}, id, true, false
 		}
 	}
 }
@@ -578,8 +671,12 @@ func (p *UpstreamPool) GetOrStart(name string) (*UpstreamSession, error) {
 	canon := CanonicalUpstreamName(name)
 	p.mu.Lock()
 	if s, ok := p.sessions[canon]; ok {
-		p.mu.Unlock()
-		return s, nil
+		if s.Alive() {
+			p.mu.Unlock()
+			return s, nil
+		}
+		delete(p.sessions, canon)
+		go s.Close()
 	}
 	p.mu.Unlock()
 
