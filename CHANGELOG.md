@@ -1,3 +1,18 @@
+## 0.4.1 - 2026-11-18
+
+### Added
+- **REA & Craft Anything MCP Integration (`mcp connect`, `mcp proxy --server`, `--meta`)**:
+  - Built-in presets for [`morluto/rea`](https://github.com/morluto/rea) (`rea-agents mcp`, 229 RE tools) and [`storytold/craft-anything`](https://github.com/storytold/craft-anything) (`craft-anything-cli mcp`, dynamic `enable_toolset` / `--all-tools`).
+  - Persistent stateful stdio sessions across multi-turn RE calls in both the Go hub (`internal/mcp/upstreams.go`) and Python fallback (`xtforge/core/mcp_proxy.py`), with automatic tool-catalog refresh on `notifications/tools/list_changed` / `enable_toolset`.
+  - One-command `xt-forge mcp connect <server>` to probe, audit, trust-pin, save `$XT_HOME/mcp_upstreams.json`, and cache `$XT_HOME/cache/mcp-catalog-<server>.json` for lazy `<server>:<tool>` discovery/execution inside `xt-forge --meta`.
+- **Cross-Platform Installers & Agent Self-Install Prompts**:
+  - Added Linux/macOS (`install.sh`), Windows (`install.ps1`, `bin/xtforge.cmd`), `npx xt-forge init`, and agent copy-paste prompts under `prompts/`.
+- **XT Brand Visuals & Plain Skill Naming**:
+  - Replaced legacy icon assets with `XT`-styled artwork (`docs/assets/xt-forge-icon.svg`, `README.md`), standardized `XtrComSu` authorship across package metadata and git history, and renamed all 18 workflow skills cleanly (`XTF-RepoMap`, `XTF-MCPGateway`, `XTF-Decompile`, etc.).
+
+### Fixed
+- Unified Python `xtforge.core.mcp_audit` SHA-256 schema/tool hashing with Go `internal/mcp/audit.go` so `mcp_trust.json` pins interoperate cleanly across native and `XT_FORCE_PYTHON=1` modes.
+
 ## 0.4.0 - Local Release Preview
 
 ### Added
