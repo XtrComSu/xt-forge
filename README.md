@@ -105,6 +105,18 @@ Drop-in configurations, slash commands (`/xtf --meta`), and tailored setup walkt
 
 Wire `xt-forge` once using `--meta`. Models discover tools on demand (`xt_discover` -> `xt_schema` -> `xt_call` or `xt_batch`), keeping initial prompt schema size at **0.90 KB** (`94%` smaller than mounting all 50 individual schemas upfront) and spilling large outputs cleanly to `$XT_HOME/cache/artifacts/`.
 
+It also connects and proxies **REA** ([`morluto/rea`](https://github.com/morluto/rea), 229 RE tools) and **Craft Anything** ([`storytold/craft-anything`](https://github.com/storytold/craft-anything), dynamic `enable_toolset` / `--all-tools`) behind persistent stdio sessions and rug-pull schema pinning:
+
+```sh
+# Connect & trust-pin REA or Craft Anything once (populates lazy xt_discover cache)
+xt-forge mcp connect rea --json
+xt-forge mcp connect craft-anything --json
+
+# Or mount a single trusted proxy directly (auto-refreshes dynamic toolsets)
+xt-forge mcp proxy --server rea
+xt-forge mcp proxy --server craft-anything
+```
+
 ```json
 {
   "mcpServers": {

@@ -1,21 +1,56 @@
 """MCP Tool Registry & On-Demand Dispatcher.
 
-Enables on-demand discovery and execution of specialized MCP tools (OpenSCAD/cad3d,
-photoeditor, glmocr, etc.) through xt-forge WITHOUT dumping all their schemas into the
-model's initial prompt catalog on every turn, saving thousands of tokens per request.
+Enables zero-bloat discovery and execution of external stdio MCP servers
+(including REA, Craft Anything, cad3d/OpenSCAD, photoeditor, glmocr, searchd,
+and user-defined servers in $XT_HOME/mcp_upstreams.json) with full MCP
+initialize + notifications/initialized handshakes and cached catalogs.
 """
 from __future__ import annotations
 
 import json
 import os
+import shlex
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
+
+from ..atomicio import atomic_write_json, read_json
+from ..version import xt_home
 
 _SHARE_ROOT = Path.home() / ".local" / "share"
 
 EXTERNAL_SERVERS: dict[str, dict[str, Any]] = {
+    "rea": {
+        "title": "REA — Reverse Engineering Agent MCP",
+        "description": "229+ tools for native binaries, Electron/JS, .NET, websites, Frida, Ghidra, and Hopper.",
+        "command": "rea-agents",
+        "args": ["mcp"],
+        "aliases": ["rea", "rea-agents", "re-mcp", "rea_mcp", "hopper", "ghidra", "ida", "reverse"],
+        "tools": [
+            {"name": "open_binary", "description": "Open a local binary, archive, Electron ASAR, or JS file for analysis."},
+            {"name": "binary_overview", "description": "Inspect architecture, sections, symbols, and format metadata."},
+            {"name": "procedure_pseudo_code", "description": "Recover decompiled pseudocode for a procedure."},
+            {"name": "analyze_javascript_application", "description": "Inspect JS/Electron bundles, routes, and secrets statically."},
+            {"name": "inspect_analysis_settings", "description": "Inspect editable REA runtime admission limits and timeouts."},
+        ],
+    },
+    "craft-anything": {
+        "title": "Craft Anything — Pure-Rust Clean-Room & Deep RE MCP",
+        "description": "300+ tools across native ELF/PE/Mach-O, WebAssembly, Android, Apple, web capture, and rebuild workflows.",
+        "command": "craft-anything-cli",
+        "args": ["mcp", "--all-tools"],
+        "aliases": ["craft", "craft-anything", "craftanything", "craft-anything-cli", "craft_anything", "cleanroom", "rebuild"],
+        "tools": [
+            {"name": "core_target_open", "description": "Open a binary, app bundle, archive, or website URL in Craft Anything."},
+            {"name": "list_toolsets", "description": "List available specialty toolsets (native, android, apple, web, wasm...)."},
+            {"name": "enable_toolset", "description": "Enable a Craft Anything toolset dynamically when --all-tools is off."},
+            {"name": "core_investigation_show", "description": "Inspect active project brief, evidence, findings, and unknowns."},
+            {"name": "core_evidence_browse", "description": "Page through retained evidence records without blowing context budgets."},
+        ],
+    },
     "cad3d": {
         "title": "3D CAD & OpenSCAD Modeling",
         "description": "3D CAD modeling, OpenSCAD script compilation, CSG booleans, extrusion, mesh inspection, and STL/OBJ/GLB/3MF conversions.",
@@ -72,29 +107,264 @@ EXTERNAL_SERVERS: dict[str, dict[str, Any]] = {
 }
 
 
-def search_tools(query: str, limit: int = 5) -> list[dict[str, Any]]:
-    """Search external tools matching query keywords or aliases."""
+def canonical_upstream_name(name: str) -> str:
+    low = name.strip().lower()
+    if low in ("rea", "rea-agents", "re-mcp", "rea_mcp"):
+        return "rea"
+    if low in ("craft", "craft-anything", "craftanything", "craft-anything-cli", "craft_anything"):
+        return "craft-anything"
+    return name.strip()
+
+
+def upstreams_path() -> Path:
+    return xt_home() / "mcp_upstreams.json"
+
+
+def catalog_cache_path(server: str) -> Path:
+    safe = server.replace("/", "_").replace("\\", "_").replace(":", "_").replace(" ", "_")
+    return xt_home() / "cache" / f"mcp-catalog-{safe}.json"
+
+
+def load_upstreams() -> dict[str, dict[str, Any]]:
+    data = read_json(upstreams_path())
+    if isinstance(data, dict) and isinstance(data.get("upstreams"), dict):
+        return dict(data["upstreams"])
+    return {}
+
+
+def save_upstream(name: str, command: list[str], source: str = "connect") -> None:
+    canon = canonical_upstream_name(name)
+    cur = load_upstreams()
+    cur[canon] = {"name": canon, "command": command, "source": source}
+    atomic_write_json(upstreams_path(), {"version": 1, "upstreams": cur})
+
+
+def save_cached_catalog(server: str, tools: list[dict[str, Any]]) -> None:
+    atomic_write_json(
+        catalog_cache_path(canonical_upstream_name(server)),
+        {"server": canonical_upstream_name(server), "fetched_at": int(time.time()), "tools": tools},
+    )
+
+
+def load_cached_catalog(server: str) -> list[dict[str, Any]]:
+    data = read_json(catalog_cache_path(canonical_upstream_name(server)))
+    if isinstance(data, dict) and isinstance(data.get("tools"), list):
+        return list(data["tools"])
+    return []
+
+
+def split_cmd(cmd_str: str) -> list[str]:
+    return shlex.split(cmd_str, posix=(os.name != "nt"))
+
+
+def resolve_upstream_cmd(server_name: str, explicit_cmd: str | None = None) -> tuple[str, list[str] | None, str | None]:
+    """Resolve an external MCP stdio command from explicit_cmd, $XT_HOME/mcp_upstreams.json, or presets."""
+    canon = canonical_upstream_name(server_name)
+    if explicit_cmd:
+        parts = split_cmd(explicit_cmd)
+        if not parts:
+            return canon, None, "empty command"
+        return canon, parts, None
+
+    saved = load_upstreams()
+    if canon in saved and isinstance(saved[canon].get("command"), list) and saved[canon]["command"]:
+        return canon, list(saved[canon]["command"]), None
+    if server_name in saved and isinstance(saved[server_name].get("command"), list) and saved[server_name]["command"]:
+        return server_name, list(saved[server_name]["command"]), None
+
+    home = Path.home()
+    if canon == "rea":
+        env_cmd = os.environ.get("REA_CMD", "").strip()
+        if env_cmd:
+            parts = split_cmd(env_cmd)
+            if os.environ.get("REA_ARGS", "").strip():
+                parts.extend(split_cmd(os.environ["REA_ARGS"]))
+            elif "mcp" not in parts and "--mcp" not in parts:
+                parts.append("mcp")
+            return canon, parts, None
+        for exe in ("rea-agents", "rea"):
+            found = shutil.which(exe)
+            if found:
+                return canon, [found, "mcp"], None
+        cands = [
+            home / ".local" / "share" / "rea" / "node_modules" / ".bin" / "rea-agents",
+            home / ".local" / "share" / "rea" / "node_modules" / ".bin" / "rea",
+        ]
+        if os.name == "nt":
+            cands = [
+                home / ".local" / "share" / "rea" / "node_modules" / ".bin" / "rea-agents.cmd",
+                home / "AppData" / "Local" / "rea" / "node_modules" / ".bin" / "rea-agents.cmd",
+            ] + cands
+        for c in cands:
+            if c.is_file():
+                return canon, [str(c), "mcp"], None
+        npx = shutil.which("npx") or shutil.which("npx.cmd")
+        if npx:
+            return canon, [npx, "-y", "rea-agents@latest", "mcp"], None
+        return canon, None, "rea executable not found (set REA_CMD or install rea-agents)"
+
+    if canon == "craft-anything":
+        def _craft_flags(base: list[str]) -> list[str]:
+            out = list(base)
+            if "mcp" not in out:
+                out.append("mcp")
+            if os.environ.get("XT_CRAFT_ALL_TOOLS") != "0" and "--all-tools" not in out:
+                out.append("--all-tools")
+            if os.environ.get("XT_CRAFT_DEEP") == "1" and "--deep" not in out:
+                out.append("--deep")
+            if os.environ.get("XT_CRAFT_ALLOW_RUN") == "1" and "--allow-run" not in out:
+                out.append("--allow-run")
+            proj = os.environ.get("XT_CRAFT_PROJECT", "").strip()
+            if proj and "--project" not in out:
+                out.extend(["--project", proj])
+            return out
+
+        env_cmd = os.environ.get("CRAFT_ANYTHING_CMD", "").strip()
+        if env_cmd:
+            return canon, _craft_flags(split_cmd(env_cmd)), None
+        for exe in ("craft-anything-cli", "craft-anything"):
+            found = shutil.which(exe)
+            if found:
+                return canon, _craft_flags([found]), None
+        suffix = ".exe" if os.name == "nt" else ""
+        for cand in (home / ".cargo" / "bin" / f"craft-anything-cli{suffix}",
+                     home / ".local" / "bin" / f"craft-anything-cli{suffix}"):
+            if cand.is_file():
+                return canon, _craft_flags([str(cand)]), None
+        return canon, None, "craft-anything-cli not found (set CRAFT_ANYTHING_CMD or install craft-anything-cli)"
+
+    info = EXTERNAL_SERVERS.get(canon)
+    if not info:
+        for s_name, s_info in EXTERNAL_SERVERS.items():
+            if canon.lower() in s_info.get("aliases", []):
+                info = s_info
+                canon = s_name
+                break
+    if info:
+        return canon, [info["command"], *info["args"]], None
+    return canon, None, f"unknown server '{server_name}'. Available: {sorted(set(EXTERNAL_SERVERS) | set(saved))}"
+
+
+def known_upstreams() -> list[str]:
+    seen: list[str] = []
+    def _add(name: str) -> None:
+        c = canonical_upstream_name(name)
+        if c and c not in seen:
+            seen.append(c)
+
+    for k in load_upstreams():
+        _add(k)
+    env_raw = os.environ.get("XT_MCP_UPSTREAMS", "").strip()
+    if env_raw:
+        for part in env_raw.split(","):
+            _add(part)
+    cache_dir = xt_home() / "cache"
+    if cache_dir.is_dir():
+        for p in sorted(cache_dir.glob("mcp-catalog-*.json")):
+            _add(p.name[len("mcp-catalog-"):-len(".json")])
+    for preset in ("rea", "craft-anything"):
+        _, argv, err = resolve_upstream_cmd(preset)
+        if not err and argv and Path(argv[0]).name not in ("npx", "npx.cmd"):
+            _add(preset)
+    return seen
+
+
+def _read_rpc_by_id(stdout, expected_id: int, deadline: float) -> tuple[dict[str, Any] | None, bool]:
+    """Read newline-delimited JSON-RPC messages until expected_id matches."""
+    list_changed = False
+    while time.monotonic() < deadline:
+        line = stdout.readline()
+        if not line:
+            return None, list_changed
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("id") is None:
+            if msg.get("method") == "notifications/tools/list_changed":
+                list_changed = True
+            continue
+        if msg.get("id") == expected_id:
+            return msg, list_changed
+    return None, list_changed
+
+
+def close_subprocess(proc: subprocess.Popen[str] | None) -> None:
+    """Terminate an MCP child process and close all attached stdio pipes."""
+    if proc is None:
+        return
+    try:
+        if proc.stdin:
+            proc.stdin.close()
+    except OSError:
+        pass
+    try:
+        proc.terminate()
+        proc.wait(timeout=3)
+    except Exception:
+        try:
+            proc.kill()
+            proc.wait(timeout=2)
+        except Exception:
+            pass
+    for stream in (proc.stdout, proc.stderr):
+        if stream is not None:
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+
+def search_tools(query: str, limit: int = 8) -> list[dict[str, Any]]:
+    """Search external tools across cached catalogs, saved upstreams, and presets."""
     q = query.lower().strip()
     words = [w for w in q.split() if len(w) > 1]
     matches: list[dict[str, Any]] = []
+    seen_servers: set[str] = set()
+
+    for s_name in known_upstreams():
+        cached = load_cached_catalog(s_name)
+        if not cached:
+            continue
+        seen_servers.add(s_name)
+        matching_tools = []
+        s_boost = 2 if s_name in q or (s_name == "craft-anything" and "craft" in words) else 0
+        for t in cached:
+            hay = f"{s_name} {t.get('name', '')} {t.get('description', '')}".lower()
+            if not words or any(w in hay for w in words):
+                matching_tools.append({
+                    "name": t.get("name"),
+                    "description": str(t.get("description", ""))[:140],
+                })
+        if matching_tools or s_boost > 0:
+            matches.append({
+                "server": s_name,
+                "title": EXTERNAL_SERVERS.get(s_name, {}).get("title", f"Connected MCP: {s_name}"),
+                "description": EXTERNAL_SERVERS.get(s_name, {}).get("description", "Cached live upstream MCP catalog"),
+                "tools": (matching_tools or cached)[:15],
+                "invocation": f"xtforge tool run {s_name} <tool_name> '{{\"arg\": \"val\"}}'",
+            })
 
     for s_name, s_info in EXTERNAL_SERVERS.items():
+        if s_name in seen_servers:
+            continue
         score = 0
         matching_tools = []
-        # Check aliases
         for alias in s_info.get("aliases", []):
             if alias in q or any(w == alias for w in words):
                 score += 3
-        # Check title / description
         if any(w in s_info.get("description", "").lower() for w in words):
             score += 1
-
         for t in s_info.get("tools", []):
             t_name = t["name"].lower()
             t_desc = t["description"].lower()
             if any(w in t_name or w in t_desc for w in words) or score > 0:
                 matching_tools.append(t)
-
         if score > 0 or matching_tools:
             matches.append({
                 "server": s_name,
@@ -109,23 +379,18 @@ def search_tools(query: str, limit: int = 5) -> list[dict[str, Any]]:
 
 def execute_tool(server_name: str, tool_name: str, arguments: dict[str, Any] | None = None,
                  timeout: int = 60) -> dict[str, Any]:
-    """Execute an external MCP tool via stdio JSON-RPC."""
-    server = EXTERNAL_SERVERS.get(server_name.lower())
-    if not server:
-        # Check alias
-        for s_name, s_info in EXTERNAL_SERVERS.items():
-            if server_name.lower() in s_info.get("aliases", []):
-                server = s_info
-                server_name = s_name
-                break
+    """Execute an external MCP tool over stdio JSON-RPC with a full MCP handshake."""
+    canon, cmd, err = resolve_upstream_cmd(server_name)
+    if err or not cmd:
+        return {"ok": False, "error": err or f"unknown server '{server_name}'"}
 
-    if not server:
-        return {"ok": False, "error": f"unknown server '{server_name}'. Available: {list(EXTERNAL_SERVERS.keys())}"}
-
-    cmd = [server["command"], *server["args"]]
-    if not os.path.exists(cmd[0]):
+    resolved_bin = shutil.which(cmd[0]) or cmd[0]
+    if not os.path.exists(resolved_bin):
         return {"ok": False, "error": f"server executable not found: {cmd[0]}"}
+    cmd = [resolved_bin, *cmd[1:]]
 
+    deadline = time.monotonic() + max(timeout, 5)
+    proc: subprocess.Popen[str] | None = None
     try:
         proc = subprocess.Popen(
             cmd,
@@ -133,23 +398,40 @@ def execute_tool(server_name: str, tool_name: str, arguments: dict[str, Any] | N
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            bufsize=1,
         )
-        req = json.dumps({
+        assert proc.stdin is not None and proc.stdout is not None
+        proc.stdin.write(json.dumps({
             "jsonrpc": "2.0",
             "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                       "clientInfo": {"name": "xt-forge", "version": "0.4.0"}},
+        }) + "\n")
+        proc.stdin.flush()
+        init_resp, _ = _read_rpc_by_id(proc.stdout, 1, deadline)
+        if init_resp is None:
+            return {"ok": False, "error": f"{canon} did not answer initialize"}
+        if "error" in init_resp:
+            return {"ok": False, "error": init_resp["error"]}
+
+        proc.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
+        proc.stdin.write(json.dumps({
+            "jsonrpc": "2.0",
+            "id": 2,
             "method": "tools/call",
             "params": {"name": tool_name, "arguments": arguments or {}},
-        }) + "\n"
-        stdout, stderr = proc.communicate(req, timeout=timeout)
-        if not stdout.strip():
-            return {"ok": False, "error": f"empty response from {server_name}: {stderr}"}
+        }) + "\n")
+        proc.stdin.flush()
 
-        resp = json.loads(stdout.strip().split("\n")[0])
-        if "error" in resp:
-            return {"ok": False, "error": resp["error"]}
-        return {"ok": True, "result": resp.get("result", {})}
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        return {"ok": False, "error": f"tool '{tool_name}' timed out after {timeout}s"}
+        call_resp, _ = _read_rpc_by_id(proc.stdout, 2, deadline)
+        if call_resp is None:
+            stderr_tail = (proc.stderr.read() if proc.stderr else "")[:400]
+            return {"ok": False, "error": f"no tools/call response from {canon}: {stderr_tail}"}
+        if "error" in call_resp:
+            return {"ok": False, "error": call_resp["error"]}
+        return {"ok": True, "server": canon, "result": call_resp.get("result", {})}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+    finally:
+        close_subprocess(proc)

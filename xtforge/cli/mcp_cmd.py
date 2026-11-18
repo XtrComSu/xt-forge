@@ -79,45 +79,63 @@ def _maybe_probe(args, servers) -> None:
 
 def cmd_mcp(args) -> int:
     verb = getattr(args, "mcp_verb", "status")
+    target = getattr(args, "mcp_target", None)
+    srv_arg = getattr(args, "server", None) or target
+    cmd_arg = getattr(args, "cmd", None)
+
     if verb == "serve":
         import subprocess, sys
         argv = [sys.executable, "-m", "adapters.mcp.server"]
         if getattr(args, "meta", False):
             argv.append("--meta")
         return subprocess.run(argv).returncode
+    if verb == "connect":
+        from ..core import mcp_proxy as proxymod
+        if not srv_arg:
+            return _out(args, {"ok": False, "err": "mcp connect requires a server name (e.g. rea, craft-anything)"},
+                        "error: mcp connect requires <server>", code=2)
+        res = proxymod.connect_server(srv_arg, cmd=cmd_arg)
+        if not res.get("ok"):
+            return _out(args, res, f"connect failed: {res.get('err') or res.get('findings')}", code=1)
+        return _out(args, res, f"connected {res['server']} ({res['tool_count']} tools) sha256={res['sha256'][:16]}")
     if verb == "audit":
         from ..core import mcp_proxy as proxymod
-        cmd = getattr(args, "cmd", None)
-        if not cmd:
-            return _out(args, {"ok": False, "err": "mcp audit requires --cmd"}, "error: mcp audit requires --cmd", code=2)
+        if not cmd_arg and not srv_arg:
+            from ..core import mcp_audit as auditmod
+            db = auditmod.load_trust()
+            return _out(args, {"ok": True, **db}, f"trusted servers: {len(db.get('servers', {}))}")
         rep = proxymod.audit_child_server(
-            getattr(args, "server", None) or "child",
-            cmd,
+            srv_arg or "child",
+            cmd_arg,
             trust_on_first=bool(getattr(args, "trust_on_first", False)),
         )
         return _out(args, rep, f"audit ok={rep['ok']} rug_pull={rep.get('rug_pull')} findings={len(rep.get('findings', []))}",
                     code=0 if rep.get("ok") else 1)
     if verb == "proxy":
         from ..core import mcp_proxy as proxymod
-        cmd = getattr(args, "cmd", None)
-        if not cmd:
-            return _out(args, {"ok": False, "err": "mcp proxy requires --cmd"}, "error: mcp proxy requires --cmd", code=2)
+        srv_name = srv_arg or getattr(args, "prefix", None)
+        if not cmd_arg and not srv_name:
+            return _out(args, {"ok": False, "err": "mcp proxy requires --server <name> or --cmd <cmd>"},
+                        "error: mcp proxy requires --server <name> or --cmd <cmd>", code=2)
         return proxymod.serve_proxy_lite(
-            getattr(args, "server", None) or "child",
-            cmd,
+            srv_name or "proxy",
+            cmd_arg,
             trust_on_first=bool(getattr(args, "trust_on_first", False)),
+            prefix=getattr(args, "prefix", None),
         )
     if verb == "trust":
         from ..core import mcp_audit as auditmod
         from ..core import mcp_proxy as proxymod
-        srv = getattr(args, "server", None)
-        cmd = getattr(args, "cmd", None)
-        if srv and cmd:
-            tools, err = proxymod.probe_child_tools(cmd)
-            if err:
-                return _out(args, {"ok": False, "err": err}, err, code=1)
-            res = auditmod.pin_trust(srv, tools, note="pinned via cli")
-            return _out(args, res, f"pinned {srv} ({res['tool_count']} tools) sha256={res['sha256'][:16]}")
+        from ..core import mcp_registry as regmod
+        if srv_arg or cmd_arg:
+            canon, argv, err = regmod.resolve_upstream_cmd(srv_arg or "child", explicit_cmd=cmd_arg)
+            if err or not argv:
+                return _out(args, {"ok": False, "err": err}, str(err), code=1)
+            tools, perr = proxymod.probe_child_tools(argv, server_name=canon)
+            if perr:
+                return _out(args, {"ok": False, "err": perr}, perr, code=1)
+            res = auditmod.pin_trust(canon, tools, note="pinned via cli")
+            return _out(args, res, f"pinned {canon} ({res['tool_count']} tools) sha256={res['sha256'][:16]}")
         db = auditmod.load_trust()
         return _out(args, {"ok": True, **db}, f"trusted servers: {len(db.get('servers', {}))}")
 

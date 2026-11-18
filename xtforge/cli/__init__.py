@@ -628,9 +628,10 @@ def _add_tool(sub) -> None:
 
 
 def _add_mcp(sub) -> None:
-    m = sub.add_parser("mcp", help="MCP servers, audit, trust pinning, proxy, and gateway")
+    m = sub.add_parser("mcp", help="MCP servers, connect, audit, trust pinning, proxy, and gateway")
     m.add_argument("mcp_verb", nargs="?", default="status",
-                   choices=["status", "advice", "configs", "serve", "audit", "proxy", "trust"])
+                   choices=["status", "advice", "configs", "serve", "audit", "proxy", "trust", "connect"])
+    m.add_argument("mcp_target", nargs="?", help="optional server name/alias (e.g. rea, craft-anything)")
     m.add_argument("--profile", help="only read this profile's cordis patch "
                                      "(default: every profile)")
     m.add_argument("--probe", action="store_true",
@@ -640,8 +641,9 @@ def _add_mcp(sub) -> None:
                    help="probe: seconds allowed per server")
     m.add_argument("--meta", action="store_true",
                    help="serve: expose 4-tool meta-gateway (~1.4KB) instead of 56 pinned tools")
-    m.add_argument("--server", help="audit/proxy/trust: logical server name")
-    m.add_argument("--cmd", help="audit/proxy/trust: stdio command for child server")
+    m.add_argument("--server", help="audit/proxy/trust/connect: logical server name or preset (rea, craft-anything)")
+    m.add_argument("--prefix", help="proxy: tool prefix (defaults to server name)")
+    m.add_argument("--cmd", help="audit/proxy/trust/connect: stdio command for child server")
     m.add_argument("--trust-on-first", dest="trust_on_first", action="store_true",
                    help="audit/proxy: pin SHA-256 baseline on first inspection")
     m.set_defaults(func=cmd_mcp)

@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"xtforge-hub/internal/compress"
 	"xtforge-hub/internal/guard"
@@ -204,19 +203,164 @@ func runLocalCommand(selfBin string, argv []string, maxBytes int) (string, bool)
 }
 
 // ServeMeta runs xt-forge's built-in 4-tool meta MCP server over stdio.
+func splitUpstreamToolRef(raw string) (string, string, bool) {
+	idx := strings.IndexByte(raw, ':')
+	if idx <= 0 || idx+1 >= len(raw) {
+		return "", "", false
+	}
+	srv := CanonicalUpstreamName(raw[:idx])
+	tool := strings.TrimSpace(raw[idx+1:])
+	if srv == "" || tool == "" {
+		return "", "", false
+	}
+	return srv, tool, true
+}
+
+func isMutatingToolName(name string) bool {
+	l := strings.ToLower(name)
+	for _, kw := range []string{"write", "delete", "remove", "patch", "modify", "update_", "install", "uninstall", "run_command", "exec", "sign_in", "sign_out", "rebuild"} {
+		if strings.Contains(l, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveUpstreamTools(pool *UpstreamPool, server string) ([]ToolDef, error) {
+	canon := CanonicalUpstreamName(server)
+	if cached := LoadCachedCatalog(canon); len(cached) > 0 {
+		return cached, nil
+	}
+	sess, err := pool.GetOrStart(canon)
+	if err != nil {
+		return nil, err
+	}
+	return sess.Tools(), nil
+}
+
+func callUpstreamTool(pool *UpstreamPool, server, toolName string, args map[string]any, maxBytes int) (string, bool) {
+	canon := CanonicalUpstreamName(server)
+	if args == nil {
+		args = map[string]any{}
+	}
+	if guard.CurrentMode() == guard.ModeExplore && isMutatingToolName(toolName) {
+		guard.AuditEvent("mcp", canon, toolName, "denied_explore", args, 1)
+		return fmt.Sprintf("denied: XT_PERM_MODE=explore forbids mutating upstream call %s:%s", canon, toolName), true
+	}
+	sess, err := pool.GetOrStart(canon)
+	if err != nil {
+		guard.AuditEvent("mcp", canon, toolName, "start_error", args, 1)
+		return err.Error(), true
+	}
+	resRaw, rpcErr := sess.CallTool(toolName, args)
+	if rpcErr != nil {
+		guard.AuditEvent("mcp", canon, toolName, "error", args, 1)
+		return rpcErr.Message, true
+	}
+	guard.AuditEvent("mcp", canon, toolName, "ok", args, 0)
+	clipped, _ := compress.ClipOrSpill(string(resRaw), maxBytes, canon+"-"+toolName)
+	return clipped, false
+}
+
+func searchUpstreamCatalogs(pool *UpstreamPool, upstreamFilter, query string, limit int) []map[string]any {
+	q := strings.ToLower(strings.TrimSpace(query))
+	words := strings.Fields(q)
+	filter := CanonicalUpstreamName(strings.TrimSpace(upstreamFilter))
+
+	var targets []string
+	if filter != "" && filter != "all" && filter != "xt-forge" {
+		targets = []string{filter}
+	} else if filter != "xt-forge" {
+		targets = KnownUpstreams()
+	}
+
+	type hit struct {
+		row   map[string]any
+		score int
+	}
+	var hits []hit
+	for _, srv := range targets {
+		var tools []ToolDef
+		if filter != "" && filter != "all" {
+			tools, _ = resolveUpstreamTools(pool, srv)
+		} else {
+			tools = LoadCachedCatalog(srv)
+			// If query explicitly names rea or craft-anything and no cache exists yet, live-probe once.
+			if len(tools) == 0 && (strings.Contains(q, srv) || (srv == "craft-anything" && strings.Contains(q, "craft"))) {
+				tools, _ = resolveUpstreamTools(pool, srv)
+			}
+		}
+		for _, t := range tools {
+			hay := strings.ToLower(srv + " " + t.Name + " " + t.Description)
+			score := 0
+			if len(words) == 0 {
+				score = 1
+			} else {
+				for _, w := range words {
+					if w == srv || w == "craft" && srv == "craft-anything" {
+						score += 2
+					}
+					if strings.Contains(hay, w) {
+						score += 2
+					}
+					if strings.ToLower(t.Name) == w {
+						score += 4
+					}
+				}
+			}
+			if score > 0 {
+				prefixed := srv + ":" + t.Name
+				hits = append(hits, hit{
+					score: score,
+					row: map[string]any{
+						"name":        prefixed,
+						"upstream":    srv,
+						"tool":        t.Name,
+						"description": SummarizeDescription(t.Description, 140),
+						"args_hint":   fmt.Sprintf(`{"name":%q,"arguments":{}}`, prefixed),
+					},
+				})
+			}
+		}
+	}
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].score != hits[j].score {
+			return hits[i].score > hits[j].score
+		}
+		return fmt.Sprint(hits[i].row["name"]) < fmt.Sprint(hits[j].row["name"])
+	})
+	if limit <= 0 {
+		limit = 10
+	}
+	if len(hits) > limit {
+		hits = hits[:limit]
+	}
+	out := make([]map[string]any, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, h.row)
+	}
+	return out
+}
+
+// ServeMeta runs xt-forge's built-in 4-tool meta MCP server over stdio, routing
+// both xt-forge CLI tools and connected upstream MCP servers (e.g. rea, craft-anything).
 func ServeMeta(selfBin string, maxBytes int) int {
 	if maxBytes <= 0 {
 		maxBytes = 16384
 	}
+	pool := NewUpstreamPool()
+	defer pool.CloseAll()
+
 	metaTools := []ToolDef{
 		{
 			Name:        "xt_discover",
-			Description: "Search xt-forge's 40+ CLI tools across RE, code graph, LSP, memory, steering, research, and security.",
+			Description: "Search xt-forge tools plus connected external MCPs (rea, craft-anything, or custom upstreams) by keyword.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"query":    map[string]any{"type": "string", "description": "Keywords or capability to find"},
 					"category": map[string]any{"type": "string", "description": "Optional filter: re|code|memory|steering|research|security|ops"},
+					"upstream": map[string]any{"type": "string", "description": "Optional server filter: xt-forge|rea|craft-anything|all"},
 					"limit":    map[string]any{"type": "integer", "description": "Max results (default 10)"},
 				},
 				"additionalProperties": false,
@@ -224,7 +368,7 @@ func ServeMeta(selfBin string, maxBytes int) int {
 		},
 		{
 			Name:        "xt_schema",
-			Description: "Return exact usage hints and flags for an xt-forge tool discovered via xt_discover.",
+			Description: "Return exact usage hints or full JSON inputSchema for an xt-forge tool or upstream <server>:<tool>.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -236,20 +380,23 @@ func ServeMeta(selfBin string, maxBytes int) int {
 		},
 		{
 			Name:        "xt_call",
-			Description: "Execute any xt-forge command with automatic L1-L3 compression and artifact spilling for large outputs.",
+			Description: "Execute any xt-forge command (argv) or connected upstream MCP tool (name='<server>:<tool>' or server+tool) with L1-L3 compression.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"argv":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"name":      map[string]any{"type": "string", "description": "Prefixed upstream tool, e.g. rea:open_binary or craft-anything:core_target_open"},
+					"server":    map[string]any{"type": "string", "description": "Explicit upstream server name (rea, craft-anything, ...)"},
+					"tool":      map[string]any{"type": "string", "description": "Tool name on server when server is given"},
+					"arguments": map[string]any{"type": "object", "description": "Arguments JSON object for upstream MCP call"},
 					"max_bytes": map[string]any{"type": "integer"},
 				},
-				"required":             []string{"argv"},
 				"additionalProperties": false,
 			},
 		},
 		{
 			Name:        "xt_batch",
-			Description: "Run multiple read-only xt-forge commands concurrently in one turn.",
+			Description: "Run multiple read-only xt-forge or upstream MCP calls concurrently in one turn.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -258,9 +405,12 @@ func ServeMeta(selfBin string, maxBytes int) int {
 						"items": map[string]any{
 							"type": "object",
 							"properties": map[string]any{
-								"argv": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+								"argv":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+								"name":      map[string]any{"type": "string"},
+								"server":    map[string]any{"type": "string"},
+								"tool":      map[string]any{"type": "string"},
+								"arguments": map[string]any{"type": "object"},
 							},
-							"required": []string{"argv"},
 						},
 					},
 				},
@@ -270,22 +420,87 @@ func ServeMeta(selfBin string, maxBytes int) int {
 		},
 	}
 
+	dispatchCall := func(args map[string]any, budget int) (string, bool) {
+		rawName, _ := args["name"].(string)
+		srv, _ := args["server"].(string)
+		tool, _ := args["tool"].(string)
+		toolArgs, _ := args["arguments"].(map[string]any)
+		if srv != "" && tool != "" {
+			return callUpstreamTool(pool, srv, tool, toolArgs, budget)
+		}
+		if uSrv, uTool, ok := splitUpstreamToolRef(rawName); ok {
+			return callUpstreamTool(pool, uSrv, uTool, toolArgs, budget)
+		}
+		rawArgv, _ := args["argv"].([]any)
+		argv := make([]string, 0, len(rawArgv))
+		for _, item := range rawArgv {
+			if s, ok := item.(string); ok {
+				argv = append(argv, s)
+			}
+		}
+		if len(argv) == 0 && rawName != "" {
+			for _, e := range FullCatalog() {
+				if e.Name == rawName {
+					argv = []string{e.Noun}
+					if e.Verb != "" {
+						argv = append(argv, e.Verb)
+					}
+					break
+				}
+			}
+		}
+		return runLocalCommand(selfBin, argv, budget)
+	}
+
 	return serveLoop(metaTools, func(name string, args map[string]any) (string, bool) {
 		switch name {
 		case "xt_discover":
 			q, _ := args["query"].(string)
 			cat, _ := args["category"].(string)
+			up, _ := args["upstream"].(string)
 			lim := 10
 			if f, ok := args["limit"].(float64); ok && f > 0 {
 				lim = int(f)
 			}
-			b, _ := json.MarshalIndent(map[string]any{
-				"ok":      true,
-				"matches": searchCatalog(q, cat, lim),
-			}, "", "  ")
+			local := []CatalogEntry{}
+			upNorm := strings.ToLower(strings.TrimSpace(up))
+			if upNorm == "" || upNorm == "all" || upNorm == "xt-forge" {
+				local = searchCatalog(q, cat, lim)
+			}
+			ext := []map[string]any{}
+			if cat == "" {
+				ext = searchUpstreamCatalogs(pool, up, q, lim)
+			}
+			payload := map[string]any{
+				"ok":               true,
+				"matches":          local,
+				"upstream_matches": ext,
+				"known_upstreams":  KnownUpstreams(),
+			}
+			b, _ := json.MarshalIndent(payload, "", "  ")
 			return string(b), false
 		case "xt_schema":
 			target, _ := args["name"].(string)
+			if srv, toolName, ok := splitUpstreamToolRef(target); ok {
+				tools, err := resolveUpstreamTools(pool, srv)
+				if err != nil {
+					return err.Error(), true
+				}
+				for _, t := range tools {
+					if t.Name == toolName {
+						b, _ := json.MarshalIndent(map[string]any{
+							"ok":          true,
+							"upstream":    srv,
+							"name":        srv + ":" + t.Name,
+							"tool":        t.Name,
+							"description": t.Description,
+							"inputSchema": t.InputSchema,
+						}, "", "  ")
+						return string(b), false
+					}
+				}
+				return fmt.Sprintf("unknown tool '%s' on upstream '%s'", toolName, srv), true
+			}
 			for _, e := range FullCatalog() {
 				if e.Name == target {
 					b, _ := json.MarshalIndent(e, "", "  ")
@@ -294,18 +509,11 @@ func ServeMeta(selfBin string, maxBytes int) int {
 			}
 			return fmt.Sprintf("unknown xt-forge catalog tool: %s", target), true
 		case "xt_call":
-			rawArgv, _ := args["argv"].([]any)
-			argv := make([]string, 0, len(rawArgv))
-			for _, item := range rawArgv {
-				if s, ok := item.(string); ok {
-					argv = append(argv, s)
-				}
-			}
 			mb := maxBytes
 			if f, ok := args["max_bytes"].(float64); ok && f > 0 {
 				mb = int(f)
 			}
-			return runLocalCommand(selfBin, argv, mb)
+			return dispatchCall(args, mb)
 		case "xt_batch":
 			rawCalls, _ := args["calls"].([]any)
 			if len(rawCalls) > 16 {
@@ -318,15 +526,13 @@ func ServeMeta(selfBin string, maxBytes int) int {
 				go func(idx int, item any) {
 					defer wg.Done()
 					m, _ := item.(map[string]any)
-					rawArgv, _ := m["argv"].([]any)
-					argv := make([]string, 0, len(rawArgv))
-					for _, a := range rawArgv {
-						if s, ok := a.(string); ok {
-							argv = append(argv, s)
-						}
+					txt, isErr := dispatchCall(m, maxBytes/2)
+					results[idx] = map[string]any{
+						"target":  m["name"],
+						"argv":    m["argv"],
+						"isError": isErr,
+						"output":  txt,
 					}
-					txt, isErr := runLocalCommand(selfBin, argv, maxBytes/2)
-					results[idx] = map[string]any{"argv": argv, "isError": isErr, "output": txt}
 				}(i, rc)
 			}
 			wg.Wait()
@@ -340,7 +546,7 @@ func ServeMeta(selfBin string, maxBytes int) int {
 
 // ServeProxy wraps any upstream stdio MCP server behind a 3-tool lite facade
 // (<prefix>_search, <prefix>_list, <prefix>_call) with inline compression,
-// artifact spilling, and schema rug-pull verification.
+// artifact spilling, dynamic tools/list refresh, and schema rug-pull verification.
 func ServeProxy(prefix string, upstreamCmd []string, maxBytes int, trustOnFirst bool) int {
 	if prefix == "" {
 		prefix = "proxy"
@@ -353,95 +559,14 @@ func ServeProxy(prefix string, upstreamCmd []string, maxBytes int, trustOnFirst 
 		return 2
 	}
 
-	cmd := exec.Command(upstreamCmd[0], upstreamCmd[1:]...)
-	upIn, err := cmd.StdinPipe()
+	sess, err := StartUpstreamSession(prefix, upstreamCmd)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "xtforge mcp proxy: %v\n", err)
 		return 1
 	}
-	upOut, err := cmd.StdoutPipe()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "xtforge mcp proxy: start failed: %v\n", err)
-		return 1
-	}
-	defer func() {
-		_ = upIn.Close()
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-	}()
+	defer sess.Close()
 
-	reader := bufio.NewReader(upOut)
-	var upMu sync.Mutex
-	nextID := 1
-	callUpstream := func(method string, params any) (json.RawMessage, *rpcError) {
-		upMu.Lock()
-		defer upMu.Unlock()
-		id := nextID
-		nextID++
-		pBytes, _ := json.Marshal(params)
-		req := rpcMessage{
-			JSONRPC: "2.0",
-			ID:      json.RawMessage(fmt.Sprintf("%d", id)),
-			Method:  method,
-			Params:  pBytes,
-		}
-		line, _ := json.Marshal(req)
-		if _, err := upIn.Write(append(line, '\n')); err != nil {
-			return nil, &rpcError{Code: -32000, Message: err.Error()}
-		}
-		deadline := time.Now().Add(30 * time.Second)
-		for time.Now().Before(deadline) {
-			rawLine, err := reader.ReadString('\n')
-			if err != nil {
-				return nil, &rpcError{Code: -32000, Message: err.Error()}
-			}
-			rawLine = strings.TrimSpace(rawLine)
-			if rawLine == "" {
-				continue
-			}
-			var resp rpcMessage
-			if json.Unmarshal([]byte(rawLine), &resp) != nil {
-				continue
-			}
-			if len(resp.ID) == 0 {
-				continue // skip notifications
-			}
-			return resp.Result, resp.Error
-		}
-		return nil, &rpcError{Code: -32001, Message: "upstream timeout"}
-	}
-
-	// Initialize upstream & inspect tools/list.
-	_, initErr := callUpstream("initialize", map[string]any{
-		"protocolVersion": ProtocolVersion,
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "xtforge-hub-proxy", "version": "0.4.0"},
-	})
-	if initErr != nil {
-		fmt.Fprintf(os.Stderr, "xtforge mcp proxy: initialize failed: %s\n", initErr.Message)
-		return 1
-	}
-	upMu.Lock()
-	notif, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"})
-	_, _ = upIn.Write(append(notif, '\n'))
-	upMu.Unlock()
-
-	listRaw, listErr := callUpstream("tools/list", map[string]any{})
-	var upstreamTools []ToolDef
-	if listErr == nil && len(listRaw) > 0 {
-		var parsed struct {
-			Tools []ToolDef `json:"tools"`
-		}
-		if json.Unmarshal(listRaw, &parsed) == nil {
-			upstreamTools = parsed.Tools
-		}
-	}
-
+	upstreamTools := sess.Tools()
 	auditRes := EvaluateTools(prefix, strings.Join(upstreamCmd, " "), upstreamTools, trustOnFirst)
 	if auditRes.Status == "rug_pull" || auditRes.Status == "injection_risk" {
 		fmt.Fprintf(os.Stderr, "xtforge mcp proxy warning: %s flagged (%s)\n", prefix, auditRes.Status)
@@ -486,6 +611,7 @@ func ServeProxy(prefix string, upstreamCmd []string, maxBytes int, trustOnFirst 
 	}
 
 	return serveLoop(proxyTools, func(name string, args map[string]any) (string, bool) {
+		currentTools := sess.Tools()
 		switch name {
 		case prefix + "_search":
 			q := strings.ToLower(fmt.Sprint(args["query"]))
@@ -494,9 +620,9 @@ func ServeProxy(prefix string, upstreamCmd []string, maxBytes int, trustOnFirst 
 				lim = int(f)
 			}
 			var hits []map[string]any
-			for _, t := range upstreamTools {
+			for _, t := range currentTools {
 				hay := strings.ToLower(t.Name + " " + t.Description)
-				if strings.Contains(hay, q) {
+				if q == "" || strings.Contains(hay, q) {
 					hits = append(hits, map[string]any{
 						"name":        t.Name,
 						"description": SummarizeDescription(t.Description, 140),
@@ -507,8 +633,9 @@ func ServeProxy(prefix string, upstreamCmd []string, maxBytes int, trustOnFirst 
 					break
 				}
 			}
-			b, _ := json.MarshalIndent(map[string]any{"server": prefix, "audit": auditRes.Status, "matches": hits}, "", "  ")
-			return string(b), false
+			b, _ := json.MarshalIndent(map[string]any{"server": prefix, "total_tools": len(currentTools), "audit": auditRes.Status, "matches": hits}, "", "  ")
+			clipped, _ := compress.ClipOrSpill(string(b), maxBytes, prefix+"-search")
+			return clipped, false
 		case prefix + "_list":
 			off, lim := 0, 30
 			if f, ok := args["offset"].(float64); ok && f >= 0 {
@@ -518,25 +645,28 @@ func ServeProxy(prefix string, upstreamCmd []string, maxBytes int, trustOnFirst 
 				lim = int(f)
 			}
 			var rows []map[string]string
-			for i := off; i < len(upstreamTools) && len(rows) < lim; i++ {
+			for i := off; i < len(currentTools) && len(rows) < lim; i++ {
 				rows = append(rows, map[string]string{
-					"name":        upstreamTools[i].Name,
-					"description": SummarizeDescription(upstreamTools[i].Description, 100),
+					"name":        currentTools[i].Name,
+					"description": SummarizeDescription(currentTools[i].Description, 100),
 				})
 			}
-			b, _ := json.MarshalIndent(map[string]any{"server": prefix, "total": len(upstreamTools), "tools": rows}, "", "  ")
+			b, _ := json.MarshalIndent(map[string]any{"server": prefix, "total": len(currentTools), "tools": rows}, "", "  ")
 			return string(b), false
 		case prefix + "_call":
 			tName, _ := args["tool"].(string)
+			if tName == "" {
+				tName, _ = args["name"].(string)
+			}
 			tArgs, _ := args["arguments"].(map[string]any)
 			if tArgs == nil {
 				tArgs = map[string]any{}
 			}
-			if guard.CurrentMode() == guard.ModeExplore && (strings.Contains(tName, "write") || strings.Contains(tName, "delete") || strings.Contains(tName, "patch")) {
+			if guard.CurrentMode() == guard.ModeExplore && isMutatingToolName(tName) {
 				guard.AuditEvent("mcp-proxy", prefix, tName, "denied_explore", tArgs, 1)
 				return "denied: XT_PERM_MODE=explore forbids mutating proxied call " + tName, true
 			}
-			resRaw, callErr := callUpstream("tools/call", map[string]any{"name": tName, "arguments": tArgs})
+			resRaw, callErr := sess.CallTool(tName, tArgs)
 			if callErr != nil {
 				guard.AuditEvent("mcp-proxy", prefix, tName, "error", tArgs, 1)
 				return callErr.Message, true

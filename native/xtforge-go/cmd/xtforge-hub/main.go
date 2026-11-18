@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -78,9 +77,27 @@ func run(args []string) int {
 	}
 }
 
+func resolveHubUpstream(serverName, cmdStr string) (string, []string, error) {
+	if cmdStr != "" {
+		parts := mcp.SplitCommand(cmdStr)
+		if len(parts) == 0 {
+			return "", nil, fmt.Errorf("empty upstream command")
+		}
+		srv := serverName
+		if srv == "" {
+			srv = filepathBase(parts[0])
+		}
+		return mcp.CanonicalUpstreamName(srv), parts, nil
+	}
+	if serverName == "" {
+		return "", nil, fmt.Errorf("--server or --cmd required")
+	}
+	return mcp.ResolvePresetCommand(serverName)
+}
+
 func handleMCP(args []string) int {
 	if len(args) == 0 {
-		return printError("mcp requires a verb: serve|proxy|audit|trust")
+		return printError("mcp requires a verb: serve|proxy|audit|trust|connect")
 	}
 	verb := args[0]
 	rest := args[1:]
@@ -90,15 +107,73 @@ func handleMCP(args []string) int {
 		maxBytes := flagInt(rest, "--max-bytes", 16384)
 		return mcp.ServeMeta(mcp.ResolveSelfBinary(), maxBytes)
 	case "proxy":
-		prefix := flagStr(rest, "--prefix", "proxy")
+		serverName := flagStr(rest, "--server", "")
+		if serverName == "" && len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+			serverName = rest[0]
+		}
+		prefix := flagStr(rest, "--prefix", "")
 		cmdStr := flagStr(rest, "--cmd", "")
 		maxBytes := flagInt(rest, "--max-bytes", 16384)
 		trustFirst := hasFlag(rest, "--trust-on-first")
-		if cmdStr == "" {
-			return printError("mcp proxy requires --cmd '<upstream command>'")
+		resolvedName, parts, err := resolveHubUpstream(serverName, cmdStr)
+		if err != nil && prefix != "" && cmdStr == "" && serverName == "" {
+			resolvedName, parts, err = resolveHubUpstream(prefix, "")
 		}
-		parts := strings.Fields(cmdStr)
+		if err != nil {
+			return printError("mcp proxy: " + err.Error())
+		}
+		if prefix == "" {
+			if resolvedName != "" {
+				prefix = strings.ReplaceAll(resolvedName, "-", "_")
+			} else {
+				prefix = "proxy"
+			}
+		}
 		return mcp.ServeProxy(prefix, parts, maxBytes, trustFirst)
+	case "connect":
+		serverName := flagStr(rest, "--server", "")
+		if serverName == "" && len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
+			serverName = rest[0]
+		}
+		cmdStr := flagStr(rest, "--cmd", "")
+		resolvedName, parts, err := resolveHubUpstream(serverName, cmdStr)
+		if err != nil {
+			return printError("mcp connect: " + err.Error())
+		}
+		tools, err := mcp.ProbeUpstreamTools(resolvedName, parts)
+		if err != nil {
+			return printError("mcp connect probe failed: " + err.Error())
+		}
+		joinedCmd := strings.Join(parts, " ")
+		auditRes := mcp.EvaluateTools(resolvedName, joinedCmd, tools, true)
+		if !auditRes.OK {
+			printJSON(map[string]any{
+				"ok":         false,
+				"server":     resolvedName,
+				"status":     auditRes.Status,
+				"tool_count": auditRes.ToolCount,
+				"findings":   auditRes.Findings,
+			})
+			return 1
+		}
+		if err := mcp.SaveUpstream(mcp.UpstreamConfig{
+			Name:    resolvedName,
+			Command: parts,
+			Source:  "connect",
+		}); err != nil {
+			return printError("mcp connect save failed: " + err.Error())
+		}
+		return printJSON(map[string]any{
+			"ok":             true,
+			"server":         resolvedName,
+			"command":        parts,
+			"status":         auditRes.Status,
+			"sha256":         auditRes.SchemaSHA256,
+			"tool_count":     auditRes.ToolCount,
+			"upstreams_path": mcp.UpstreamsPath(),
+			"catalog_cache":  mcp.CatalogCachePath(resolvedName),
+			"usage":          fmt.Sprintf(`xt-forge --meta -> xt_discover(upstream=%q) / xt_call(name=%q)`, resolvedName, resolvedName+":<tool>"),
+		})
 	case "audit", "trust":
 		serverName := flagStr(rest, "--server", "")
 		cmdStr := flagStr(rest, "--cmd", "")
@@ -107,26 +182,32 @@ func handleMCP(args []string) int {
 		if serverName == "" && len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
 			serverName = rest[0]
 		}
-		if cmdStr == "" {
-			// Return trust DB overview when no live command is specified.
+		if cmdStr == "" && serverName == "" {
 			db := mcp.LoadTrust()
-			return printJSON(map[string]any{"ok": true, "trust_path": mcp.TrustPath(), "servers": db.Servers})
+			return printJSON(map[string]any{
+				"ok":         true,
+				"trust_path": mcp.TrustPath(),
+				"servers":    db.Servers,
+				"upstreams":  mcp.LoadUpstreams(),
+			})
 		}
-		tools, err := probeToolsList(strings.Fields(cmdStr))
+		resolvedName, parts, err := resolveHubUpstream(serverName, cmdStr)
 		if err != nil {
 			return printError(err.Error())
 		}
-		if serverName == "" {
-			serverName = filepathBase(strings.Fields(cmdStr)[0])
+		tools, err := mcp.ProbeUpstreamTools(resolvedName, parts)
+		if err != nil {
+			return printError(err.Error())
 		}
+		joinedCmd := strings.Join(parts, " ")
 		if trust {
-			rec, err := mcp.PinTrust(serverName, cmdStr, tools)
+			rec, err := mcp.PinTrust(resolvedName, joinedCmd, tools)
 			if err != nil {
 				return printError(err.Error())
 			}
 			return printJSON(map[string]any{"ok": true, "action": "pinned", "record": rec})
 		}
-		res := mcp.EvaluateTools(serverName, cmdStr, tools, trustOnFirst)
+		res := mcp.EvaluateTools(resolvedName, joinedCmd, tools, trustOnFirst)
 		printJSON(map[string]any{
 			"ok":         res.OK,
 			"server":     res.Server,
@@ -143,72 +224,6 @@ func handleMCP(args []string) int {
 	default:
 		return printError("unknown mcp hub verb: " + verb)
 	}
-}
-
-func probeToolsList(cmdArgs []string) ([]mcp.ToolDef, error) {
-	if len(cmdArgs) == 0 {
-		return nil, fmt.Errorf("empty command")
-	}
-	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
-	in, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, err
-	}
-	out, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	defer func() {
-		_ = in.Close()
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-	}()
-
-	reqs := []string{
-		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"xtforge-audit","version":"0.4.0"}}}`,
-		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
-	}
-	for _, r := range reqs {
-		_, _ = in.Write([]byte(r + "\n"))
-	}
-	_ = in.Close()
-
-	raw, _ := ioReadAllLimit(out, 8*1024*1024)
-	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var resp struct {
-			ID     any `json:"id"`
-			Result struct {
-				Tools []mcp.ToolDef `json:"tools"`
-			} `json:"result"`
-		}
-		if json.Unmarshal([]byte(line), &resp) == nil && len(resp.Result.Tools) > 0 {
-			return resp.Result.Tools, nil
-		}
-	}
-	return nil, fmt.Errorf("no tools/list response received from upstream MCP server")
-}
-
-func ioReadAllLimit(r interface{ Read([]byte) (int, error) }, max int) ([]byte, error) {
-	var out []byte
-	buf := make([]byte, 4096)
-	for len(out) < max {
-		n, err := r.Read(buf)
-		if n > 0 {
-			out = append(out, buf[:n]...)
-		}
-		if err != nil {
-			break
-		}
-	}
-	return out, nil
 }
 
 func handleCode(args []string) int {

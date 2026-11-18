@@ -19,20 +19,23 @@ Protect your agent runtime from prompt-poisoned MCP tool descriptions, post-inst
    xt-forge mcp status
    xt-forge mcp advice
    ```
-2. Audit and trust-pin a candidate upstream MCP server on first verification:
+2. Connect, audit, and trust-pin a preset (`rea`, `craft-anything`) or custom upstream MCP server on first verification:
    ```sh
+   xt-forge mcp connect rea --json
+   xt-forge mcp connect craft-anything --json
    xt-forge mcp audit --server upstream --cmd "npx -y @org/mcp-server" --trust-on-first
    ```
 3. Re-audit before reuse; any post-pin mutation to tool schemas or hidden shell instructions triggers non-zero rug-pull failure:
    ```sh
    xt-forge mcp audit --server upstream --cmd "npx -y @org/mcp-server"
    ```
-4. Serve XT-Forge itself in ultra-compact meta-tool mode (4 tools: `xt_discover`, `xt_schema`, `xt_call`, `xt_batch`):
+4. Serve XT-Forge itself in ultra-compact meta-tool mode (4 tools: `xt_discover`, `xt_schema`, `xt_call`, `xt_batch` — supports `<server>:<tool>` routing into connected persistent sessions):
    ```sh
    xt-forge --meta
    ```
-5. Wrap untrusted upstreams behind the Go trust-enforcing proxy:
+5. Wrap untrusted or dynamic-toolset upstreams behind the Go trust-enforcing proxy:
    ```sh
+   xt-forge mcp proxy --server craft-anything
    xt-forge mcp proxy --prefix ext --cmd "node server.js"
    ```
 

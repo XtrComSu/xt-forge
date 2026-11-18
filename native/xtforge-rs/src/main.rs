@@ -132,7 +132,7 @@ fn wants_hub(p: &args::Parsed) -> bool {
     let noun = p.noun.as_deref().unwrap_or("");
     let verb = p.verb.as_deref().unwrap_or("");
     match (noun, verb) {
-        ("mcp", "audit" | "proxy" | "trust") => true,
+        ("mcp", "audit" | "proxy" | "trust" | "connect") => true,
         ("mcp", "serve") => p.fbool("meta"),
         ("code", "lsp") => true,
         ("re", "asar" | "netcap" | "apk" | "decompile" | "trace" | "checksec" | "capa") => true,

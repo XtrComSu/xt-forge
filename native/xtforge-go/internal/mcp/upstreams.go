@@ -1,0 +1,613 @@
+package mcp
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"xtforge-hub/internal/guard"
+)
+
+// UpstreamConfig defines one persisted or preset external stdio MCP server.
+type UpstreamConfig struct {
+	Name    string            `json:"name"`
+	Command []string          `json:"command"`
+	Env     map[string]string `json:"env,omitempty"`
+	Source  string            `json:"source,omitempty"`
+}
+
+type upstreamsFile struct {
+	Version   int                       `json:"version"`
+	Upstreams map[string]UpstreamConfig `json:"upstreams"`
+}
+
+type cachedCatalog struct {
+	Server    string    `json:"server"`
+	FetchedAt int64     `json:"fetched_at"`
+	Tools     []ToolDef `json:"tools"`
+}
+
+// UpstreamsPath returns $XT_HOME/mcp_upstreams.json.
+func UpstreamsPath() string {
+	return filepath.Join(guard.XTHome(), "mcp_upstreams.json")
+}
+
+// CatalogCachePath returns $XT_HOME/cache/mcp-catalog-<server>.json.
+func CatalogCachePath(server string) string {
+	safe := strings.NewReplacer("/", "_", "\\", "_", ":", "_", " ", "_").Replace(server)
+	return filepath.Join(guard.XTHome(), "cache", "mcp-catalog-"+safe+".json")
+}
+
+// LoadUpstreams reads user-configured external upstreams from $XT_HOME/mcp_upstreams.json.
+func LoadUpstreams() map[string]UpstreamConfig {
+	out := map[string]UpstreamConfig{}
+	raw, err := os.ReadFile(UpstreamsPath())
+	if err != nil {
+		return out
+	}
+	var parsed upstreamsFile
+	if json.Unmarshal(raw, &parsed) == nil && parsed.Upstreams != nil {
+		for k, v := range parsed.Upstreams {
+			if v.Name == "" {
+				v.Name = k
+			}
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// SaveUpstream writes or updates an upstream server entry in $XT_HOME/mcp_upstreams.json.
+func SaveUpstream(cfg UpstreamConfig) error {
+	p := UpstreamsPath()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	cur := LoadUpstreams()
+	cur[cfg.Name] = cfg
+	payload := upstreamsFile{Version: 1, Upstreams: cur}
+	b, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p)
+}
+
+// SaveCachedCatalog stores a server's tools/list catalog under $XT_HOME/cache/.
+func SaveCachedCatalog(server string, tools []ToolDef) error {
+	p := CatalogCachePath(server)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	b, err := json.Marshal(cachedCatalog{
+		Server:    server,
+		FetchedAt: time.Now().Unix(),
+		Tools:     tools,
+	})
+	if err != nil {
+		return err
+	}
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p)
+}
+
+// LoadCachedCatalog reads a previously probed tools/list snapshot for server.
+func LoadCachedCatalog(server string) []ToolDef {
+	raw, err := os.ReadFile(CatalogCachePath(server))
+	if err != nil {
+		return nil
+	}
+	var c cachedCatalog
+	if json.Unmarshal(raw, &c) != nil {
+		return nil
+	}
+	return c.Tools
+}
+
+// CanonicalUpstreamName normalizes common aliases for REA and Craft Anything.
+func CanonicalUpstreamName(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "rea", "rea-agents", "re-mcp", "rea_mcp":
+		return "rea"
+	case "craft", "craft-anything", "craftanything", "craft-anything-cli", "craft_anything":
+		return "craft-anything"
+	default:
+		return strings.TrimSpace(name)
+	}
+}
+
+// SplitCommand tokenizes a shell-like command string while preserving quoted
+// arguments and Windows backslashes outside escape quotes.
+func SplitCommand(cmdLine string) []string {
+	var args []string
+	var cur strings.Builder
+	var quote rune
+	inToken := false
+
+	runes := []rune(cmdLine)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+				continue
+			}
+			if quote == '"' && r == '\\' && i+1 < len(runes) && (runes[i+1] == '"' || runes[i+1] == '\\') {
+				i++
+				cur.WriteRune(runes[i])
+				continue
+			}
+			cur.WriteRune(r)
+			continue
+		}
+		switch r {
+		case '\'', '"':
+			quote = r
+			inToken = true
+		case ' ', '\t', '\n', '\r':
+			if inToken {
+				args = append(args, cur.String())
+				cur.Reset()
+				inToken = false
+			}
+		default:
+			cur.WriteRune(r)
+			inToken = true
+		}
+	}
+	if inToken {
+		args = append(args, cur.String())
+	}
+	return args
+}
+
+func homeDir() string {
+	if h := os.Getenv("HOME"); h != "" {
+		return h
+	}
+	if h := os.Getenv("USERPROFILE"); h != "" {
+		return h
+	}
+	h, _ := os.UserHomeDir()
+	return h
+}
+
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
+}
+
+func firstExecutable(names ...string) string {
+	for _, n := range names {
+		if p, err := exec.LookPath(n); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+func hasArg(args []string, targets ...string) bool {
+	for _, a := range args {
+		for _, t := range targets {
+			if a == t {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ResolvePresetCommand returns the stdio command argv for a built-in preset
+// ("rea", "craft-anything") or a saved entry in $XT_HOME/mcp_upstreams.json.
+func ResolvePresetCommand(name string) (string, []string, error) {
+	canon := CanonicalUpstreamName(name)
+	saved := LoadUpstreams()
+	if cfg, ok := saved[canon]; ok && len(cfg.Command) > 0 {
+		return canon, cfg.Command, nil
+	}
+	if cfg, ok := saved[name]; ok && len(cfg.Command) > 0 {
+		return name, cfg.Command, nil
+	}
+
+	home := homeDir()
+	switch canon {
+	case "rea":
+		if raw := strings.TrimSpace(os.Getenv("REA_CMD")); raw != "" {
+			parts := SplitCommand(raw)
+			if len(parts) > 0 {
+				if extra := strings.TrimSpace(os.Getenv("REA_ARGS")); extra != "" {
+					parts = append(parts, SplitCommand(extra)...)
+				} else if !hasArg(parts, "mcp", "--mcp") {
+					parts = append(parts, "mcp")
+				}
+				return canon, parts, nil
+			}
+		}
+		if p := firstExecutable("rea-agents", "rea"); p != "" {
+			return canon, []string{p, "mcp"}, nil
+		}
+		localCandidates := []string{
+			filepath.Join(home, ".local", "share", "rea", "node_modules", ".bin", "rea-agents"),
+			filepath.Join(home, ".local", "share", "rea", "node_modules", ".bin", "rea"),
+		}
+		if runtime.GOOS == "windows" {
+			localCandidates = append([]string{
+				filepath.Join(home, ".local", "share", "rea", "node_modules", ".bin", "rea-agents.cmd"),
+				filepath.Join(home, "AppData", "Local", "rea", "node_modules", ".bin", "rea-agents.cmd"),
+			}, localCandidates...)
+		}
+		for _, cand := range localCandidates {
+			if fileExists(cand) {
+				return canon, []string{cand, "mcp"}, nil
+			}
+		}
+		if npx := firstExecutable("npx", "npx.cmd"); npx != "" {
+			return canon, []string{npx, "-y", "rea-agents@latest", "mcp"}, nil
+		}
+		return canon, nil, fmt.Errorf("rea executable not found (set REA_CMD or install rea-agents)")
+
+	case "craft-anything":
+		appendCraftFlags := func(base []string) []string {
+			out := append([]string{}, base...)
+			if !hasArg(out, "mcp") {
+				out = append(out, "mcp")
+			}
+			// Expose all 300+ tools behind xt-forge's compact proxy unless explicitly opted out.
+			if os.Getenv("XT_CRAFT_ALL_TOOLS") != "0" && !hasArg(out, "--all-tools") {
+				out = append(out, "--all-tools")
+			}
+			if os.Getenv("XT_CRAFT_DEEP") == "1" && !hasArg(out, "--deep") {
+				out = append(out, "--deep")
+			}
+			if os.Getenv("XT_CRAFT_ALLOW_RUN") == "1" && !hasArg(out, "--allow-run") {
+				out = append(out, "--allow-run")
+			}
+			if proj := strings.TrimSpace(os.Getenv("XT_CRAFT_PROJECT")); proj != "" && !hasArg(out, "--project") {
+				out = append(out, "--project", proj)
+			}
+			return out
+		}
+		if raw := strings.TrimSpace(os.Getenv("CRAFT_ANYTHING_CMD")); raw != "" {
+			parts := SplitCommand(raw)
+			if len(parts) > 0 {
+				return canon, appendCraftFlags(parts), nil
+			}
+		}
+		if p := firstExecutable("craft-anything-cli", "craft-anything"); p != "" {
+			return canon, appendCraftFlags([]string{p}), nil
+		}
+		exe := ""
+		if runtime.GOOS == "windows" {
+			exe = ".exe"
+		}
+		candidates := []string{
+			filepath.Join(home, ".cargo", "bin", "craft-anything-cli"+exe),
+			filepath.Join(home, ".local", "bin", "craft-anything-cli"+exe),
+		}
+		for _, cand := range candidates {
+			if fileExists(cand) {
+				return canon, appendCraftFlags([]string{cand}), nil
+			}
+		}
+		return canon, nil, fmt.Errorf("craft-anything-cli not found (set CRAFT_ANYTHING_CMD or install craft-anything-cli)")
+	}
+
+	return canon, nil, fmt.Errorf("unknown MCP server '%s' (pass --cmd or configure %s)", name, UpstreamsPath())
+}
+
+// KnownUpstreams returns every upstream server configured in $XT_HOME/mcp_upstreams.json,
+// XT_MCP_UPSTREAMS, cached catalogs, or detected locally (rea / craft-anything).
+func KnownUpstreams() []string {
+	seen := map[string]bool{}
+	var order []string
+	add := func(n string) {
+		c := CanonicalUpstreamName(n)
+		if c != "" && !seen[c] {
+			seen[c] = true
+			order = append(order, c)
+		}
+	}
+	for name := range LoadUpstreams() {
+		add(name)
+	}
+	if envList := strings.TrimSpace(os.Getenv("XT_MCP_UPSTREAMS")); envList != "" {
+		for _, item := range strings.Split(envList, ",") {
+			add(item)
+		}
+	}
+	// Include any cached catalog files already probed.
+	cacheDir := filepath.Join(guard.XTHome(), "cache")
+	if entries, err := os.ReadDir(cacheDir); err == nil {
+		for _, e := range entries {
+			n := e.Name()
+			if strings.HasPrefix(n, "mcp-catalog-") && strings.HasSuffix(n, ".json") {
+				srv := strings.TrimSuffix(strings.TrimPrefix(n, "mcp-catalog-"), ".json")
+				add(srv)
+			}
+		}
+	}
+	// Also include locally installed rea / craft-anything binaries without running npx downloads.
+	for _, preset := range []string{"rea", "craft-anything"} {
+		if !seen[preset] {
+			if _, argv, err := ResolvePresetCommand(preset); err == nil && len(argv) > 0 {
+				base := filepath.Base(argv[0])
+				if base != "npx" && base != "npx.cmd" {
+					add(preset)
+				}
+			}
+		}
+	}
+	return order
+}
+
+func mcpCallTimeout() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("XT_MCP_TIMEOUT")); raw != "" {
+		if sec, err := strconv.Atoi(raw); err == nil && sec > 0 {
+			return time.Duration(sec) * time.Second
+		}
+	}
+	return 45 * time.Second
+}
+
+// UpstreamSession manages a persistent stdio JSON-RPC connection to one child MCP server.
+type UpstreamSession struct {
+	Name   string
+	Cmd    []string
+	proc   *exec.Cmd
+	in     io.WriteCloser
+	reader *bufio.Reader
+	mu     sync.Mutex
+	nextID int
+	tools  []ToolDef
+	dirty  bool // set when notifications/tools/list_changed arrives
+}
+
+// StartUpstreamSession spawns an upstream stdio MCP server, completes initialize +
+// notifications/initialized, and loads its initial tools/list snapshot.
+func StartUpstreamSession(name string, argv []string) (*UpstreamSession, error) {
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("empty upstream command for %s", name)
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	upIn, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	upOut, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start %s (%s): %w", name, argv[0], err)
+	}
+
+	s := &UpstreamSession{
+		Name:   CanonicalUpstreamName(name),
+		Cmd:    append([]string{}, argv...),
+		proc:   cmd,
+		in:     upIn,
+		reader: bufio.NewReaderSize(upOut, 1024*1024),
+		nextID: 1,
+	}
+
+	if _, rpcErr := s.callLocked("initialize", map[string]any{
+		"protocolVersion": ProtocolVersion,
+		"capabilities":    map[string]any{},
+		"clientInfo":      map[string]any{"name": "xtforge-hub", "version": "0.4.0"},
+	}); rpcErr != nil {
+		s.Close()
+		return nil, fmt.Errorf("initialize %s: %s", s.Name, rpcErr.Message)
+	}
+	notif, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": "notifications/initialized"})
+	if _, err := s.in.Write(append(notif, '\n')); err != nil {
+		s.Close()
+		return nil, fmt.Errorf("send initialized to %s: %w", s.Name, err)
+	}
+	if _, err := s.RefreshTools(); err != nil {
+		s.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+// Close shuts down stdin and terminates the child process cleanly.
+func (s *UpstreamSession) Close() {
+	if s == nil {
+		return
+	}
+	if s.in != nil {
+		_ = s.in.Close()
+	}
+	if s.proc != nil && s.proc.Process != nil {
+		_ = s.proc.Process.Kill()
+		_, _ = s.proc.Process.Wait()
+	}
+}
+
+func (s *UpstreamSession) Tools() []ToolDef {
+	s.mu.Lock()
+	needRefresh := s.dirty
+	out := append([]ToolDef{}, s.tools...)
+	s.mu.Unlock()
+	if needRefresh {
+		if refreshed, err := s.RefreshTools(); err == nil {
+			return refreshed
+		}
+	}
+	return out
+}
+
+func (s *UpstreamSession) RefreshTools() ([]ToolDef, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	raw, rpcErr := s.callLocked("tools/list", map[string]any{})
+	if rpcErr != nil {
+		return nil, fmt.Errorf("tools/list %s: %s", s.Name, rpcErr.Message)
+	}
+	var parsed struct {
+		Tools []ToolDef `json:"tools"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, fmt.Errorf("decode tools/list %s: %w", s.Name, err)
+	}
+	s.tools = parsed.Tools
+	s.dirty = false
+	_ = SaveCachedCatalog(s.Name, s.tools)
+	return append([]ToolDef{}, s.tools...), nil
+}
+
+func (s *UpstreamSession) CallTool(toolName string, args map[string]any) (json.RawMessage, *rpcError) {
+	s.mu.Lock()
+	res, rpcErr := s.callLocked("tools/call", map[string]any{"name": toolName, "arguments": args})
+	needRefresh := s.dirty || toolName == "enable_toolset" || toolName == "disable_toolset"
+	s.mu.Unlock()
+
+	if rpcErr == nil && needRefresh {
+		_, _ = s.RefreshTools()
+	}
+	return res, rpcErr
+}
+
+func (s *UpstreamSession) callLocked(method string, params any) (json.RawMessage, *rpcError) {
+	id := s.nextID
+	s.nextID++
+	expectedID := strconv.Itoa(id)
+
+	pBytes, _ := json.Marshal(params)
+	req := rpcMessage{
+		JSONRPC: "2.0",
+		ID:      json.RawMessage(expectedID),
+		Method:  method,
+		Params:  pBytes,
+	}
+	line, _ := json.Marshal(req)
+	if _, err := s.in.Write(append(line, '\n')); err != nil {
+		return nil, &rpcError{Code: -32000, Message: err.Error()}
+	}
+
+	type readResult struct {
+		line []byte
+		err  error
+	}
+	timeout := mcpCallTimeout()
+	deadline := time.Now().Add(timeout)
+
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, &rpcError{Code: -32001, Message: "upstream timeout waiting for " + method}
+		}
+		ch := make(chan readResult, 1)
+		go func() {
+			b, err := s.reader.ReadBytes('\n')
+			ch <- readResult{line: b, err: err}
+		}()
+		var res readResult
+		select {
+		case res = <-ch:
+		case <-time.After(remaining):
+			return nil, &rpcError{Code: -32001, Message: "upstream timeout waiting for " + method}
+		}
+
+		trimmed := bytes.TrimSpace(res.line)
+		if len(trimmed) > 0 {
+			var msg rpcMessage
+			if json.Unmarshal(trimmed, &msg) == nil {
+				if len(msg.ID) == 0 || string(msg.ID) == "null" {
+					if msg.Method == "notifications/tools/list_changed" {
+						s.dirty = true
+					}
+					if res.err != nil {
+						return nil, &rpcError{Code: -32000, Message: res.err.Error()}
+					}
+					continue
+				}
+				gotID := strings.Trim(strings.TrimSpace(string(msg.ID)), `"`)
+				if gotID == expectedID {
+					return msg.Result, msg.Error
+				}
+			}
+		}
+		if res.err != nil {
+			return nil, &rpcError{Code: -32000, Message: res.err.Error()}
+		}
+	}
+}
+
+// ProbeUpstreamTools spawns cmdArgs, retrieves tools/list using a proper
+// MCP handshake, caches the catalog if serverName != "", and kills the child cleanly.
+func ProbeUpstreamTools(serverName string, cmdArgs []string) ([]ToolDef, error) {
+	sess, err := StartUpstreamSession(serverName, cmdArgs)
+	if err != nil {
+		return nil, err
+	}
+	tools := sess.Tools()
+	sess.Close()
+	return tools, nil
+}
+
+// UpstreamPool holds lazy persistent stdio sessions keyed by canonical upstream name.
+type UpstreamPool struct {
+	mu       sync.Mutex
+	sessions map[string]*UpstreamSession
+}
+
+func NewUpstreamPool() *UpstreamPool {
+	return &UpstreamPool{sessions: map[string]*UpstreamSession{}}
+}
+
+func (p *UpstreamPool) GetOrStart(name string) (*UpstreamSession, error) {
+	canon := CanonicalUpstreamName(name)
+	p.mu.Lock()
+	if s, ok := p.sessions[canon]; ok {
+		p.mu.Unlock()
+		return s, nil
+	}
+	p.mu.Unlock()
+
+	resolvedName, argv, err := ResolvePresetCommand(canon)
+	if err != nil {
+		return nil, err
+	}
+	sess, err := StartUpstreamSession(resolvedName, argv)
+	if err != nil {
+		return nil, err
+	}
+
+	p.mu.Lock()
+	if existing, ok := p.sessions[resolvedName]; ok {
+		p.mu.Unlock()
+		sess.Close()
+		return existing, nil
+	}
+	p.sessions[resolvedName] = sess
+	p.mu.Unlock()
+	return sess, nil
+}
+
+func (p *UpstreamPool) CloseAll() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for k, s := range p.sessions {
+		s.Close()
+		delete(p.sessions, k)
+	}
+}

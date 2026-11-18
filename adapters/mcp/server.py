@@ -619,31 +619,126 @@ META_TOOLS = [
 ]
 
 _TOOL_MAP = {t["name"]: t for t in TOOLS}
+_UPSTREAM_POOL: dict[str, Any] = {}
+
+
+def _get_py_upstream(server: str):
+    from xtforge.core.mcp_proxy import PythonUpstreamSession
+    from xtforge.core.mcp_registry import canonical_upstream_name, resolve_upstream_cmd
+    canon = canonical_upstream_name(server)
+    sess = _UPSTREAM_POOL.get(canon)
+    if sess is not None:
+        return sess
+    resolved, argv, err = resolve_upstream_cmd(canon)
+    if err or not argv:
+        raise RuntimeError(err or f"cannot resolve upstream: {server}")
+    sess = PythonUpstreamSession(resolved, argv)
+    sess.start()
+    _UPSTREAM_POOL[resolved] = sess
+    return sess
+
+
+def _split_upstream_ref(raw: str) -> tuple[str, str] | None:
+    if ":" not in raw:
+        return None
+    srv, tool = raw.split(":", 1)
+    srv, tool = srv.strip(), tool.strip()
+    if not srv or not tool:
+        return None
+    from xtforge.core.mcp_registry import canonical_upstream_name
+    return canonical_upstream_name(srv), tool
 
 
 def _handle_meta_call(name: str | None, arguments: dict[str, Any]) -> dict[str, Any]:
     from xtforge.core.compress import clip_or_spill
+    from xtforge.core.mcp_registry import (
+        canonical_upstream_name,
+        known_upstreams,
+        load_cached_catalog,
+    )
     if name == "xt_discover":
         q = str(arguments.get("query") or "").lower().strip()
+        up_raw = str(arguments.get("upstream") or "").strip().lower()
         lim = int(arguments.get("limit") or 12)
-        matches = [
-            {"name": t["name"], "description": t["description"]}
-            for t in TOOLS
-            if not q or q in t["name"].lower() or q in t["description"].lower()
-        ][:lim]
+        matches = []
+        if up_raw in ("", "all", "xt-forge"):
+            matches = [
+                {"name": t["name"], "description": t["description"]}
+                for t in TOOLS
+                if not q or q in t["name"].lower() or q in t["description"].lower()
+            ][:lim]
+        upstream_matches = []
+        if up_raw != "xt-forge":
+            targets = [canonical_upstream_name(up_raw)] if up_raw not in ("", "all") else known_upstreams()
+            for srv in targets:
+                tools = load_cached_catalog(srv)
+                if not tools and (up_raw not in ("", "all") or srv in q or (srv == "craft-anything" and "craft" in q)):
+                    try:
+                        tools = _get_py_upstream(srv).get_tools()
+                    except Exception:
+                        tools = []
+                for t in tools:
+                    hay = f"{srv} {t.get('name', '')} {t.get('description', '')}".lower()
+                    if not q or all(w in hay for w in q.split()):
+                        upstream_matches.append({
+                            "name": f"{srv}:{t.get('name')}",
+                            "upstream": srv,
+                            "tool": t.get("name"),
+                            "description": str(t.get("description", ""))[:140],
+                        })
+                        if len(upstream_matches) >= lim:
+                            break
         return {"content": [{"type": "text", "text": json.dumps({
-            "ok": True, "count": len(matches), "total_catalog": len(TOOLS), "tools": matches,
+            "ok": True,
+            "count": len(matches),
+            "total_catalog": len(TOOLS),
+            "tools": matches,
+            "upstream_matches": upstream_matches[:lim],
+            "known_upstreams": known_upstreams(),
         })}], "isError": False}
     if name == "xt_schema":
         tname = str(arguments.get("name") or "")
+        ref = _split_upstream_ref(tname)
+        if ref is not None:
+            srv, tool_name = ref
+            tools = load_cached_catalog(srv)
+            if not tools:
+                try:
+                    tools = _get_py_upstream(srv).get_tools()
+                except Exception as exc:
+                    return {"content": [{"type": "text", "text": json.dumps({"ok": False, "err": str(exc)})}], "isError": True}
+            for item in tools:
+                if item.get("name") == tool_name:
+                    return {"content": [{"type": "text", "text": json.dumps({
+                        "ok": True, "upstream": srv, "name": f"{srv}:{tool_name}",
+                        "tool": tool_name, "description": item.get("description", ""),
+                        "inputSchema": item.get("inputSchema", {}),
+                    })}], "isError": False}
+            return {"content": [{"type": "text", "text": json.dumps({"ok": False, "err": f"unknown tool {tname}"})}], "isError": True}
         t = _TOOL_MAP.get(tname)
         if not t:
             return {"content": [{"type": "text", "text": json.dumps({"ok": False, "err": f"unknown tool: {tname}"})}], "isError": True}
         return {"content": [{"type": "text", "text": json.dumps({"ok": True, "tool": t})}], "isError": False}
     if name == "xt_call":
         target = str(arguments.get("name") or "")
+        srv_arg = str(arguments.get("server") or "").strip()
+        tool_arg = str(arguments.get("tool") or "").strip()
+        call_args = arguments.get("arguments") or {}
+        if srv_arg and tool_arg:
+            try:
+                res, is_err = _get_py_upstream(srv_arg).call_tool(tool_arg, call_args)
+                return {"content": [{"type": "text", "text": json.dumps(clip_or_spill(res), ensure_ascii=False)}], "isError": is_err}
+            except Exception as exc:
+                return {"content": [{"type": "text", "text": json.dumps({"ok": False, "err": str(exc)})}], "isError": True}
+        ref = _split_upstream_ref(target)
+        if ref is not None:
+            try:
+                res, is_err = _get_py_upstream(ref[0]).call_tool(ref[1], call_args)
+                return {"content": [{"type": "text", "text": json.dumps(clip_or_spill(res), ensure_ascii=False)}], "isError": is_err}
+            except Exception as exc:
+                return {"content": [{"type": "text", "text": json.dumps({"ok": False, "err": str(exc)})}], "isError": True}
         if target in _TOOL_MAP:
-            return _call_tool(target, arguments.get("arguments") or {})
+            return _call_tool(target, call_args)
         argv = list(arguments.get("argv") or [])
         if not argv and target:
             argv = target.split(".", 1) if "." in target else target.split(" ", 1)
@@ -701,32 +796,40 @@ def _handle(message: dict[str, Any], meta_mode: bool = False) -> dict[str, Any] 
 def main(argv: list[str] | None = None) -> int:
     cli_args = list(sys.argv[1:] if argv is None else argv)
     meta_mode = "--meta" in cli_args
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            message = json.loads(line)
-        except json.JSONDecodeError:
-            _send({"jsonrpc": "2.0", "id": None,
-                   "error": {"code": -32700, "message": "parse error"}})
-            continue
-        if not isinstance(message, dict):
-            continue
-        if message.get("method") == "exit":
-            break
-        try:
-            reply = _handle(message, meta_mode=meta_mode)
-        except RpcError as exc:
-            reply = {"jsonrpc": "2.0", "id": message.get("id"),
-                     "error": {"code": exc.code, "message": exc.message}}
-        except Exception as exc:  # never leak a traceback to stdout
-            print(f"xt-forge mcp: {exc!r}", file=sys.stderr)
-            reply = {"jsonrpc": "2.0", "id": message.get("id"),
-                     "error": {"code": -32603, "message": "internal error"}}
-        if reply is not None:
-            _send(reply)
-    return 0
+    try:
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                _send({"jsonrpc": "2.0", "id": None,
+                       "error": {"code": -32700, "message": "parse error"}})
+                continue
+            if not isinstance(message, dict):
+                continue
+            if message.get("method") == "exit":
+                break
+            try:
+                reply = _handle(message, meta_mode=meta_mode)
+            except RpcError as exc:
+                reply = {"jsonrpc": "2.0", "id": message.get("id"),
+                         "error": {"code": exc.code, "message": exc.message}}
+            except Exception as exc:  # never leak a traceback to stdout
+                print(f"xt-forge mcp: {exc!r}", file=sys.stderr)
+                reply = {"jsonrpc": "2.0", "id": message.get("id"),
+                         "error": {"code": -32603, "message": "internal error"}}
+            if reply is not None:
+                _send(reply)
+        return 0
+    finally:
+        for sess in list(_UPSTREAM_POOL.values()):
+            try:
+                sess.close()
+            except Exception:
+                pass
+        _UPSTREAM_POOL.clear()
 
 
 if __name__ == "__main__":
