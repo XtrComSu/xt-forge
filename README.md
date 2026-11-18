@@ -24,20 +24,39 @@ Most coding and security agent setups burn thousands of context tokens on massiv
 
 ---
 
-## Install & Run in Seconds
+## Install on Windows, Linux, and macOS
 
-Node.js (`npx`) or Bash gives you global `xt-forge`, `xtf`, and slash command `/xtf` support immediately:
+### Option 1: Universal `npx` Setup (Windows, Linux, macOS)
+
+Node.js (`18+`) installs global `xt-forge`, `xtf`, `/xtf` slash commands, and all 18 `XTF-*` skills in one step:
 
 ```sh
-# Option A: instant global CLI, /xtf slash integration, and XTF-* skills via npx
-npx xt-forge init
-
-# Option B: build Rust + Go native engines from a local clone and link onto PATH
-git clone https://github.com/XtrComSu/xt-forge.git && cd xt-forge
-./install.sh
+npx xt-forge@latest init
 ```
 
-Launch the sub-1KB MCP gateway from any terminal, or call `/xtf --meta` inside supported agent harnesses:
+### Option 2: Native One-Line Install (Builds Rust + Go + Links PATH)
+
+**Linux & macOS (Bash / Zsh):**
+
+```sh
+# Piped one-liner:
+curl -fsSL https://raw.githubusercontent.com/XtrComSu/xt-forge/main/install.sh | bash
+
+# Or from a local clone:
+git clone https://github.com/XtrComSu/xt-forge.git && cd xt-forge && ./install.sh
+```
+
+**Windows (PowerShell 5.1+ / PowerShell 7+):**
+
+```powershell
+# Piped one-liner:
+irm https://raw.githubusercontent.com/XtrComSu/xt-forge/main/install.ps1 | iex
+
+# Or from a local clone:
+git clone https://github.com/XtrComSu/xt-forge.git; cd xt-forge; .\install.ps1
+```
+
+Both `install.sh` and `install.ps1` compile Rust (`xtforge-native`) and Go (`xtforge-hub`) when toolchains are present and fall back cleanly to zero-dependency Python 3.11+ (`XT_FORCE_PYTHON=1` forces Python anytime). Prebuilt release archives and wheels are published on [Releases](https://github.com/XtrComSu/xt-forge/releases).
 
 ```sh
 xt-forge --meta        # stdio MCP gateway (xt_discover, xt_schema, xt_call, xt_batch)
@@ -45,7 +64,13 @@ xt-forge doctor        # check workspace health, guard mode, and native engines
 xt-forge skills        # list the 18 bundled XTF-* workflow skills
 ```
 
-When native Rust (`xtforge-native`) and Go (`xtforge-hub`) binaries are built, hot paths and concurrent daemons dispatch natively; otherwise `xt-forge` runs on zero-dependency Python 3.11+ (`XT_FORCE_PYTHON=1` selects pure Python anytime).
+---
+
+## Agent Self-Install Prompts
+
+Want an AI coding agent (Claude Code, Codex CLI, OpenCode, DSH, Cursor) to install and configure `xt-forge` itself? Paste this prompt directly to the agent, or print the full prompt suite via `npx xt-forge prompt-install` (see [prompts/install.md](prompts/install.md)):
+
+> Install `xt-forge` (`https://github.com/XtrComSu/xt-forge`) for this OS (`./install.sh` on Linux/macOS, `.\install.ps1` on Windows PowerShell, or `npx xt-forge@latest init`), verify `xt-forge`, `xtf`, `/xtf`, and all 18 `XTF-*` skills are installed, register `xt-forge --meta` in the active MCP config if one exists, and run `xt-forge version --json` + `xt-forge doctor --json` + `tools/list` on `xt-forge --meta` to prove the setup works.
 
 ---
 

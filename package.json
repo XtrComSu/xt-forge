@@ -22,6 +22,8 @@
     "!**/*.pyo",
     "!**/*.db*",
     "pyproject.toml",
+    "install.sh",
+    "install.ps1",
     "VERSION",
     "README.md",
     "LICENSE"

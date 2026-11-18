@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 /**
- * Zero-dependency launcher & one-shot setup entrypoint for `npx xt-forge`.
+ * Zero-dependency launcher & cross-platform setup entrypoint for `npx xt-forge`.
+ * Works on Windows, Linux, and macOS.
  *
  * Examples:
  *   npx xt-forge --meta               Launch sub-1KB MCP gateway (stdio)
  *   npx xt-forge init                 Install CLI on PATH, copy XTF-* skills, configure harnesses
  *   npx xt-forge skills               List the 3-tier XTF-* skill catalog
+ *   npx xt-forge prompt-install       Print agent self-install prompts (Windows/Linux/macOS)
  *   npx xt-forge <noun> <verb> ...    Forward directly to native Rust/Go/Python workbench
  */
 import { spawnSync } from "node:child_process"
@@ -21,19 +23,27 @@ import {
   writeFileSync,
 } from "node:fs"
 import { homedir } from "node:os"
-import { dirname, join, resolve } from "node:path"
+import { delimiter, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, "..")
-const HOME = homedir()
+const IS_WIN = process.platform === "win32"
+const IS_MAC = process.platform === "darwin"
+const HOME = IS_WIN ? process.env.USERPROFILE || homedir() : process.env.HOME || homedir()
 
 function resolveRunner() {
-  const rsBin = join(ROOT, "native", "xtforge-rs", "target", "release", "xtforge-native")
-  if (existsSync(rsBin)) return { cmd: rsBin, prefixArgs: [], engine: "rust+go" }
-  const shBin = join(ROOT, "bin", "xtforge")
-  if (existsSync(shBin)) return { cmd: shBin, prefixArgs: [], engine: "cli" }
-  return { cmd: process.env.XT_PYTHON || "python3", prefixArgs: ["-m", "xtforge.cli"], engine: "python" }
+  const rsName = IS_WIN ? "xtforge-native.exe" : "xtforge-native"
+  const rsBin = join(ROOT, "native", "xtforge-rs", "target", "release", rsName)
+  if (process.env.XT_FORCE_PYTHON !== "1" && existsSync(rsBin)) {
+    return { cmd: rsBin, prefixArgs: [], engine: "rust+go", needsShell: false }
+  }
+  const wrapper = join(ROOT, "bin", IS_WIN ? "xtforge.cmd" : "xtforge")
+  if (existsSync(wrapper)) {
+    return { cmd: wrapper, prefixArgs: [], engine: "cli", needsShell: IS_WIN }
+  }
+  const py = process.env.XT_PYTHON || (IS_WIN ? "python" : "python3")
+  return { cmd: py, prefixArgs: ["-m", "xtforge.cli"], engine: "python", needsShell: false }
 }
 
 function copyDir(src, dst) {
@@ -55,8 +65,13 @@ function copyDir(src, dst) {
   return count
 }
 
-function linkBinary(targetDir, name, sourcePath) {
+function installShim(targetDir, name, sourcePath) {
   mkdirSync(targetDir, { recursive: true })
+  if (IS_WIN) {
+    const dest = join(targetDir, `${name}.cmd`)
+    writeFileSync(dest, `@echo off\r\n"${sourcePath}" %*\r\n`, "ascii")
+    return dest
+  }
   const dest = join(targetDir, name)
   try {
     unlinkSync(dest)
@@ -86,19 +101,30 @@ function cmdSkills() {
   console.log("Install all skills locally via: xt-forge init (or npx xt-forge init)")
 }
 
+function cmdPromptInstall() {
+  const promptPath = join(ROOT, "prompts", "install.md")
+  if (!existsSync(promptPath)) {
+    console.error("prompts/install.md not found in package")
+    process.exit(1)
+  }
+  process.stdout.write(readFileSync(promptPath, "utf8"))
+}
+
 function cmdInit(argv) {
   const args = new Set(argv)
   const localBin = join(HOME, ".local", "bin")
-  const launcher = join(ROOT, "bin", "xtforge")
-  try {
-    chmodSync(launcher, 0o755)
-  } catch {
-    // ignore if packaged read-only
+  const launcher = join(ROOT, "bin", IS_WIN ? "xtforge.cmd" : "xtforge")
+  if (!IS_WIN) {
+    try {
+      chmodSync(launcher, 0o755)
+    } catch {
+      // ignore if packaged read-only
+    }
   }
 
-  const binPath = linkBinary(localBin, "xt-forge", launcher)
-  const aliasPath = linkBinary(localBin, "xtforge", launcher)
-  const shortAlias = linkBinary(localBin, "xtf", launcher)
+  const binPath = installShim(localBin, "xt-forge", launcher)
+  const aliasPath = installShim(localBin, "xtforge", launcher)
+  const shortAlias = installShim(localBin, "xtf", launcher)
 
   const skillsSrc = join(ROOT, "skills")
   const skillTargets = [
@@ -112,7 +138,6 @@ function cmdInit(argv) {
     installedCounts[dst] = copyDir(skillsSrc, dst)
   }
 
-  // Install /xtf slash integration prompt files for harnesses that read command markdowns.
   const dshCmdDir = join(HOME, ".dsh", "commands")
   mkdirSync(dshCmdDir, { recursive: true })
   writeFileSync(
@@ -132,20 +157,30 @@ function cmdInit(argv) {
   const ocPluginDst = join(HOME, ".config", "opencode", "plugins", "xt-native")
   if (existsSync(ocPluginDst)) {
     const runner = resolveRunner()
-    spawnSync(runner.cmd, [...runner.prefixArgs, "plugin", "install"], { stdio: "ignore" })
+    spawnSync(runner.cmd, [...runner.prefixArgs, "plugin", "install"], {
+      stdio: "ignore",
+      shell: runner.needsShell,
+    })
   }
 
   console.log("XT-Forge initialized successfully:\n")
+  console.log(`  Platform         : ${process.platform} (${process.arch})`)
   console.log(`  Commands on PATH : ${binPath}, ${aliasPath}, ${shortAlias}`)
   console.log(`  Gateway command  : xt-forge --meta`)
-  console.log(`  Slash commands   : /xtf (DSH & Claude Code ~/.dsh/commands/xtf.md, ~/.claude/commands/xtf.md)`)
+  console.log(`  Slash commands   : /xtf (~/.dsh/commands/xtf.md, ~/.claude/commands/xtf.md)`)
   console.log(`  Skills installed : ${installedCounts[join(HOME, ".agents", "skills")]} XTF-* workflow skills synced to:`)
   for (const [dir, n] of Object.entries(installedCounts)) {
     console.log(`    - ${dir} (${n} skills)`)
   }
-  const pathEnv = (process.env.PATH || "").split(":")
+  const pathEnv = (process.env.PATH || "").split(delimiter)
   if (!pathEnv.includes(localBin)) {
-    console.log(`\n  Add ${localBin} to PATH if missing:\n    export PATH="${localBin}:$PATH"`)
+    if (IS_WIN) {
+      console.log(`\n  Add ${localBin} to User PATH cleanly in PowerShell:\n    setx PATH "$env:USERPROFILE\\.local\\bin;$env:PATH"`)
+    } else if (IS_MAC) {
+      console.log(`\n  Add ${localBin} to PATH in ~/.zshrc:\n    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc`)
+    } else {
+      console.log(`\n  Add ${localBin} to PATH in ~/.bashrc:\n    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc`)
+    }
   }
   if (!args.has("--quiet")) {
     console.log("\n  Quick check:\n    xt-forge doctor\n    xt-forge --meta\n")
@@ -161,15 +196,26 @@ if (rawArgs[0] === "skills" && rawArgs.length === 1) {
   cmdSkills()
   process.exit(0)
 }
+if (rawArgs[0] === "prompt-install" || (rawArgs[0] === "prompt" && rawArgs[1] === "install")) {
+  cmdPromptInstall()
+  process.exit(0)
+}
 
-const { cmd, prefixArgs } = resolveRunner()
+const { cmd, prefixArgs, needsShell } = resolveRunner()
 const finalArgs = [...prefixArgs, ...rawArgs]
+const childEnv = { ...process.env }
+if (!childEnv.XT_HOME) {
+  childEnv.XT_HOME = join(HOME, ".xt-forge")
+}
+if (!childEnv.PYTHONPATH) {
+  childEnv.PYTHONPATH = ROOT
+} else if (!childEnv.PYTHONPATH.split(delimiter).includes(ROOT)) {
+  childEnv.PYTHONPATH = `${ROOT}${delimiter}${childEnv.PYTHONPATH}`
+}
 const child = spawnSync(cmd, finalArgs, {
   cwd: rawArgs[0] === "--meta" || rawArgs[0] === "mcp" ? ROOT : process.cwd(),
+  env: childEnv,
   stdio: "inherit",
-  env: {
-    ...process.env,
-    PYTHONPATH: process.env.PYTHONPATH ? `${ROOT}:${process.env.PYTHONPATH}` : ROOT,
-  },
+  shell: needsShell,
 })
 process.exit(child.status ?? 1)
