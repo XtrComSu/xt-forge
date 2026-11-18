@@ -2,6 +2,9 @@
 name = "xtforge-native"
 version = "0.1.0"
 edition = "2021"
+authors = ["XtrComSu <xtrcom.su@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/XtrComSu/xt-forge"
 description = "Native CLI core for xt-forge (P1: flash, route, compress)"
 
 [dependencies]

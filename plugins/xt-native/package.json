@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "xt-forge native plugin for OpenCode: /taste, /goal, /loop",
+  "author": "XtrComSu",
   "main": "index.ts",
   "engines": {
     "opencode": ">=2.0.0"

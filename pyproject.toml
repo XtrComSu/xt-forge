@@ -9,7 +9,7 @@ description = "Local agent workbench for call-graph context, offline reverse eng
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "XtrCom" }]
+authors = [{ name = "XtrComSu", email = "xtrcom.su@gmail.com" }]
 keywords = ["agents", "memory", "mcp", "tooling"]
 classifiers = [
   "Programming Language :: Python :: 3",
