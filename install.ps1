@@ -58,8 +58,17 @@ if (Get-Command node -ErrorAction SilentlyContinue) {
         (Join-Path $env:USERPROFILE ".config\opencode\skills"),
         (Join-Path $env:USERPROFILE ".claude\skills")
     )
+    $LegacySkills = @(
+        "XTF-Pulse", "XTF-Compass", "XTF-Spark", "XTF-Shield", "XTF-Lumen", "XTF-Gage",
+        "XTF-Vise", "XTF-Trace", "XTF-Beacon", "XTF-Anvil", "XTF-Sliver", "XTF-Chisel",
+        "XTF-Wraith", "XTF-Cipher", "XTF-Cartographer", "XTF-Scalpel", "XTF-Sentinel", "XTF-Crucible"
+    )
     foreach ($dst in $SkillTargets) {
         New-Item -ItemType Directory -Force -Path $dst | Out-Null
+        foreach ($legacy in $LegacySkills) {
+            $oldPath = Join-Path $dst $legacy
+            if (Test-Path $oldPath) { Remove-Item -Path $oldPath -Recurse -Force -ErrorAction SilentlyContinue }
+        }
         foreach ($tier in @("simple", "complex", "advanced")) {
             $tierDir = Join-Path $SkillsSrc $tier
             if (Test-Path $tierDir) {

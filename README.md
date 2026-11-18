@@ -80,9 +80,9 @@ Want an AI coding agent (Claude Code, Codex CLI, OpenCode, DSH, Cursor) to insta
 
 | Tier | Count | Skills | Scope |
 | --- | ---: | --- | --- |
-| **Simple** | 6 | `XTF-Pulse`, `XTF-Compass`, `XTF-Spark`, `XTF-Shield`, `XTF-Lumen`, `XTF-Gage` | Workspace maps, call graphs, flash scratchpad, secret/injection scans, log squeeze, keyless CVE triage |
-| **Complex** | 6 | `XTF-Vise`, `XTF-Trace`, `XTF-Beacon`, `XTF-Anvil`, `XTF-Sliver`, `XTF-Chisel` | Offline ELF/PE triage, CFG/RTTI, binary IOC enrichment, guarded patching, ASAR/APK/HAR, parallel research |
-| **Advanced** | 6 | `XTF-Wraith`, `XTF-Cipher`, `XTF-Cartographer`, `XTF-Scalpel`, `XTF-Sentinel`, `XTF-Crucible` | XOR/stack decoding, headless decompile, MCP rug-pull defense, minidump postmortem, bounded verification loops |
+| **Simple** | 6 | `XTF-RepoMap`, `XTF-CallGraph`, `XTF-Notes`, `XTF-SecretScan`, `XTF-LogCompress`, `XTF-CVELookup` | Workspace maps, call graphs, flash notes, secret/injection scans, log compression, keyless CVE lookup |
+| **Complex** | 6 | `XTF-BinaryTriage`, `XTF-Disasm`, `XTF-IOCIntel`, `XTF-BinaryPatch`, `XTF-Unpack`, `XTF-DeepResearch` | Offline ELF/PE triage, disassembly/CFG/RTTI, IOC enrichment, guarded patching, ASAR/APK/HAR unpack, parallel research |
+| **Advanced** | 6 | `XTF-Decompile`, `XTF-MCPGateway`, `XTF-BugFix`, `XTF-CrashTriage`, `XTF-GoalLoop`, `XTF-MemoryEval` | String decoding, decompilation, MCP rug-pull defense, bug fixes, minidump postmortem, bounded verification loops |
 
 Full reference and trigger patterns live in [docs/SKILLS.md](docs/SKILLS.md).
 

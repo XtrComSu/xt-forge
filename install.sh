@@ -68,6 +68,11 @@ else
   echo "[xt-forge] Linked ${LOCAL_BIN}/{xt-forge,xtforge,xtf}"
   for dst in "${HOME}/.agents/skills" "${HOME}/.dsh/skills" "${HOME}/.config/opencode/skills" "${HOME}/.claude/skills"; do
     mkdir -p "${dst}"
+    for legacy in XTF-Pulse XTF-Compass XTF-Spark XTF-Shield XTF-Lumen XTF-Gage \
+                  XTF-Vise XTF-Trace XTF-Beacon XTF-Anvil XTF-Sliver XTF-Chisel \
+                  XTF-Wraith XTF-Cipher XTF-Cartographer XTF-Scalpel XTF-Sentinel XTF-Crucible; do
+      rm -rf "${dst}/${legacy}"
+    done
     for tier in simple complex advanced; do
       if [ -d "${ROOT}/skills/${tier}" ]; then
         for s in "${ROOT}/skills/${tier}"/XTF-*; do

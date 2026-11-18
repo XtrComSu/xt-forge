@@ -18,6 +18,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -46,9 +47,18 @@ function resolveRunner() {
   return { cmd: py, prefixArgs: ["-m", "xtforge.cli"], engine: "python", needsShell: false }
 }
 
+const LEGACY_SKILLS = [
+  "XTF-Pulse", "XTF-Compass", "XTF-Spark", "XTF-Shield", "XTF-Lumen", "XTF-Gage",
+  "XTF-Vise", "XTF-Trace", "XTF-Beacon", "XTF-Anvil", "XTF-Sliver", "XTF-Chisel",
+  "XTF-Wraith", "XTF-Cipher", "XTF-Cartographer", "XTF-Scalpel", "XTF-Sentinel", "XTF-Crucible",
+]
+
 function copyDir(src, dst) {
   if (!existsSync(src)) return 0
   mkdirSync(dst, { recursive: true })
+  for (const legacy of LEGACY_SKILLS) {
+    rmSync(join(dst, legacy), { recursive: true, force: true })
+  }
   let count = 0
   for (const tier of ["simple", "complex", "advanced"]) {
     const tierDir = join(src, tier)

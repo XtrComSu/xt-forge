@@ -3,25 +3,25 @@
   "prefix": "XTF-",
   "tiers": ["simple", "complex", "advanced"],
   "skills": [
-    {"name": "XTF-Pulse", "tier": "simple", "summary": "Budgeted workspace map, find, grep, and slice peeks", "path": "skills/simple/XTF-Pulse/SKILL.md"},
-    {"name": "XTF-Compass", "tier": "simple", "summary": "Symbol call graphs, outlines, references, and LSP queries", "path": "skills/simple/XTF-Compass/SKILL.md"},
-    {"name": "XTF-Spark", "tier": "simple", "summary": "Hot scratchpad notes, pinning, and /mp /mw /mu flash ops", "path": "skills/simple/XTF-Spark/SKILL.md"},
-    {"name": "XTF-Shield", "tier": "simple", "summary": "Pre-share secret scanning and prompt-injection checks", "path": "skills/simple/XTF-Shield/SKILL.md"},
-    {"name": "XTF-Lumen", "tier": "simple", "summary": "Lossless L0-L3 log compression preserving error traces", "path": "skills/simple/XTF-Lumen/SKILL.md"},
-    {"name": "XTF-Gage", "tier": "simple", "summary": "Keyless CVE, CVSS, EPSS, and CISA KEV vulnerability triage", "path": "skills/simple/XTF-Gage/SKILL.md"},
+    {"name": "XTF-RepoMap", "tier": "simple", "summary": "Budgeted workspace map, find, grep, and slice peeks", "path": "skills/simple/XTF-RepoMap/SKILL.md"},
+    {"name": "XTF-CallGraph", "tier": "simple", "summary": "Symbol call graphs, outlines, references, and LSP queries", "path": "skills/simple/XTF-CallGraph/SKILL.md"},
+    {"name": "XTF-Notes", "tier": "simple", "summary": "Hot scratchpad notes, pinning, and /mp /mw /mu flash ops", "path": "skills/simple/XTF-Notes/SKILL.md"},
+    {"name": "XTF-SecretScan", "tier": "simple", "summary": "Pre-share secret scanning and prompt-injection checks", "path": "skills/simple/XTF-SecretScan/SKILL.md"},
+    {"name": "XTF-LogCompress", "tier": "simple", "summary": "Lossless L0-L3 log compression preserving error traces", "path": "skills/simple/XTF-LogCompress/SKILL.md"},
+    {"name": "XTF-CVELookup", "tier": "simple", "summary": "Keyless CVE, CVSS, EPSS, and CISA KEV vulnerability triage", "path": "skills/simple/XTF-CVELookup/SKILL.md"},
 
-    {"name": "XTF-Vise", "tier": "complex", "summary": "Offline ELF/PE hardening checksec, capabilities, and strings", "path": "skills/complex/XTF-Vise/SKILL.md"},
-    {"name": "XTF-Trace", "tier": "complex", "summary": "Native disassembly, CFG, cross-references, and C++ RTTI", "path": "skills/complex/XTF-Trace/SKILL.md"},
-    {"name": "XTF-Beacon", "tier": "complex", "summary": "Extract IOCs from artifacts and enrich via keyless threat intel", "path": "skills/complex/XTF-Beacon/SKILL.md"},
-    {"name": "XTF-Anvil", "tier": "complex", "summary": "Structural binary diffing and confirm-token guarded patching", "path": "skills/complex/XTF-Anvil/SKILL.md"},
-    {"name": "XTF-Sliver", "tier": "complex", "summary": "Pure-Go Electron ASAR unpacking, Android APK, and HAR/SAZ triage", "path": "skills/complex/XTF-Sliver/SKILL.md"},
-    {"name": "XTF-Chisel", "tier": "complex", "summary": "Concurrent research across memory, call graphs, code, and CVEs", "path": "skills/complex/XTF-Chisel/SKILL.md"},
+    {"name": "XTF-BinaryTriage", "tier": "complex", "summary": "Offline ELF/PE hardening checksec, capabilities, and strings", "path": "skills/complex/XTF-BinaryTriage/SKILL.md"},
+    {"name": "XTF-Disasm", "tier": "complex", "summary": "Native disassembly, CFG, cross-references, and C++ RTTI", "path": "skills/complex/XTF-Disasm/SKILL.md"},
+    {"name": "XTF-IOCIntel", "tier": "complex", "summary": "Extract IOCs from artifacts and enrich via keyless threat intel", "path": "skills/complex/XTF-IOCIntel/SKILL.md"},
+    {"name": "XTF-BinaryPatch", "tier": "complex", "summary": "Structural binary diffing and confirm-token guarded patching", "path": "skills/complex/XTF-BinaryPatch/SKILL.md"},
+    {"name": "XTF-Unpack", "tier": "complex", "summary": "Pure-Go Electron ASAR unpacking, Android APK, and HAR/SAZ triage", "path": "skills/complex/XTF-Unpack/SKILL.md"},
+    {"name": "XTF-DeepResearch", "tier": "complex", "summary": "Concurrent research across memory, call graphs, code, and CVEs", "path": "skills/complex/XTF-DeepResearch/SKILL.md"},
 
-    {"name": "XTF-Wraith", "tier": "advanced", "summary": "XOR/stack string decoding, headless decompile, and safe tracing", "path": "skills/advanced/XTF-Wraith/SKILL.md"},
-    {"name": "XTF-Cipher", "tier": "advanced", "summary": "MCP rug-pull pinning, upstream proxying, and --meta gateway", "path": "skills/advanced/XTF-Cipher/SKILL.md"},
-    {"name": "XTF-Cartographer", "tier": "advanced", "summary": "Cross-module bug localization with scope checks and proof gates", "path": "skills/advanced/XTF-Cartographer/SKILL.md"},
-    {"name": "XTF-Scalpel", "tier": "advanced", "summary": "Crash minidump postmortems and severity-ranked recon reporting", "path": "skills/advanced/XTF-Scalpel/SKILL.md"},
-    {"name": "XTF-Sentinel", "tier": "advanced", "summary": "Bounded goal loops, recurring daemons, and verification gates", "path": "skills/advanced/XTF-Sentinel/SKILL.md"},
-    {"name": "XTF-Crucible", "tier": "advanced", "summary": "Durable memory linking, taste calibration, and eval delta tracking", "path": "skills/advanced/XTF-Crucible/SKILL.md"}
+    {"name": "XTF-Decompile", "tier": "advanced", "summary": "XOR/stack string decoding, headless decompile, and safe tracing", "path": "skills/advanced/XTF-Decompile/SKILL.md"},
+    {"name": "XTF-MCPGateway", "tier": "advanced", "summary": "MCP rug-pull pinning, upstream proxying, and --meta gateway", "path": "skills/advanced/XTF-MCPGateway/SKILL.md"},
+    {"name": "XTF-BugFix", "tier": "advanced", "summary": "Cross-module bug localization with scope checks and proof gates", "path": "skills/advanced/XTF-BugFix/SKILL.md"},
+    {"name": "XTF-CrashTriage", "tier": "advanced", "summary": "Crash minidump postmortems and severity-ranked recon reporting", "path": "skills/advanced/XTF-CrashTriage/SKILL.md"},
+    {"name": "XTF-GoalLoop", "tier": "advanced", "summary": "Bounded goal loops, recurring daemons, and verification gates", "path": "skills/advanced/XTF-GoalLoop/SKILL.md"},
+    {"name": "XTF-MemoryEval", "tier": "advanced", "summary": "Durable memory linking, taste calibration, and eval delta tracking", "path": "skills/advanced/XTF-MemoryEval/SKILL.md"}
   ]
 }
