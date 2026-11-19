@@ -27,7 +27,7 @@ func run(args []string) int {
 		printJSON(map[string]any{
 			"ok":      true,
 			"service": "xtforge-hub",
-			"version": "0.4.3",
+			"version": "0.4.4",
 			"nouns":   []string{"mcp", "code", "re", "research", "loop", "guard"},
 		})
 		return 0

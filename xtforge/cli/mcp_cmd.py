@@ -109,7 +109,7 @@ def cmd_mcp(args) -> int:
     if verb == "connect":
         from ..core import mcp_proxy as proxymod
         if not srv_arg:
-            return _out(args, {"ok": False, "err": "mcp connect requires a server name (e.g. rea, craft-anything)"},
+            return _out(args, {"ok": False, "err": "mcp connect requires a server name (e.g. rea, craft-anything, borer)"},
                         "error: mcp connect requires <server>", code=2)
         res = proxymod.connect_server(srv_arg, cmd=cmd_arg)
         if not res.get("ok"):

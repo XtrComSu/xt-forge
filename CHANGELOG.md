@@ -1,3 +1,13 @@
+## 0.4.4 - 2026-11-19
+
+### Added
+- **Borer MCP Integration & 1-Call Optimization (`xt-forge mcp connect borer`, `xt-forge --meta`, `xt-forge tool run borer`)**:
+  - Added first-class preset, auto-discovery, SHA-256 trust pinning, and persistent stdio pooling for [`imjustprism/borer`](https://github.com/imjustprism/borer) (`borer`, 34 MCP tools + 111 `borer://` resources for certified x86/x64/arm64/RISC-V decompilation, function emulation, symbolic solve, taint tracking, devirtualization, and unpacking) in both Go (`native/xtforge-go/internal/mcp/upstreams.go`, `proxy.go`) and Python (`xtforge/core/mcp_registry.py`, `mcp_proxy.py`, `mcp_server.py`).
+  - **1-Call `load_binary` Injection & Session Rehydration**: Passing `"path"` or `"binary"` to any downstream `borer:*` tool (`decompile`, `function_summary`, `query`, `binary_info`, `strings`, `symbols`, `xrefs`, `cfg`, `callgraph`) automatically executes `load_binary` in the active session and caches the target binary path in `$XT_HOME/cache/borer-session.json` so subsequent calls and one-shot CLI invocations (`xt-forge tool run borer ...`) preserve binary state without extra round-trips.
+  - **`borer://` Resource Discovery & Shorthand Expansion**: Indexed all 39 static resources and 72 resource templates (`triage`, `emulate`, `solve`, `taint`, `devirt`, `unpack`, `stackstrings`, `capabilities`, `antianalysis`, `dynimports`, `checks`, `yara`, `sig`, `layout`, `patch`) for `xt_discover` and automatically normalized shorthand `query(uri="capabilities")` calls to `"borer://capabilities"`.
+- **Clean, Minimal 2x-Supersampled Visual Cards (`docs/assets/*.png`)**:
+  - Redesigned `xt-oss-banner.png`, `xtforge-vs-rea-benchmark.png`, `architecture-rust-go.png`, and `mcp-token-savings.png` with a clean, restrained dark palette, generous negative space, crisp 2x-supersampled Noto Sans + JetBrains Mono typography, and zero neon box clutter.
+
 ## 0.4.3 - 2026-11-19
 
 ### Added

@@ -51,6 +51,21 @@ EXTERNAL_SERVERS: dict[str, dict[str, Any]] = {
             {"name": "core_evidence_browse", "description": "Page through retained evidence records without blowing context budgets."},
         ],
     },
+    "borer": {
+        "title": "Borer — Pure-Rust Decompiler, Emulator & Certified Binary Analysis MCP",
+        "description": "34 MCP tools + 111 borer:// resources for certified x86/x64/arm64/RISC-V decompilation, function emulation, symbolic solve, devirtualization, unpacking, and protocol recovery.",
+        "command": "borer",
+        "args": [],
+        "aliases": ["borer", "borer-mcp", "borer-cli", "borer_mcp", "certify", "emulate", "devirt", "taint"],
+        "tools": [
+            {"name": "load_binary", "description": "Load a PE, ELF, Mach-O, or raw memory dump as the active session binary."},
+            {"name": "decompile", "description": "Decompile a function to pseudo-C with binary-vs-lift verification annotations."},
+            {"name": "function_summary", "description": "One-call function triage: shape, loops, jump tables, callers, callees, strings, and constants."},
+            {"name": "query", "description": "Read any borer:// resource (borer://triage, borer://emulate/<addr>, borer://solve/<spec>, borer://taint/<spec>, borer://devirt/<addr>, borer://unpack/<addr>, borer://capabilities, borer://antianalysis, borer://stackstrings)."},
+            {"name": "class_layout", "description": "Infer C++ class fields, methods, and vftable layout from member accesses."},
+            {"name": "find_crypto_constants", "description": "Find AES, SHA, MD5, CRC-32, ChaCha, Blowfish, FNV, Base64, and hashed API constants."},
+        ],
+    },
     "cad3d": {
         "title": "3D CAD & OpenSCAD Modeling",
         "description": "3D CAD modeling, OpenSCAD script compilation, CSG booleans, extrusion, mesh inspection, and STL/OBJ/GLB/3MF conversions.",
@@ -113,7 +128,28 @@ def canonical_upstream_name(name: str) -> str:
         return "rea"
     if low in ("craft", "craft-anything", "craftanything", "craft-anything-cli", "craft_anything"):
         return "craft-anything"
+    if low in ("borer", "borer-mcp", "borer-cli", "borer_mcp"):
+        return "borer"
     return name.strip()
+
+
+def borer_session_path() -> Path:
+    return xt_home() / "cache" / "borer-session.json"
+
+
+def save_borer_session(bin_path: str) -> None:
+    p = str(bin_path).strip()
+    if p:
+        atomic_write_json(borer_session_path(), {"path": p, "updated_at": int(time.time())})
+
+
+def load_borer_session() -> str:
+    data = read_json(borer_session_path())
+    if isinstance(data, dict):
+        p = str(data.get("path", "")).strip()
+        if p and os.path.isfile(p):
+            return p
+    return ""
 
 
 def upstreams_path() -> Path:
@@ -233,6 +269,27 @@ def resolve_upstream_cmd(server_name: str, explicit_cmd: str | None = None) -> t
                 return canon, _craft_flags([str(cand)]), None
         return canon, None, "craft-anything-cli not found (set CRAFT_ANYTHING_CMD or install craft-anything-cli)"
 
+    if canon == "borer":
+        def _borer_flags(base: list[str]) -> list[str]:
+            out = list(base)
+            extra = os.environ.get("BORER_ARGS", "").strip()
+            if extra:
+                out.extend(split_cmd(extra))
+            return out
+
+        env_cmd = os.environ.get("BORER_CMD", "").strip()
+        if env_cmd:
+            return canon, _borer_flags(split_cmd(env_cmd)), None
+        found = shutil.which("borer")
+        if found:
+            return canon, _borer_flags([found]), None
+        suffix = ".exe" if os.name == "nt" else ""
+        for cand in (home / ".cargo" / "bin" / f"borer{suffix}",
+                     home / ".local" / "bin" / f"borer{suffix}"):
+            if cand.is_file():
+                return canon, _borer_flags([str(cand)]), None
+        return canon, None, "borer executable not found (set BORER_CMD or install imjustprism/borer)"
+
     info = EXTERNAL_SERVERS.get(canon)
     if not info:
         for s_name, s_info in EXTERNAL_SERVERS.items():
@@ -262,7 +319,7 @@ def known_upstreams() -> list[str]:
     if cache_dir.is_dir():
         for p in sorted(cache_dir.glob("mcp-catalog-*.json")):
             _add(p.name[len("mcp-catalog-"):-len(".json")])
-    for preset in ("rea", "craft-anything"):
+    for preset in ("rea", "craft-anything", "borer"):
         _, argv, err = resolve_upstream_cmd(preset)
         if not err and argv and Path(argv[0]).name not in ("npx", "npx.cmd"):
             _add(preset)
@@ -336,6 +393,8 @@ def search_tools(query: str, limit: int = 8) -> list[dict[str, Any]]:
         s_boost = 2 if s_name in q or (s_name == "craft-anything" and "craft" in words) else 0
         for t in cached:
             hay = f"{s_name} {t.get('name', '')} {t.get('description', '')}".lower()
+            if s_name == "borer" and t.get("name") == "query":
+                hay += " triage taint emulate solve grep unpack devirt stackstrings capabilities antianalysis dynimports checks yara sig why layout patch flat vm hidden decoded"
             if not words or any(w in hay for w in words):
                 matching_tools.append({
                     "name": t.get("name"),
@@ -413,7 +472,7 @@ def execute_tool(server_name: str, tool_name: str, arguments: dict[str, Any] | N
             "id": 1,
             "method": "initialize",
             "params": {"protocolVersion": "2025-06-18", "capabilities": {},
-                       "clientInfo": {"name": "xt-forge", "version": "0.4.3"}},
+                       "clientInfo": {"name": "xt-forge", "version": "0.4.4"}},
         }) + "\n")
         proc.stdin.flush()
         init_resp, _ = _read_rpc_by_id(proc.stdout, 1, deadline)
@@ -423,20 +482,49 @@ def execute_tool(server_name: str, tool_name: str, arguments: dict[str, Any] | N
             return {"ok": False, "error": init_resp["error"]}
 
         proc.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
+        call_args = dict(arguments or {})
+        req_id = 2
+        if canon == "borer":
+            if tool_name == "query":
+                raw_uri = str(call_args.get("uri", "")).strip()
+                if raw_uri and "://" not in raw_uri:
+                    call_args["uri"] = f"borer://{raw_uri.lstrip('/')}"
+            if tool_name == "load_binary":
+                if not call_args.get("path") and call_args.get("binary"):
+                    call_args["path"] = str(call_args.pop("binary")).strip()
+            elif tool_name not in ("load_project", "save_project", "reload"):
+                target_bin = str(call_args.pop("path", "") or call_args.pop("binary", "") or "").strip()
+                if not target_bin:
+                    target_bin = load_borer_session()
+                if target_bin:
+                    proc.stdin.write(json.dumps({
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "method": "tools/call",
+                        "params": {"name": "load_binary", "arguments": {"path": target_bin}},
+                    }) + "\n")
+                    proc.stdin.flush()
+                    load_resp, _ = _read_rpc_by_id(proc.stdout, req_id, deadline)
+                    if load_resp and "error" not in load_resp:
+                        save_borer_session(target_bin)
+                    req_id += 1
+
         proc.stdin.write(json.dumps({
             "jsonrpc": "2.0",
-            "id": 2,
+            "id": req_id,
             "method": "tools/call",
-            "params": {"name": tool_name, "arguments": arguments or {}},
+            "params": {"name": tool_name, "arguments": call_args},
         }) + "\n")
         proc.stdin.flush()
 
-        call_resp, _ = _read_rpc_by_id(proc.stdout, 2, deadline)
+        call_resp, _ = _read_rpc_by_id(proc.stdout, req_id, deadline)
         if call_resp is None:
             stderr_tail = (proc.stderr.read() if proc.stderr else "")[:400]
             return {"ok": False, "error": f"no tools/call response from {canon}: {stderr_tail}"}
         if "error" in call_resp:
             return {"ok": False, "error": call_resp["error"]}
+        if canon == "borer" and tool_name == "load_binary" and call_args.get("path"):
+            save_borer_session(str(call_args["path"]))
         return {"ok": True, "server": canon, "result": call_resp.get("result", {})}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}

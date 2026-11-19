@@ -794,6 +794,8 @@ def _handle_meta_call(
                 continue
             for t in tools:
                 hay = f"{srv} {t.get('name', '')} {t.get('description', '')}".lower()
+                if srv == "borer" and t.get("name") == "query":
+                    hay += " triage taint emulate solve grep unpack devirt stackstrings capabilities antianalysis dynimports checks yara sig why layout patch flat vm hidden decoded"
                 if not q or all(w in hay for w in q.split()):
                     upstream_matches.append({
                         "name": f"{srv}:{t.get('name')}",

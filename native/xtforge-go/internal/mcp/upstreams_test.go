@@ -42,6 +42,81 @@ func TestSplitCommandAndPresetResolution(t *testing.T) {
 	if !strings.Contains(joined, "mcp") || !strings.Contains(joined, "--all-tools") || !strings.Contains(joined, "--deep") {
 		t.Fatalf("expected craft flags, got: %s", joined)
 	}
+
+	t.Setenv("BORER_CMD", "/tmp/fake/borer")
+	bname, borerCmd, err := ResolvePresetCommand("borer-mcp")
+	if err != nil || bname != "borer" || len(borerCmd) != 1 || borerCmd[0] != "/tmp/fake/borer" {
+		t.Fatalf("unexpected borer preset: name=%s cmd=%v err=%v", bname, borerCmd, err)
+	}
+}
+
+func TestBorerAutoLoadBinaryAndQueryShorthand(t *testing.T) {
+	t.Setenv("XT_HOME", t.TempDir())
+
+	mock := writeMockMCPServer(t, `
+import json, sys
+
+loaded = None
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    mid = msg.get("id")
+    method = msg.get("method")
+    if method == "initialize":
+        print(json.dumps({"jsonrpc": "2.0", "id": mid, "result": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "serverInfo": {"name": "borer", "version": "0.3.0"}
+        }}), flush=True)
+    elif method == "notifications/initialized":
+        pass
+    elif method == "tools/list":
+        print(json.dumps({"jsonrpc": "2.0", "id": mid, "result": {"tools": [
+            {"name": "load_binary", "description": "Load binary."},
+            {"name": "decompile", "description": "Decompile function."},
+            {"name": "query", "description": "Read a borer:// resource."}
+        ]}}), flush=True)
+    elif method == "tools/call":
+        p = msg.get("params") or {}
+        tname = p.get("name")
+        args = p.get("arguments") or {}
+        if tname == "load_binary":
+            loaded = args.get("path")
+            res = {"content": [{"type": "text", "text": f"loaded:{loaded}"}]}
+        elif tname == "decompile":
+            res = {"content": [{"type": "text", "text": f"decompile:{loaded}@{args.get('address')}|has_path={'path' in args}"}]}
+        elif tname == "query":
+            res = {"content": [{"type": "text", "text": f"query:{loaded}@{args.get('uri')}"}]}
+        else:
+            res = {"content": [{"type": "text", "text": "err"}], "isError": True}
+        print(json.dumps({"jsonrpc": "2.0", "id": mid, "result": res}), flush=True)
+`)
+
+	sess, err := StartUpstreamSession("borer", mock)
+	if err != nil {
+		t.Fatalf("StartUpstreamSession borer failed: %v", err)
+	}
+	defer sess.Close()
+
+	// 1-call decompile with inline "path" should auto-call load_binary and strip "path" from decompile args.
+	raw, rpcErr := sess.CallTool("decompile", map[string]any{"path": "/usr/bin/ls", "address": "0x5620"})
+	if rpcErr != nil {
+		t.Fatalf("decompile failed: %v", rpcErr.Message)
+	}
+	if !strings.Contains(string(raw), "decompile:/usr/bin/ls@0x5620|has_path=False") {
+		t.Fatalf("expected auto-loaded binary and stripped path arg, got %s", string(raw))
+	}
+
+	// Shorthand query URI ("triage") should normalize to "borer://triage" while reusing loaded binary.
+	qRaw, qErr := sess.CallTool("query", map[string]any{"uri": "triage"})
+	if qErr != nil {
+		t.Fatalf("query failed: %v", qErr.Message)
+	}
+	if !strings.Contains(string(qRaw), "query:/usr/bin/ls@borer://triage") {
+		t.Fatalf("expected borer://triage normalization, got %s", string(qRaw))
+	}
 }
 
 func TestUpstreamSessionStatePersistenceAndDynamicRefresh(t *testing.T) {

@@ -660,12 +660,15 @@ func searchUpstreamCatalogs(pool *UpstreamPool, upstreamFilter, query string, li
 		}
 		for _, t := range tools {
 			hay := strings.ToLower(srv + " " + t.Name + " " + t.Description)
+			if srv == "borer" && t.Name == "query" {
+				hay += " triage taint emulate solve grep unpack devirt stackstrings capabilities antianalysis dynimports checks yara sig why layout patch flat vm hidden decoded"
+			}
 			score := 0
 			if len(words) == 0 {
 				score = 1
 			} else {
 				for _, w := range words {
-					if w == srv || w == "craft" && srv == "craft-anything" {
+					if w == srv || (w == "craft" && srv == "craft-anything") {
 						score += 2
 					}
 					if strings.Contains(hay, w) {
@@ -678,6 +681,19 @@ func searchUpstreamCatalogs(pool *UpstreamPool, upstreamFilter, query string, li
 			}
 			if score > 0 {
 				prefixed := srv + ":" + t.Name
+				argsHint := fmt.Sprintf(`{"name":%q,"arguments":{}}`, prefixed)
+				if srv == "borer" {
+					switch t.Name {
+					case "load_binary":
+						argsHint = fmt.Sprintf(`{"name":%q,"arguments":{"path":"/abs/path/to/bin"}}`, prefixed)
+					case "decompile", "function_summary", "function", "disassemble_function", "cfg", "callgraph", "xrefs":
+						argsHint = fmt.Sprintf(`{"name":%q,"arguments":{"path":"/abs/path/to/bin","address":"0x1000"}}`, prefixed)
+					case "query":
+						argsHint = fmt.Sprintf(`{"name":%q,"arguments":{"path":"/abs/path/to/bin","uri":"borer://triage"}}`, prefixed)
+					case "binary_info", "strings", "symbols", "functions", "find_crypto_constants", "entropy":
+						argsHint = fmt.Sprintf(`{"name":%q,"arguments":{"path":"/abs/path/to/bin"}}`, prefixed)
+					}
+				}
 				hits = append(hits, hit{
 					score: score,
 					row: map[string]any{
@@ -685,7 +701,7 @@ func searchUpstreamCatalogs(pool *UpstreamPool, upstreamFilter, query string, li
 						"upstream":    srv,
 						"tool":        t.Name,
 						"description": SummarizeDescription(t.Description, 140),
-						"args_hint":   fmt.Sprintf(`{"name":%q,"arguments":{}}`, prefixed),
+						"args_hint":   argsHint,
 					},
 				})
 			}
@@ -1343,7 +1359,7 @@ func serveLoop(tools []ToolDef, handler func(context.Context, string, map[string
 				"result": map[string]any{
 					"protocolVersion": pv,
 					"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
-					"serverInfo":      map[string]any{"name": "xt-forge-hub", "version": "0.4.3"},
+					"serverInfo":      map[string]any{"name": "xt-forge-hub", "version": "0.4.4"},
 				},
 			})
 		case "ping":

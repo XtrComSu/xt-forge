@@ -122,13 +122,15 @@ func LoadCachedCatalog(server string) []ToolDef {
 	return c.Tools
 }
 
-// CanonicalUpstreamName normalizes common aliases for REA and Craft Anything.
+// CanonicalUpstreamName normalizes common aliases for REA, Craft Anything, and Borer.
 func CanonicalUpstreamName(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "rea", "rea-agents", "re-mcp", "rea_mcp":
 		return "rea"
 	case "craft", "craft-anything", "craftanything", "craft-anything-cli", "craft_anything":
 		return "craft-anything"
+	case "borer", "borer-mcp", "borer-cli", "borer_mcp":
+		return "borer"
 	default:
 		return strings.TrimSpace(name)
 	}
@@ -308,13 +310,45 @@ func ResolvePresetCommand(name string) (string, []string, error) {
 			}
 		}
 		return canon, nil, fmt.Errorf("craft-anything-cli not found (set CRAFT_ANYTHING_CMD or install craft-anything-cli)")
+
+	case "borer":
+		appendBorerFlags := func(base []string) []string {
+			out := append([]string{}, base...)
+			if extra := strings.TrimSpace(os.Getenv("BORER_ARGS")); extra != "" {
+				out = append(out, SplitCommand(extra)...)
+			}
+			return out
+		}
+		if raw := strings.TrimSpace(os.Getenv("BORER_CMD")); raw != "" {
+			parts := SplitCommand(raw)
+			if len(parts) > 0 {
+				return canon, appendBorerFlags(parts), nil
+			}
+		}
+		if p := firstExecutable("borer"); p != "" {
+			return canon, appendBorerFlags([]string{p}), nil
+		}
+		exe := ""
+		if runtime.GOOS == "windows" {
+			exe = ".exe"
+		}
+		candidates := []string{
+			filepath.Join(home, ".cargo", "bin", "borer"+exe),
+			filepath.Join(home, ".local", "bin", "borer"+exe),
+		}
+		for _, cand := range candidates {
+			if fileExists(cand) {
+				return canon, appendBorerFlags([]string{cand}), nil
+			}
+		}
+		return canon, nil, fmt.Errorf("borer executable not found (set BORER_CMD or install imjustprism/borer)")
 	}
 
 	return canon, nil, fmt.Errorf("unknown MCP server '%s' (pass --cmd or configure %s)", name, UpstreamsPath())
 }
 
 // KnownUpstreams returns every upstream server configured in $XT_HOME/mcp_upstreams.json,
-// XT_MCP_UPSTREAMS, cached catalogs, or detected locally (rea / craft-anything).
+// XT_MCP_UPSTREAMS, cached catalogs, or detected locally (rea / craft-anything / borer).
 func KnownUpstreams() []string {
 	seen := map[string]bool{}
 	var order []string
@@ -344,8 +378,8 @@ func KnownUpstreams() []string {
 			}
 		}
 	}
-	// Also include locally installed rea / craft-anything binaries without running npx downloads.
-	for _, preset := range []string{"rea", "craft-anything"} {
+	// Also include locally installed rea / craft-anything / borer binaries without running npx downloads.
+	for _, preset := range []string{"rea", "craft-anything", "borer"} {
 		if !seen[preset] {
 			if _, argv, err := ResolvePresetCommand(preset); err == nil && len(argv) > 0 {
 				base := filepath.Base(argv[0])
@@ -374,18 +408,51 @@ type upstreamLine struct {
 
 // UpstreamSession manages a persistent stdio JSON-RPC connection to one child MCP server.
 type UpstreamSession struct {
-	Name    string
-	Cmd     []string
-	proc    *exec.Cmd
-	in      io.WriteCloser
-	reader  *bufio.Reader
-	lines   chan upstreamLine
-	done    chan struct{}
-	mu      sync.Mutex
-	writeMu sync.Mutex
-	nextID  int
-	tools   []ToolDef
-	dirty   bool // set when notifications/tools/list_changed arrives
+	Name         string
+	Cmd          []string
+	proc         *exec.Cmd
+	in           io.WriteCloser
+	reader       *bufio.Reader
+	lines        chan upstreamLine
+	done         chan struct{}
+	mu           sync.Mutex
+	writeMu      sync.Mutex
+	nextID       int
+	tools        []ToolDef
+	dirty        bool   // set when notifications/tools/list_changed arrives
+	loadedBinary string // tracks active binary loaded into a borer session
+}
+
+// BorerSessionPath returns $XT_HOME/cache/borer-session.json.
+func BorerSessionPath() string {
+	return filepath.Join(guard.XTHome(), "cache", "borer-session.json")
+}
+
+func saveBorerSession(binPath string) {
+	binPath = strings.TrimSpace(binPath)
+	if binPath == "" {
+		return
+	}
+	p := BorerSessionPath()
+	_ = os.MkdirAll(filepath.Dir(p), 0o755)
+	b, err := json.Marshal(map[string]any{"path": binPath, "updated_at": time.Now().Unix()})
+	if err == nil {
+		_ = os.WriteFile(p, b, 0o600)
+	}
+}
+
+func loadBorerSession() string {
+	raw, err := os.ReadFile(BorerSessionPath())
+	if err != nil {
+		return ""
+	}
+	var parsed struct {
+		Path string `json:"path"`
+	}
+	if json.Unmarshal(raw, &parsed) == nil && fileExists(strings.TrimSpace(parsed.Path)) {
+		return strings.TrimSpace(parsed.Path)
+	}
+	return ""
 }
 
 // StartUpstreamSession spawns an upstream stdio MCP server, completes initialize +
@@ -437,7 +504,7 @@ func StartUpstreamSession(name string, argv []string) (*UpstreamSession, error) 
 	if _, rpcErr := s.callLocked("initialize", map[string]any{
 		"protocolVersion": ProtocolVersion,
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "xtforge-hub", "version": "0.4.3"},
+		"clientInfo":      map[string]any{"name": "xtforge-hub", "version": "0.4.4"},
 	}); rpcErr != nil {
 		s.Close()
 		return nil, fmt.Errorf("initialize %s: %s", s.Name, rpcErr.Message)
@@ -560,8 +627,61 @@ func (s *UpstreamSession) CallToolContext(ctx context.Context, toolName string, 
 	if err := ctx.Err(); err != nil {
 		return nil, &rpcError{Code: -32800, Message: "request cancelled before dispatch: " + err.Error()}, 0, false, false
 	}
+	callArgs := map[string]any{}
+	for k, v := range args {
+		callArgs[k] = v
+	}
+
 	s.mu.Lock()
-	res, rpcErr, reqID, started, cancelNotified := s.callLockedContext(ctx, "tools/call", map[string]any{"name": toolName, "arguments": args})
+	if s.Name == "borer" {
+		if toolName == "query" {
+			if rawURI, ok := callArgs["uri"].(string); ok {
+				u := strings.TrimSpace(rawURI)
+				if u != "" && !strings.Contains(u, "://") {
+					callArgs["uri"] = "borer://" + strings.TrimPrefix(u, "/")
+				}
+			}
+		}
+		if toolName == "load_binary" {
+			if p, _ := callArgs["path"].(string); strings.TrimSpace(p) == "" {
+				if b, ok := callArgs["binary"].(string); ok && strings.TrimSpace(b) != "" {
+					callArgs["path"] = strings.TrimSpace(b)
+					delete(callArgs, "binary")
+				}
+			}
+		} else if toolName != "load_project" && toolName != "save_project" && toolName != "reload" {
+			var targetBin string
+			if p, ok := callArgs["path"].(string); ok && strings.TrimSpace(p) != "" {
+				targetBin = strings.TrimSpace(p)
+				delete(callArgs, "path")
+			}
+			if b, ok := callArgs["binary"].(string); ok && strings.TrimSpace(b) != "" {
+				if targetBin == "" {
+					targetBin = strings.TrimSpace(b)
+				}
+				delete(callArgs, "binary")
+			}
+			if targetBin == "" && s.loadedBinary == "" {
+				targetBin = loadBorerSession()
+			}
+			if targetBin != "" && targetBin != s.loadedBinary {
+				if _, loadErr, _, _, _ := s.callLockedContext(ctx, "tools/call", map[string]any{
+					"name":      "load_binary",
+					"arguments": map[string]any{"path": targetBin},
+				}); loadErr == nil {
+					s.loadedBinary = targetBin
+					saveBorerSession(targetBin)
+				}
+			}
+		}
+	}
+	res, rpcErr, reqID, started, cancelNotified := s.callLockedContext(ctx, "tools/call", map[string]any{"name": toolName, "arguments": callArgs})
+	if rpcErr == nil && s.Name == "borer" && toolName == "load_binary" {
+		if p, ok := callArgs["path"].(string); ok && strings.TrimSpace(p) != "" {
+			s.loadedBinary = strings.TrimSpace(p)
+			saveBorerSession(s.loadedBinary)
+		}
+	}
 	needRefresh := s.dirty || toolName == "enable_toolset" || toolName == "disable_toolset"
 	s.mu.Unlock()
 

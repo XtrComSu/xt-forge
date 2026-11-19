@@ -18,8 +18,10 @@ from .mcp_registry import (
     _read_rpc_by_id,
     canonical_upstream_name,
     close_subprocess,
+    load_borer_session,
     load_upstreams,
     resolve_upstream_cmd,
+    save_borer_session,
     save_cached_catalog,
     save_upstream,
     split_cmd,
@@ -41,6 +43,7 @@ class PythonUpstreamSession:
         self.next_id = 1
         self.tools: list[dict[str, Any]] = []
         self._dirty = False
+        self.loaded_binary = ""
         self._write_lock = threading.Lock()
         self._call_lock = threading.Lock()
         self._lines: queue.Queue[str | None] = queue.Queue()
@@ -78,7 +81,7 @@ class PythonUpstreamSession:
         init_res, _, _, _ = self._call("initialize", {
             "protocolVersion": "2025-06-18",
             "capabilities": {},
-            "clientInfo": {"name": "xt-forge-proxy", "version": "0.4.3"},
+            "clientInfo": {"name": "xt-forge-proxy", "version": "0.4.4"},
         })
         if "error" in init_res:
             raise RuntimeError(str(init_res["error"]))
@@ -186,11 +189,37 @@ class PythonUpstreamSession:
         *,
         cancel_event: threading.Event | None = None,
     ) -> tuple[Any, bool, int, bool, bool]:
+        call_args = dict(arguments or {})
+        if self.name == "borer":
+            if tool_name == "query":
+                raw_uri = str(call_args.get("uri", "")).strip()
+                if raw_uri and "://" not in raw_uri:
+                    call_args["uri"] = f"borer://{raw_uri.lstrip('/')}"
+            if tool_name == "load_binary":
+                if not call_args.get("path") and call_args.get("binary"):
+                    call_args["path"] = str(call_args.pop("binary")).strip()
+            elif tool_name not in ("load_project", "save_project", "reload"):
+                target_bin = str(call_args.pop("path", "") or call_args.pop("binary", "") or "").strip()
+                if not target_bin and not self.loaded_binary:
+                    target_bin = load_borer_session()
+                if target_bin and target_bin != self.loaded_binary:
+                    load_msg, _, _, _ = self._call(
+                        "tools/call",
+                        {"name": "load_binary", "arguments": {"path": target_bin}},
+                        cancel_event=cancel_event,
+                    )
+                    if "error" not in load_msg:
+                        self.loaded_binary = target_bin
+                        save_borer_session(target_bin)
+
         msg, rid, started, cancel_notified = self._call(
-            "tools/call", {"name": tool_name, "arguments": arguments}, cancel_event=cancel_event,
+            "tools/call", {"name": tool_name, "arguments": call_args}, cancel_event=cancel_event,
         )
         if "error" in msg:
             return msg["error"], True, rid, started, cancel_notified
+        if self.name == "borer" and tool_name == "load_binary" and call_args.get("path"):
+            self.loaded_binary = str(call_args["path"]).strip()
+            save_borer_session(self.loaded_binary)
         if self._dirty or tool_name in ("enable_toolset", "disable_toolset"):
             try:
                 self.refresh_tools()
@@ -328,7 +357,7 @@ def serve_proxy_lite(server: str, cmd: str | None = None, *, trust_on_first: boo
                 continue
             if method == "initialize":
                 resp = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {"listChanged": False}},
-                        "serverInfo": {"name": f"xtforge-proxy:{canon}", "version": "0.4.3"}}
+                        "serverInfo": {"name": f"xtforge-proxy:{canon}", "version": "0.4.4"}}
             elif method == "tools/list":
                 resp = {"tools": proxy_tools}
             elif method == "tools/call":

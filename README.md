@@ -6,7 +6,7 @@
   <p><strong>Supreme local agent workbench for call-graph context, AST correctness auditing, normalized binary diffing, keyless CVE intel, and sub-1KB MCP routing.</strong></p>
   <p>Engineered in <strong>Rust</strong>, <strong>Go</strong>, and zero-dependency <strong>Python 3.11+</strong> under <strong>XT-OSS</strong> by <a href="https://xtrcom.xyz">XtrComSu</a>.</p>
   <p>
-    <a href="https://github.com/XtrComSu/xt-forge/releases/tag/v0.4.3-Damascus"><img src="https://img.shields.io/badge/XT--OSS-v0.4.3--Damascus-FF2E2E?style=flat-square&logo=github" alt="Release v0.4.3-Damascus" /></a>
+    <a href="https://github.com/XtrComSu/xt-forge/releases/tag/v0.4.4-Damascus"><img src="https://img.shields.io/badge/XT--OSS-v0.4.4--Damascus-FF2E2E?style=flat-square&logo=github" alt="Release v0.4.4-Damascus" /></a>
     <img src="https://img.shields.io/badge/vs%20Raw%20REA%20(229%20tools)-100%25%20Win%20Rate%20(7%2F7%20Tiers)-34D399?style=flat-square" alt="100% Win Rate vs Raw REA" />
     <img src="https://img.shields.io/badge/engines-Rust%20%2B%20Go%20%2B%20Python%203.11%2B-0C0D12?style=flat-square" alt="Rust + Go + Python" />
     <img src="https://img.shields.io/badge/MCP%20schema-1.35%20KB%20(--meta)-60A5FA?style=flat-square" alt="1.35 KB MCP Schema" />
@@ -17,12 +17,12 @@
 
 <p align="center">
   <a href="https://xtrcom.xyz">
-    <img src="docs/assets/xt-oss-banner.png" alt="XT-Forge v0.4.3-Damascus" width="100%" />
+    <img src="docs/assets/xt-oss-banner.png" alt="XT-Forge v0.4.4-Damascus" width="100%" />
   </a>
 </p>
 
 <p align="center">
-  <img src="docs/assets/overview-showcase.gif" alt="XT-Forge v0.4.3-Damascus XT-OSS Overview Showcase" width="100%" />
+  <img src="docs/assets/overview-showcase.gif" alt="XT-Forge v0.4.4-Damascus XT-OSS Overview Showcase" width="100%" />
 </p>
 
 ---
@@ -32,7 +32,7 @@
 Mounting a 229-tool reverse-engineering MCP server like raw **[REA](https://github.com/morluto/rea)** (`rea-agents mcp`, ~3.5 MB tool catalog) directly into an agent harness floods the prompt window, triggers tool-discovery loops, and times out on multi-file audits, binary regressions, and dropped-connection recovery.
 
 **`xt-forge`** solves this at both layers:
-1. **Sub-1KB `--meta` Gateway (`1,384 B` / `346` tokens in Go, `98.5%` schema reduction):** Routes local `xt-forge` engines plus stateful upstream MCPs (`rea`, `craft-anything`) through 4 deterministic primitives (`xt_discover`, `xt_schema`, `xt_call`, `xt_batch`) with crash-safe idempotency journaling (`$XT_HOME/call_journal.json`).
+1. **Sub-1KB `--meta` Gateway (`1,384 B` / `346` tokens in Go, `98.5%` schema reduction):** Routes local `xt-forge` engines plus stateful upstream MCPs (**[Borer](https://github.com/imjustprism/borer)**, **REA**, **Craft Anything**) through 4 deterministic primitives (`xt_discover`, `xt_schema`, `xt_call`, `xt_batch`) with crash-safe idempotency journaling (`$XT_HOME/call_journal.json`).
 2. **Direct Structural & Binary Analysis (`code_callers`, `code_audit`, `code_trace`, `re_diff`):** Replaces multi-turn `grep`, `read_file`, and `objdump` loops with single-call AST, CFG, and disassembly analysis.
 
 <p align="center">
@@ -64,7 +64,7 @@ Mounting a 229-tool reverse-engineering MCP server like raw **[REA](https://gith
 | Everyday Problem | What `xt-forge` Gives You | Command / Guide |
 | --- | --- | --- |
 | Bloated MCP catalogs eat 10K–40K+ tokens upfront | `--meta` gateway exposes 4 meta-tools (`1,384 B` Go / `1,007 B` Python) across local tools + external MCPs | `xt-forge --meta` |
-| Massive RE/IDE MCPs (`rea`, `craft-anything`) break context limits | Connect once (`mcp connect`), SHA-256 trust-pin, and route stateful stdio calls lazily | `xt-forge mcp connect rea` |
+| Massive RE/IDE MCPs (`borer`, `rea`, `craft-anything`) break context limits | Connect once (`mcp connect`), SHA-256 trust-pin, and route stateful stdio calls lazily with 1-call `load_binary` optimization | `xt-forge mcp connect borer` |
 | Multi-file bug hunts burn 10+ file reads and miss subtle defects | One-call AST correctness auditor flags duplicate joins, boundary `<` vs `<=`, stale caches, and floor-div truncation with full function source | `xt-forge audit . --json` |
 | Re-exports and config dispatch tables hide the real handler | Cross-module active-path tracer resolves `__init__.py` aliases and JSON/TOML/YAML/ENV dispatch keys | `xt-forge trace dispatch_request .` |
 | Comparing two binaries requires manual `objdump` diffing & magic-number math | Normalized per-function instruction diffing, inline `.rodata` string annotation, and GCC/Clang reciprocal division decoding | `xt-forge diff v1.bin v2.bin --json` |
@@ -105,21 +105,21 @@ git clone https://github.com/XtrComSu/xt-forge.git; cd xt-forge; .\install.ps1
 npx --yes github:XtrComSu/xt-forge init
 
 # Or install the npm tarball from GitHub Releases:
-npm install -g https://github.com/XtrComSu/xt-forge/releases/download/v0.4.3-Damascus/xt-forge-0.4.3.tgz
+npm install -g https://github.com/XtrComSu/xt-forge/releases/download/v0.4.4-Damascus/xt-forge-0.4.4.tgz
 
 # Python (3.11+) wheel from GitHub Releases or git:
-uv tool install https://github.com/XtrComSu/xt-forge/releases/download/v0.4.3-Damascus/xt_forge-0.4.3-py3-none-any.whl
+uv tool install https://github.com/XtrComSu/xt-forge/releases/download/v0.4.4-Damascus/xt_forge-0.4.4-py3-none-any.whl
 # or: pip install git+https://github.com/XtrComSu/xt-forge.git
 ```
 
-### Option 3: Prebuilt Release Archives (`v0.4.3-Damascus`)
+### Option 3: Prebuilt Release Archives (`v0.4.4-Damascus`)
 
-Prebuilt platform archives, Python wheels, and `SHA256SUMS.txt` are attached to [GitHub Releases (`v0.4.3-Damascus`)](https://github.com/XtrComSu/xt-forge/releases/tag/v0.4.3-Damascus):
-- `xt-forge-0.4.3-linux-x86_64.tar.gz` (includes prebuilt `xtforge-native` Rust + `xtforge-hub` Go binaries)
-- `xt-forge-0.4.3-darwin-arm64.tar.gz` (includes prebuilt `xtforge-hub` macOS arm64 binary)
-- `xt-forge-0.4.3-windows-x86_64.zip` (includes prebuilt `xtforge-hub.exe` Windows x86_64 binary)
-- `xt-forge-0.4.3.tgz` (npm package tarball)
-- `xt_forge-0.4.3-py3-none-any.whl` & `xt_forge-0.4.3.tar.gz` (Python wheel & sdist)
+Prebuilt platform archives, Python wheels, and `SHA256SUMS.txt` are attached to [GitHub Releases (`v0.4.4-Damascus`)](https://github.com/XtrComSu/xt-forge/releases/tag/v0.4.4-Damascus):
+- `xt-forge-0.4.4-linux-x86_64.tar.gz` (includes prebuilt `xtforge-native` Rust + `xtforge-hub` Go binaries)
+- `xt-forge-0.4.4-darwin-arm64.tar.gz` (includes prebuilt `xtforge-hub` macOS arm64 binary)
+- `xt-forge-0.4.4-windows-x86_64.zip` (includes prebuilt `xtforge-hub.exe` Windows x86_64 binary)
+- `xt-forge-0.4.4.tgz` (npm package tarball)
+- `xt_forge-0.4.4-py3-none-any.whl` & `xt_forge-0.4.4.tar.gz` (Python wheel & sdist)
 
 ```sh
 xt-forge --meta        # stdio MCP gateway (xt_discover, xt_schema, xt_call, xt_batch)
@@ -137,22 +137,28 @@ Want an AI coding agent (Claude Code, Codex CLI, OpenCode, DSH, Cursor) to insta
 
 ---
 
-## Lean MCP Setup + REA & Craft Anything
+## Lean MCP Setup + Borer, REA & Craft Anything
 
-Wire `xt-forge` once using `--meta`. Models discover tools on demand (`xt_discover` -> `xt_schema` -> `xt_call` or `xt_batch`), keeping initial prompt schema size at **1,384 bytes (346 tokens)** in Go (`1,007 B / 252 tok` in Python) — **93.1% smaller** on 50-tool catalogs and **98.5% smaller** on 229-tool catalogs — and spilling oversized responses cleanly to `$XT_HOME/cache/artifacts/`.
+Wire `xt-forge` once using `--meta`. Models discover tools on demand (`xt_discover` -> `xt_schema` -> `xt_call` or `xt_batch`), keeping initial prompt schema size at **1,384 bytes (346 tokens)** in Go (`1,007 B / 252 tok` in Python) — **94.4% smaller** vs Borer alone and **99.96% smaller** across all connected upstreams — and spilling oversized responses cleanly to `$XT_HOME/cache/artifacts/`.
 
 <p align="center">
   <img src="docs/assets/mcp-rea-craft.gif" alt="Connecting REA and Craft Anything through XT-Forge --meta Gateway" width="100%" />
 </p>
 
-It natively connects, trust-pins, and proxies **[REA](https://github.com/morluto/rea)** (`rea-agents mcp`, **229 RE tools** / ~3.5 MB raw schema) and **[Craft Anything](https://github.com/storytold/craft-anything)** (`craft-anything-cli mcp`, dynamic `enable_toolset` / `--all-tools`) behind **persistent stateful stdio sessions**, automatic `notifications/tools/list_changed` catalog refresh, and unified cross-runtime SHA-256 rug-pull checks:
+It natively connects, trust-pins, and optimizes **[Borer](https://github.com/imjustprism/borer)** (`borer`, **34 MCP tools + 111 `borer://` resources** for certified decompilation, function emulation, symbolic solve, devirtualization, and unpacking), **[REA](https://github.com/morluto/rea)** (`rea-agents mcp`, **229 RE tools** / ~3.5 MB raw schema), and **[Craft Anything](https://github.com/storytold/craft-anything)** (`craft-anything-cli mcp`, **300+ tools**) behind **persistent stateful stdio sessions**, **1-call `path` auto-`load_binary` optimization**, **`borer://` shorthand URI expansion**, and unified SHA-256 rug-pull checks:
 
 ```sh
-# 1. Connect, injection-scan, and SHA-256 pin REA or Craft Anything once
+# 1. Connect, injection-scan, and SHA-256 pin Borer, REA, or Craft Anything once
+xt-forge mcp connect borer --json
 xt-forge mcp connect rea --json
 xt-forge mcp connect craft-anything --json
 
-# 2. Or proxy either server directly with auto-refreshing dynamic toolsets
+# 2. One-call Borer execution (auto-runs load_binary + normalizes borer:// URIs)
+xt-forge tool run borer decompile '{"path":"/usr/bin/ls","address":"0x5620"}'
+xt-forge tool run borer query '{"uri":"capabilities"}'
+
+# 3. Or proxy any server directly with auto-refreshing dynamic toolsets
+xt-forge mcp proxy --server borer
 xt-forge mcp proxy --server rea
 xt-forge mcp proxy --server craft-anything
 ```
