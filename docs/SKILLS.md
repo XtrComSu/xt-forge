@@ -63,13 +63,6 @@ End-to-end hardening, obfuscated binary recovery, high-concurrency binary MapRed
 | **XTF-GoalLoop** | Bounded goal loops and daemonized monitors | `loop schedule`, `goal verify`, `guard status` | [SKILL.md](../skills/advanced/XTF-GoalLoop/SKILL.md) |
 | **XTF-MemoryEval** | Memory linking, taste calibration, eval tracking | `mem link`, `taste learn`, `eval record` | [SKILL.md](../skills/advanced/XTF-MemoryEval/SKILL.md) |
 
-## Interactive Walkthrough
+## Overview
 
-<p align="center">
-  <video src="videos/xtforge-overview.mp4" controls autoplay loop muted playsinline width="100%">
-    <img src="assets/xtforge-overview-player.gif" alt="XT-Forge Overview Walkthrough Video" width="100%" />
-  </video>
-</p>
-<p align="center">
-  <img src="assets/xtforge-overview-player.gif" alt="XT-Forge Overview Walkthrough Player" width="100%" />
-</p>
+![XT-Forge Overview](assets/xtforge-overview-player.gif)

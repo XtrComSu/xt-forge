@@ -11,9 +11,8 @@
   - Added `swarm map` and `swarm mcts` in the Go concurrency hub (`native/xtforge-go/internal/swarm/engine.go`) and Python fallback (`xtforge/core/re/swarm.py`).
 - **Top-Level Ergonomic CLI & `--meta` Gateway Shortcuts**:
   - Added top-level aliases `xt-forge callers`, `xt-forge audit`, `xt-forge trace`, `xt-forge diff`, and `xt-forge context`, plus first-class `--meta` MCP tools `code_callers`, `code_audit`, `code_trace`, and `re_diff` with zero-dash argument safety and `evidence_complete` flags in both Go (`xtforge-hub`) and Python (`xtforge/adapters/mcp_server.py`).
-- **24 Bundled `XTF-*` Workflow Skills & XT-OSS Visual Suite**:
+- **24 `XTF-*` Workflow Skills**:
   - Added 6 new workflow skills (`XTF-CodeAudit`, `XTF-DispatchTrace`, `XTF-BinaryDiff`, `XTF-LSPNavigate`, `XTF-SwarmRE`, `XTF-SessionRecovery`), expanding the catalog to **24 skills** across Simple (8), Complex (8), and Advanced (8) tiers.
-  - Upgraded README and docs with XT-Style + XT-OSS visuals (`docs/assets/xt-oss-banner.png`, `docs/assets/xtforge-vs-rea-benchmark.png`, `docs/assets/re-diff-decompile.gif`) and inline embedded video players (`docs/videos/xtforge-overview.mp4`, `docs/videos/cve-re-workflow.mp4`).
 
 ### Fixed
 - **6-Tier Live Benchmark (`scripts/bench_three_tier.py`)**:

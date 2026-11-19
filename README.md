@@ -25,19 +25,19 @@
 
 ---
 
-## XT-Forge Defeats Raw REA: 100% Live 6-Tier Supremacy Benchmark
+## XT-Forge vs. Raw REA
 
-Mounting a massive 229-tool reverse-engineering MCP server like raw **[REA](https://github.com/morluto/rea)** (`rea-agents mcp`, ~3.5 MB tool catalog) directly into an agent harness floods the prompt window, triggers tool-discovery paralysis, and times out on multi-file audits, binary regressions, and dropped-connection recovery.
+Mounting a 229-tool reverse-engineering MCP server like raw **[REA](https://github.com/morluto/rea)** (`rea-agents mcp`, ~3.5 MB tool catalog) directly into an agent harness floods the prompt window, triggers tool-discovery loops, and times out on multi-file audits, binary regressions, and dropped-connection recovery.
 
-**`xt-forge` (`v0.4.3-Damascus`)** solves this at both layers:
-1. **Sub-1KB `--meta` Gateway (`1,384 B` / `346` tokens in Go, `98.5%` schema reduction):** Wraps all local `xt-forge` engines plus stateful upstream MCPs (`rea`, `craft-anything`) behind 4 deterministic primitives (`xt_discover`, `xt_schema`, `xt_call`, `xt_batch`) with crash-safe idempotency journaling (`$XT_HOME/call_journal.json`).
-2. **One-Shot Structural & Binary Engines (`code_callers`, `code_audit`, `code_trace`, `re_diff`):** Replaces 10–15 turns of manual `grep`, `read_file`, and `objdump` loops with single-call AST/CFG/disassembly synthesis returning `evidence_complete: true`.
+**`xt-forge`** solves this at both layers:
+1. **Sub-1KB `--meta` Gateway (`1,384 B` / `346` tokens in Go, `98.5%` schema reduction):** Routes local `xt-forge` engines plus stateful upstream MCPs (`rea`, `craft-anything`) through 4 deterministic primitives (`xt_discover`, `xt_schema`, `xt_call`, `xt_batch`) with crash-safe idempotency journaling (`$XT_HOME/call_journal.json`).
+2. **Direct Structural & Binary Analysis (`code_callers`, `code_audit`, `code_trace`, `re_diff`):** Replaces multi-turn `grep`, `read_file`, and `objdump` loops with single-call AST, CFG, and disassembly analysis.
 
 <p align="center">
-  <img src="docs/assets/xtforge-vs-rea-benchmark.png" alt="XT-Forge vs Raw REA Live 6-Tier Benchmark" width="100%" />
+  <img src="docs/assets/xtforge-vs-rea-benchmark.png" alt="XT-Forge vs Raw REA Benchmark" width="100%" />
 </p>
 
-| Benchmark Tier | Workload | Raw REA Only (`229` tools) | `xt-forge` + REA (`--meta`) | Why `xt-forge` Wins Every Tier |
+| Benchmark Tier | Workload | Raw REA Only (`229` tools) | `xt-forge` + REA (`--meta`) | Key Advantage |
 | --- | --- | --- | --- | --- |
 | **Tier 1 · Find** | Symbol definition + production callers vs test/doc decoys | `28.8s` (8 tools, misses tuple / extra grep) | **PASS · `15.1s` ev** (`code_callers`) | Separates `production_callers` from `unresolved_candidates` (`test_or_shadow_only`) in one indexed query |
 | **Tier 2 · Fix** | Off-by-one retry budget bug fix + test verification | `52.9s` (9 tools, `13,864` tok) | **PASS · `34.2s`** (7 tools, `9,106` tok) | **1.55x faster** and **34% fewer tokens** via direct symbol localization |
@@ -48,38 +48,16 @@ Mounting a massive 229-tool reverse-engineering MCP server like raw **[REA](http
 | **Tier 6B · Bin Diff** | Stripped/compiled ELF binary regression (`calc_v1` vs `calc_v2`) | **FAIL (`120.0s` TIMEOUT)** · 12 tools | **PASS · `69.4s`** (`5.2s` ev, `re_diff`) | `re_diff` normalizes instructions, annotates `.rodata` strings, and decodes GCC reciprocal division (`10% -> 5%`) automatically |
 
 <p align="center">
-  <img src="docs/assets/re-diff-decompile.gif" alt="XT-Forge Normalized Binary Diff, Reciprocal Math Decoding, Decompile & AST Audit" width="100%" />
-</p>
-
----
-
-## Embedded Video Walkthroughs
-
-### 1. XT-Forge Workbench & `--meta` Gateway Overview
-
-<p align="center">
-  <video src="docs/videos/xtforge-overview.mp4" controls autoplay loop muted playsinline width="100%">
-    <img src="docs/assets/xtforge-overview-player.gif" alt="XT-Forge Overview Walkthrough Video" width="100%" />
-  </video>
-</p>
-<p align="center">
-  <img src="docs/assets/xtforge-overview-player.gif" alt="XT-Forge Overview Walkthrough Inline Player" width="100%" />
-</p>
-
-### 2. Offline Reverse Engineering, Binary Diffing & Keyless CVE Intel
-
-<p align="center">
-  <video src="docs/videos/cve-re-workflow.mp4" controls autoplay loop muted playsinline width="100%">
-    <img src="docs/assets/cve-re-player.gif" alt="XT-Forge CVE & Reverse Engineering Walkthrough Video" width="100%" />
-  </video>
-</p>
-<p align="center">
-  <img src="docs/assets/cve-re-player.gif" alt="XT-Forge CVE & Reverse Engineering Inline Player" width="100%" />
+  <img src="docs/assets/re-diff-decompile.gif" alt="Normalized Binary Diff, Reciprocal Math Decoding, Decompile & AST Audit" width="100%" />
 </p>
 
 ---
 
 ## Why Use xt-forge
+
+<p align="center">
+  <img src="docs/assets/xtforge-overview-player.gif" alt="XT-Forge Workbench Overview" width="100%" />
+</p>
 
 | Everyday Problem | What `xt-forge` Gives You | Command / Guide |
 | --- | --- | --- |
@@ -196,9 +174,9 @@ xt-forge mcp proxy --server craft-anything
 
 ---
 
-## 24 Bundled 3-Tier Workflow Skills (`XTF-*`)
+## 3-Tier Workflow Skills (`XTF-*`)
 
-`xt-forge init` syncs **24 self-explanatory workflow skills** (8 Simple, 8 Complex, 8 Advanced) into `~/.agents/skills`, `~/.dsh/skills`, `~/.config/opencode/skills`, and `~/.claude/skills` so models pick exact commands instead of guessing:
+`xt-forge init` syncs **24 workflow skills** (8 Simple, 8 Complex, 8 Advanced) into `~/.agents/skills`, `~/.dsh/skills`, `~/.config/opencode/skills`, and `~/.claude/skills` so models pick exact commands instead of guessing:
 
 | Tier | Count | Skills | Scope |
 | --- | ---: | --- | --- |

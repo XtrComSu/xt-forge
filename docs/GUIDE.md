@@ -6,14 +6,7 @@ XT-Forge solves those friction points with one local, zero-dependency toolkit. I
 
 ![XT-Forge Hybrid Rust, Go, and Python Architecture](assets/architecture-rust-go.png)
 
-<p align="center">
-  <video src="videos/xtforge-overview.mp4" controls autoplay loop muted playsinline width="100%">
-    <img src="assets/xtforge-overview-player.gif" alt="XT-Forge Overview Walkthrough Video" width="100%" />
-  </video>
-</p>
-<p align="center">
-  <img src="assets/xtforge-overview-player.gif" alt="XT-Forge Overview Walkthrough Player" width="100%" />
-</p>
+![XT-Forge Overview](assets/xtforge-overview-player.gif)
 
 ## 1. Quick Start and Layout
 
