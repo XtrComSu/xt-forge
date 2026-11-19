@@ -1,0 +1,35 @@
+batch_id,tier,variant,arm,harness,model,pass,on_time_complete,failed_assertion,wall_s,first_evidence_s,sufficient_evidence_s,input_tokens,output_tokens,tool_calls,invalid_invocations,xtforge_calls
+run1_v3,tier1_find,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,swapped path binding: should_retry_attempt attached to job_runner.py instead of retry_budget.py,25.46,8.96,14.6,11288,1384,8,0,0
+run1_v3,tier1_find,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,swapped path binding: should_retry_attempt attached to webhook_pump.py instead of retry_budget.py,40.94,11.72,25.48,8256,1807,10,0,3
+run1_v3,tier2_fix,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,64.55,7.58,10.46,13599,5280,17,4,3
+run1_v3,tier2_fix,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,timeout_90s,90.06,6.7,9.65,14004,5139,20,3,0
+run1_v3,tier3_recover,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,60.44,39.19,39.19,8942,3134,15,6,0
+run1_v3,tier3_recover,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,53.59,9.57,42.44,5205,1424,8,1,7
+run1_v3,tier4_defects,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,timeout_90s,90.03,9.73,18.46,9718,6081,18,1,2
+run1_v3,tier4_defects,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,84.31,8.98,14.39,8105,9042,12,1,0
+run1_v3,tier5_trace,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,46.4,9.22,9.22,5508,2623,14,0,0
+run1_v3,tier5_trace,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,46.72,10.09,10.09,8735,2744,15,0,4
+run1_v3,tier6_regression_src,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,89.92,7.34,10.9,15234,7793,16,1,6
+run1_v3,tier6_regression_src,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,102.13,7.18,9.52,15614,8266,17,0,0
+run1_v3,tier6_regression_bin,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,timeout_120s,120.07,8.77,14.14,20271,11506,16,0,0
+run1_v3,tier6_regression_bin,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,timeout_120s,120.03,38.34,60.79,8928,3616,11,0,1
+run2_v4,tier1_find,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,14.62,7.08,9.41,4033,795,3,0,0
+run2_v4,tier1_find,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,swapped path binding: should_retry_attempt attached to webhook_pump.py instead of retry_budget.py,44.69,11.03,30.18,13960,1746,7,1,3
+run2_v4,tier2_fix,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,80.09,8.59,8.59,16651,4006,14,4,2
+run2_v4,tier2_fix,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,timeout_90s,90.03,6.79,11.95,7810,2266,9,2,0
+run2_v4,tier3_recover,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,timeout_90s,90.03,74.18,74.18,8755,2540,14,5,0
+run2_v4,tier3_recover,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,53.9,20.76,46.86,4787,1137,6,2,5
+run2_v4,tier4_defects,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,timeout_90s,90.03,10.23,28.81,10165,5788,13,0,2
+run2_v4,tier4_defects,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,timeout_90s,90.03,18.38,49.71,6353,2781,10,0,0
+run2_v4,tier5_trace,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,29.61,6.98,6.98,4258,2067,3,0,0
+run2_v4,tier5_trace,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,78.99,25.42,25.42,8103,3189,16,0,2
+run2_v4,tier6_regression_src,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,91.09,7.31,9.96,13360,5948,13,0,3
+run2_v4,tier6_regression_src,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,timeout_120s,120.03,9.09,12.98,9430,5396,10,0,0
+run2_v4,tier6_regression_bin,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,timeout_120s,120.03,24.86,56.8,12900,1256,7,0,0
+run2_v4,tier6_regression_bin,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,timeout_120s,120.03,10.67,85.67,7444,1053,8,0,6
+run3_v5,tier1_find,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,"missing verified (path, symbol) tuple: (retry_budget.py, should_retry_attempt)",28.75,6.98,17.1,7365,1145,8,0,0
+run3_v5,tier1_find,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,"missing verified (path, symbol) tuple: (retry_budget.py, should_retry_attempt)",33.59,15.11,15.11,12033,936,4,0,2
+run3_v5,tier4_defects,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,false positive bug claimed in clean file(s) (2),28.76,5.18,5.18,9838,2644,4,0,1
+run3_v5,tier4_defects,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,72.29,12.48,13.87,7172,7557,10,0,0
+run3_v5,tier6_regression_bin,primary,A,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,False,False,timeout_120s,120.03,19.19,27.92,18336,5825,12,0,0
+run3_v5,tier6_regression_bin,primary,B,dsh,hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium,True,True,,69.37,5.06,5.23,11624,8138,7,0,2

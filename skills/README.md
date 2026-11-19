@@ -15,9 +15,9 @@
 Running either command syncs all 24 `XTF-*` folders into `~/.agents/skills`, `~/.dsh/skills`, `~/.config/opencode/skills`, and `~/.claude/skills`:
 
 ```sh
-npx xt-forge init
-# or from a local clone:
 ./install.sh
+# or via npx directly from GitHub:
+npx --yes github:XtrComSu/xt-forge init
 ```
 
 See [docs/SKILLS.md](../docs/SKILLS.md) for usage examples and trigger patterns.

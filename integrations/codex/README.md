@@ -9,7 +9,7 @@ Codex CLI connects cleanly via `~/.codex/config.toml` and reads project instruct
 1. Put `xt-forge` on PATH and install the `XTF-*` skills:
 
 ```sh
-npx xt-forge init
+npx --yes github:XtrComSu/xt-forge init
 # or from a local clone: ./install.sh
 ```
 

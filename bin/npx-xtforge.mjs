@@ -123,7 +123,14 @@ function cmdPromptInstall() {
 function cmdInit(argv) {
   const args = new Set(argv)
   const localBin = join(HOME, ".local", "bin")
-  const launcher = join(ROOT, "bin", IS_WIN ? "xtforge.cmd" : "xtforge")
+  let installRoot = ROOT
+  if (ROOT.includes("_npx") || ROOT.includes("node_modules")) {
+    const persistentRoot = join(HOME, ".xt-forge-src")
+    mkdirSync(persistentRoot, { recursive: true })
+    cpSync(ROOT, persistentRoot, { recursive: true, force: true })
+    installRoot = persistentRoot
+  }
+  const launcher = join(installRoot, "bin", IS_WIN ? "xtforge.cmd" : "xtforge")
   if (!IS_WIN) {
     try {
       chmodSync(launcher, 0o755)

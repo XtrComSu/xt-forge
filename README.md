@@ -74,22 +74,14 @@ Mounting a 229-tool reverse-engineering MCP server like raw **[REA](https://gith
 
 ---
 
-## Install on Windows, Linux, and macOS
+## Install on Linux, macOS, and Windows
 
-### Option 1: Universal `npx` Setup (Windows, Linux, macOS)
-
-Node.js (`18+`) installs global `xt-forge`, `xtf`, `/xtf` slash commands, and all **24 `XTF-*` skills** in one step:
-
-```sh
-npx xt-forge@latest init
-```
-
-### Option 2: Native One-Line Install (Builds Rust + Go + Links PATH)
+### Option 1: One-Line Native Install (Builds Rust + Go + Links PATH + Syncs 24 Skills)
 
 **Linux & macOS (Bash / Zsh):**
 
 ```sh
-# Piped one-liner:
+# Piped one-liner (clones into ~/.xt-forge-src if run outside a repo):
 curl -fsSL https://raw.githubusercontent.com/XtrComSu/xt-forge/main/install.sh | bash
 
 # Or from a local clone:
@@ -106,21 +98,42 @@ irm https://raw.githubusercontent.com/XtrComSu/xt-forge/main/install.ps1 | iex
 git clone https://github.com/XtrComSu/xt-forge.git; cd xt-forge; .\install.ps1
 ```
 
-Both `install.sh` and `install.ps1` compile Rust (`xtforge-native`, requires **Cargo 1.78+** with bundled SQLite — no `libsqlite3-dev` headers required) and Go (`xtforge-hub`, requires **Go 1.24+**) when toolchains are present, and fall back to zero-dependency Python 3.11+ (`XT_FORCE_PYTHON=1` forces Python anytime) with full workflow parity while native binaries accelerate hot paths 10x–25x. Prebuilt release tarballs, npm packages (`xt-forge`, `xtf`), and stdlib wheels (`xtforge`) live on [Releases](https://github.com/XtrComSu/xt-forge/releases).
+### Option 2: Direct GitHub `npx` / `uv` / `pip` Install
+
+```sh
+# Node.js (18+) directly from GitHub (installs xt-forge, xtf, /xtf, and 24 XTF-* skills):
+npx --yes github:XtrComSu/xt-forge init
+
+# Or install the npm tarball from GitHub Releases:
+npm install -g https://github.com/XtrComSu/xt-forge/releases/download/v0.4.3-Damascus/xt-forge-0.4.3.tgz
+
+# Python (3.11+) wheel from GitHub Releases or git:
+uv tool install https://github.com/XtrComSu/xt-forge/releases/download/v0.4.3-Damascus/xt_forge-0.4.3-py3-none-any.whl
+# or: pip install git+https://github.com/XtrComSu/xt-forge.git
+```
+
+### Option 3: Prebuilt Release Archives (`v0.4.3-Damascus`)
+
+Prebuilt platform archives, Python wheels, and `SHA256SUMS.txt` are attached to [GitHub Releases (`v0.4.3-Damascus`)](https://github.com/XtrComSu/xt-forge/releases/tag/v0.4.3-Damascus):
+- `xt-forge-0.4.3-linux-x86_64.tar.gz` (includes prebuilt `xtforge-native` Rust + `xtforge-hub` Go binaries)
+- `xt-forge-0.4.3-darwin-arm64.tar.gz` (includes prebuilt `xtforge-hub` macOS arm64 binary)
+- `xt-forge-0.4.3-windows-x86_64.zip` (includes prebuilt `xtforge-hub.exe` Windows x86_64 binary)
+- `xt-forge-0.4.3.tgz` (npm package tarball)
+- `xt_forge-0.4.3-py3-none-any.whl` & `xt_forge-0.4.3.tar.gz` (Python wheel & sdist)
 
 ```sh
 xt-forge --meta        # stdio MCP gateway (xt_discover, xt_schema, xt_call, xt_batch)
 xt-forge doctor        # inspect workspace health, guard mode, and native engines
-npx xt-forge skills    # list all 24 bundled XTF-* workflow skills
+xt-forge skills        # list all 24 bundled XTF-* workflow skills
 ```
 
 ---
 
 ## Agent Self-Install Prompts
 
-Want an AI coding agent (Claude Code, Codex CLI, OpenCode, DSH, Cursor) to install and verify `xt-forge` itself? Paste this prompt directly to the agent, or print the full prompt suite via `npx xt-forge prompt-install` (see [prompts/install.md](prompts/install.md)):
+Want an AI coding agent (Claude Code, Codex CLI, OpenCode, DSH, Cursor) to install and verify `xt-forge` itself? Paste this prompt directly to the agent (see [prompts/install.md](prompts/install.md)):
 
-> Install `xt-forge` (`https://github.com/XtrComSu/xt-forge`) for this OS (`./install.sh` on Linux/macOS, `.\install.ps1` on Windows PowerShell, or `npx xt-forge@latest init`), verify `xt-forge`, `xtf`, `/xtf`, and all 24 `XTF-*` skills are installed, register `xt-forge --meta` in the active MCP config if one exists, and run `xt-forge version --json` + `xt-forge doctor --json` + `tools/list` on `xt-forge --meta` to prove the setup works.
+> Install `xt-forge` (`https://github.com/XtrComSu/xt-forge`) for this OS (`curl -fsSL https://raw.githubusercontent.com/XtrComSu/xt-forge/main/install.sh | bash` on Linux/macOS, `irm https://raw.githubusercontent.com/XtrComSu/xt-forge/main/install.ps1 | iex` on Windows PowerShell, or `npx --yes github:XtrComSu/xt-forge init`), verify `xt-forge`, `xtf`, `/xtf`, and all 24 `XTF-*` skills are installed, register `xt-forge --meta` in the active MCP config if one exists, and run `xt-forge version --json` + `xt-forge doctor --json` + `tools/list` on `xt-forge --meta` to prove the setup works.
 
 ---
 
@@ -247,13 +260,14 @@ Hot CLI paths run directly in Rust (`xtforge-native`) and Go (`xtforge-hub`), de
 
 ## Benchmarks & Reproducibility
 
-`v0.4.3-Damascus` validates context precision, MCP discovery overhead, static/binary analysis, and crash recovery end-to-end:
+Raw multi-run benchmark logs and evaluation outputs are committed under [`benchmarks/`](benchmarks/):
 
-| Suite | Scope | Result | Command |
+| Suite | Scope | Measured Result | Command / Raw Data |
 | --- | --- | --- | --- |
 | **Context Packing** | `context_tasks.json` (20 tasks) + held-out `context_tasks_unseen.json` (8 tasks) | **20/20** (`608.4` mean tok, `88.8%` cut vs `3/20` map) · **8/8** unseen (`566.4` mean tok) | `python3 scripts/bench_context_pack.py --json` |
 | **Discovery Cost** | Direct vs `--meta` on 4, 50, and 229 tools | Direct wins 1-turn on 4 tools (`450` vs `1,591` tok); `--meta` saves `93.1%` (50) & `98.5%` (229, `4.2 ms` first call) | `python3 scripts/bench_discovery_cost.py --json` |
-| **6-Tier Live Suite vs REA** | `Find` / `Fix` / `Recover` / `Defects` / `Trace` / `Regression (Src + Bin)` | **7/7 (100%) Win Rate** with `xt-forge` vs Raw REA (`120s` timeout on binary diff, `0/1` on crash recovery) | `python3 scripts/bench_three_tier.py --self-test` |
+| **External CPython Stdlib Audit & Call Graph** | 66 unmodified CPython 3.12 files (`json`, `urllib`, `email`, `http`, `xml`, `logging`, `sqlite3`, 3 reps) + 8-category defect matrix | **0 false positives** across `198` audited stdlib file-runs (`0.0%` FP rate) · **8/8** defect categories (`1.0` recall, `1.0` precision) · **12/12** call-graph hits | `python3 scripts/bench_external_repos.py --reps 3` · [raw JSON](benchmarks/external_cpython_evaluation.json) |
+| **6-Tier Live Harness Suite vs REA** | Live A/B runs (`Find`, `Fix`, `Recover`, `Defects`, `Trace`, `Regression Src/Bin`) with `rea-agents` (`229` tools) | **34 recorded live runs** committed (`--self-test` verifies fixtures/graders offline; omit `--self-test` to run live harness comparison) | `python3 scripts/bench_three_tier.py --harnesses dsh --arms A,B --reps 3 --user-harness --dsh-keep-mcps mcp-rea` · [raw JSON](benchmarks/dsh_live_runs.json) · [CSV](benchmarks/dsh_live_runs.csv) |
 
 ---
 

@@ -6,7 +6,7 @@ This edition integrates cleanly with DSH (`cordis`) profiles, native `/xtf` slas
 
 ## Why DSH users use this setup
 
-- **One-command PATH and `/xtf` setup**: running `npx xt-forge init` (or `./install.sh`) links `xt-forge` globally, installs `/xtf` into `~/.dsh/commands/xtf.md`, and syncs all 24 `XTF-*` workflow skills into `~/.dsh/skills`.
+- **One-command PATH and `/xtf` setup**: running `npx --yes github:XtrComSu/xt-forge init` (or `./install.sh`) links `xt-forge` globally, installs `/xtf` into `~/.dsh/commands/xtf.md`, and syncs all 24 `XTF-*` workflow skills into `~/.dsh/skills`.
 - **Native `/xtf --meta` invocation**: invoke `/xtf --meta` inside DSH or run `xt-forge --meta` in any shell to wire the 0.90 KB MCP gateway without editing brittle script paths.
 - **No hallucinated tool names**: `xt-forge prompt inject` inspects the active profile and reports the exact tools available in the session.
 
@@ -15,7 +15,7 @@ This edition integrates cleanly with DSH (`cordis`) profiles, native `/xtf` slas
 1. Install binaries, `/xtf`, and `XTF-*` skills:
 
 ```sh
-npx xt-forge init
+npx --yes github:XtrComSu/xt-forge init
 # or from a local clone: ./install.sh
 ```
 

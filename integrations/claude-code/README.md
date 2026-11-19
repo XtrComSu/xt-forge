@@ -9,7 +9,7 @@ Claude Code supports project-scoped `.mcp.json` discovery, `/xtf` slash commands
 1. Install `xt-forge` on PATH, `/xtf`, and all `XTF-*` skills into `~/.claude/skills`:
 
 ```sh
-npx xt-forge init
+npx --yes github:XtrComSu/xt-forge init
 # or from a local clone: ./install.sh
 ```
 

@@ -7,7 +7,9 @@ XT-Forge ships **24 plain-named workflow skills** grouped into **Simple**, **Com
 Install all 24 skills alongside the `xt-forge` CLI and `/xtf` slash command in one step:
 
 ```sh
-npx xt-forge init
+./install.sh
+# or via npx directly from GitHub:
+npx --yes github:XtrComSu/xt-forge init
 ```
 
 Or run `./install.sh` (Linux/macOS) or `.\install.ps1` (Windows PowerShell) from a cloned checkout. To inspect the catalog directly from any terminal:

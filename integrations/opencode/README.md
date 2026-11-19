@@ -9,7 +9,7 @@ OpenCode gets native slash commands (`/xtf`, `/taste`, `/goal`, `/loop`) via the
 1. Put `xt-forge` on PATH, sync `XTF-*` skills, and install the OpenCode plugin:
 
 ```sh
-npx xt-forge init
+npx --yes github:XtrComSu/xt-forge init
 xt-forge plugin install
 xt-forge plugin status
 ```

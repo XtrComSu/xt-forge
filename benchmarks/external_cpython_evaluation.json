@@ -1,0 +1,345 @@
+{
+  "ok": true,
+  "python_version": "3.14.8",
+  "stdlib_root": "/usr/lib/python3.14",
+  "reps": 3,
+  "unmodified_external_audit": {
+    "packages": [
+      "json",
+      "urllib",
+      "email",
+      "http",
+      "xml",
+      "logging",
+      "sqlite3"
+    ],
+    "unique_production_files": 66,
+    "total_files_audited_across_reps": 198,
+    "total_false_positives": 0,
+    "false_positive_rate": 0.0,
+    "median_package_audit_ms": 128.6,
+    "runs": [
+      {
+        "rep": 0,
+        "package": "cpython3.12/json",
+        "production_files": 5,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 46.34
+      },
+      {
+        "rep": 0,
+        "package": "cpython3.12/urllib",
+        "production_files": 5,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 123.89
+      },
+      {
+        "rep": 0,
+        "package": "cpython3.12/email",
+        "production_files": 28,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 298.22
+      },
+      {
+        "rep": 0,
+        "package": "cpython3.12/http",
+        "production_files": 5,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 156.35
+      },
+      {
+        "rep": 0,
+        "package": "cpython3.12/xml",
+        "production_files": 17,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 252.55
+      },
+      {
+        "rep": 0,
+        "package": "cpython3.12/logging",
+        "production_files": 3,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 128.02
+      },
+      {
+        "rep": 0,
+        "package": "cpython3.12/sqlite3",
+        "production_files": 3,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 10.37
+      },
+      {
+        "rep": 1,
+        "package": "cpython3.12/json",
+        "production_files": 5,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 42.14
+      },
+      {
+        "rep": 1,
+        "package": "cpython3.12/urllib",
+        "production_files": 5,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 122.14
+      },
+      {
+        "rep": 1,
+        "package": "cpython3.12/email",
+        "production_files": 28,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 301.96
+      },
+      {
+        "rep": 1,
+        "package": "cpython3.12/http",
+        "production_files": 5,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 156.43
+      },
+      {
+        "rep": 1,
+        "package": "cpython3.12/xml",
+        "production_files": 17,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 256.31
+      },
+      {
+        "rep": 1,
+        "package": "cpython3.12/logging",
+        "production_files": 3,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 129.55
+      },
+      {
+        "rep": 1,
+        "package": "cpython3.12/sqlite3",
+        "production_files": 3,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 10.26
+      },
+      {
+        "rep": 2,
+        "package": "cpython3.12/json",
+        "production_files": 5,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 42.18
+      },
+      {
+        "rep": 2,
+        "package": "cpython3.12/urllib",
+        "production_files": 5,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 123.38
+      },
+      {
+        "rep": 2,
+        "package": "cpython3.12/email",
+        "production_files": 28,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 296.44
+      },
+      {
+        "rep": 2,
+        "package": "cpython3.12/http",
+        "production_files": 5,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 156.16
+      },
+      {
+        "rep": 2,
+        "package": "cpython3.12/xml",
+        "production_files": 17,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 257.48
+      },
+      {
+        "rep": 2,
+        "package": "cpython3.12/logging",
+        "production_files": 3,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 128.6
+      },
+      {
+        "rep": 2,
+        "package": "cpython3.12/sqlite3",
+        "production_files": 3,
+        "false_positives": 0,
+        "findings": [],
+        "ms": 10.72
+      }
+    ]
+  },
+  "eight_category_defect_matrix": {
+    "expected_categories": [
+      "assert_tuple",
+      "boundary_comparison",
+      "duplicate_aggregation",
+      "duplicate_dict_key",
+      "late_binding_closure",
+      "literal_identity_comparison",
+      "mutable_default",
+      "stale_cache"
+    ],
+    "detected_categories": [
+      "assert_tuple",
+      "boundary_comparison",
+      "duplicate_aggregation",
+      "duplicate_dict_key",
+      "late_binding_closure",
+      "literal_identity_comparison",
+      "mutable_default",
+      "stale_cache"
+    ],
+    "recall": 1.0,
+    "false_positives_on_clean_json_stdlib": 0,
+    "precision": 1.0
+  },
+  "external_callgraph_runs": {
+    "total_runs": 12,
+    "hits": 12,
+    "hit_rate": 1.0,
+    "median_query_ms": 18.41,
+    "runs": [
+      {
+        "rep": 0,
+        "package": "cpython3.12/email",
+        "symbol": "message_from_string",
+        "expected_def_file": "__init__.py",
+        "hit": true,
+        "definitions_found": 1,
+        "callers_found": 0,
+        "ms": 42.88
+      },
+      {
+        "rep": 0,
+        "package": "cpython3.12/urllib",
+        "symbol": "urlopen",
+        "expected_def_file": "request.py",
+        "hit": true,
+        "definitions_found": 1,
+        "callers_found": 8,
+        "ms": 15.14
+      },
+      {
+        "rep": 0,
+        "package": "cpython3.12/logging",
+        "symbol": "getLogger",
+        "expected_def_file": "__init__.py",
+        "hit": true,
+        "definitions_found": 2,
+        "callers_found": 13,
+        "ms": 21.19
+      },
+      {
+        "rep": 0,
+        "package": "cpython3.12/json",
+        "symbol": "dumps",
+        "expected_def_file": "__init__.py",
+        "hit": true,
+        "definitions_found": 1,
+        "callers_found": 10,
+        "ms": 6.4
+      },
+      {
+        "rep": 1,
+        "package": "cpython3.12/email",
+        "symbol": "message_from_string",
+        "expected_def_file": "__init__.py",
+        "hit": true,
+        "definitions_found": 1,
+        "callers_found": 0,
+        "ms": 34.93
+      },
+      {
+        "rep": 1,
+        "package": "cpython3.12/urllib",
+        "symbol": "urlopen",
+        "expected_def_file": "request.py",
+        "hit": true,
+        "definitions_found": 1,
+        "callers_found": 8,
+        "ms": 14.42
+      },
+      {
+        "rep": 1,
+        "package": "cpython3.12/logging",
+        "symbol": "getLogger",
+        "expected_def_file": "__init__.py",
+        "hit": true,
+        "definitions_found": 2,
+        "callers_found": 13,
+        "ms": 20.96
+      },
+      {
+        "rep": 1,
+        "package": "cpython3.12/json",
+        "symbol": "dumps",
+        "expected_def_file": "__init__.py",
+        "hit": true,
+        "definitions_found": 1,
+        "callers_found": 10,
+        "ms": 6.89
+      },
+      {
+        "rep": 2,
+        "package": "cpython3.12/email",
+        "symbol": "message_from_string",
+        "expected_def_file": "__init__.py",
+        "hit": true,
+        "definitions_found": 1,
+        "callers_found": 0,
+        "ms": 36.79
+      },
+      {
+        "rep": 2,
+        "package": "cpython3.12/urllib",
+        "symbol": "urlopen",
+        "expected_def_file": "request.py",
+        "hit": true,
+        "definitions_found": 1,
+        "callers_found": 8,
+        "ms": 15.87
+      },
+      {
+        "rep": 2,
+        "package": "cpython3.12/logging",
+        "symbol": "getLogger",
+        "expected_def_file": "__init__.py",
+        "hit": true,
+        "definitions_found": 2,
+        "callers_found": 13,
+        "ms": 22.49
+      },
+      {
+        "rep": 2,
+        "package": "cpython3.12/json",
+        "symbol": "dumps",
+        "expected_def_file": "__init__.py",
+        "hit": true,
+        "definitions_found": 1,
+        "callers_found": 10,
+        "ms": 6.31
+      }
+    ]
+  }
+}

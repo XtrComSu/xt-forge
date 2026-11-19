@@ -10,7 +10,7 @@ XT-Forge solves those friction points with one local, zero-dependency toolkit. I
 
 ## 1. Quick Start and Layout
 
-Install `xt-forge` globally and sync the `XTF-*` workflow skills via `npx xt-forge init` (or `./install.sh`). Everything stays self-contained inside your workspace and `$XT_HOME` (defaulting to `~/.xt-forge`):
+Install `xt-forge` globally and sync the `XTF-*` workflow skills via `./install.sh` (or `npx --yes github:XtrComSu/xt-forge init`). Everything stays self-contained inside your workspace and `$XT_HOME` (defaulting to `~/.xt-forge`):
 
 ```sh
 xt-forge version

@@ -12,7 +12,7 @@ Copy and paste this prompt directly to your agent:
 >
 > 1. Detect the operating system (`uname -s` on Linux/macOS, `$env:OS` / PowerShell on Windows) and whether `node`, `cargo`, `go`, `git`, and `python3`/`python` are available.
 > 2. Pick the cleanest install path:
->    - If Node.js is available and package install works, run `npx xt-forge@latest init`; otherwise:
+>    - If Node.js is available and package install works, run `npx --yes github:XtrComSu/xt-forge init`; otherwise:
 >    - On **Linux or macOS**: clone `https://github.com/XtrComSu/xt-forge.git` (into `~/.xt-forge-src` if not already inside the repo) and run `./install.sh` (or `curl -fsSL https://raw.githubusercontent.com/XtrComSu/xt-forge/main/install.sh | bash`).
 >    - On **Windows (PowerShell)**: clone `https://github.com/XtrComSu/xt-forge.git` and run `.\install.ps1` (or `irm https://raw.githubusercontent.com/XtrComSu/xt-forge/main/install.ps1 | iex`).
 > 3. Confirm `xt-forge`, `xtf`, and `/xtf` slash commands plus the 24 `XTF-*` skills are installed (ensure `~/.local/bin` or `%USERPROFILE%\.local\bin` is on `PATH`).
@@ -29,7 +29,7 @@ Copy and paste this prompt directly to your agent:
 
 > Set up `xt-forge` via `npx` so we get global CLI commands, 24 `XTF-*` skills, `/xtf` slash integration, and the sub-1KB MCP gateway:
 >
-> 1. Run `npx xt-forge@latest init` (on Windows PowerShell make sure `%USERPROFILE%\.local\bin` is on User `PATH`; on macOS/Linux add `~/.local/bin` to `PATH` if needed).
+> 1. Run `npx --yes github:XtrComSu/xt-forge init` (on Windows PowerShell make sure `%USERPROFILE%\.local\bin` is on User `PATH`; on macOS/Linux add `~/.local/bin` to `PATH` if needed).
 > 2. Register `xt-forge` as an MCP server with command `npx` and args `["-y", "xt-forge", "--meta"]` (or command `xt-forge` and args `["--meta"]`).
 > 3. Run `xt-forge version --json` and `xt-forge skills` and confirm all 24 `XTF-*` skills are synced cleanly.
 
