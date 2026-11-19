@@ -1,6 +1,7 @@
-"""Tests for the 38-tool Ghidra & REA-replacement MCP server (`xtforge.adapters.ghidra_mcp`)."""
+"""Tests for the 43-tool Ghidra & REA-replacement MCP server (`xtforge.adapters.ghidra_mcp`)."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from xtforge.adapters import ghidra_mcp
@@ -15,7 +16,37 @@ def test_ghidra_mcp_preset_and_catalog(monkeypatch, tmp_path: Path) -> None:
     assert err is None
     assert canon == "ghidra"
     assert argv and argv[-1] == "xtforge.adapters.ghidra_mcp"
-    assert len(ghidra_mcp.TOOLS) == 38
+    assert len(ghidra_mcp.TOOLS) == 43
+
+
+def test_ghidra_mcp_sober_re_hardened_tools(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("XT_HOME", str(tmp_path))
+    bin_path = "/usr/bin/ls"
+    if not Path(bin_path).is_file():
+        return
+
+    deep = ghidra_mcp._handle_tool("inspect_elf_deep", {"path": bin_path})
+    assert deep["ok"] is True
+    assert "pt_load_segments" in deep
+    assert "safe_post_bss_vaddr" in deep
+
+    anchors = ghidra_mcp._handle_tool(
+        "resolve_string_anchors",
+        {"path": bin_path, "queries": ["POSIX", "version"]},
+    )
+    assert anchors["ok"] is True
+    assert anchors["anchors_resolved"] >= 1
+
+    win = ghidra_mcp._handle_tool(
+        "slice_disasm_window",
+        {"path": bin_path, "address": deep.get("entry_point") or "0x6000", "before_bytes": 16, "after_bytes": 64},
+    )
+    assert win["ok"] is True
+    assert win["line_count"] >= 1
+
+    probe = ghidra_mcp._handle_tool("probe_live_process", {"pid": os.getpid()})
+    assert probe["ok"] is True
+    assert "yama_ptrace_scope" in probe
 
 
 def test_ghidra_mcp_overlay_renames_prototype_and_comments(monkeypatch, tmp_path: Path) -> None:

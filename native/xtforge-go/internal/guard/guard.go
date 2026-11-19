@@ -37,7 +37,7 @@ var defaultRoots = []string{
 	"$HOME", "$HOME/storage/shared", "$HOME/xt-forge",
 	"/tmp", "/var/tmp",
 	"/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/lib64",
-	"/lib", "/lib64", "/opt",
+	"/usr/local", "/usr/share", "/lib", "/lib64", "/opt", "/var/lib/flatpak", "/app",
 	"${PREFIX}/bin", "${PREFIX}/sbin", "${PREFIX}/lib", "${PREFIX}/share",
 }
 

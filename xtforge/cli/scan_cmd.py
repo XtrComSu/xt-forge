@@ -218,6 +218,20 @@ def cmd_re(args):
                 res = rt.decompile(path, target=getattr(args, "symbol", None) or getattr(args, "target", None) or "main")
             else:
                 res = rt.trace_binary(path, confirm=getattr(args, "confirm", None))
+        elif verb in ("deep-elf", "anchors", "slice", "live-probe", "rbxm"):
+            from ..core.re import sober_re
+            if verb == "deep-elf":
+                res = sober_re.inspect_elf_deep(path)
+            elif verb == "anchors":
+                queries = [q for q in ([getattr(args, "target", None), getattr(args, "symbol", None)] + list(getattr(args, "extra", []))) if q]
+                res = sober_re.resolve_string_anchors(path, queries or ["bytecode"])
+            elif verb == "slice":
+                addr = getattr(args, "start", None) or getattr(args, "rva", None) or getattr(args, "target", None) or "0x0"
+                res = sober_re.slice_disasm_window(path, addr)
+            elif verb == "live-probe":
+                res = sober_re.probe_live_process(int(path))
+            else:
+                res = sober_re.inspect_rbxm_container(path)
         else:
             return _out(args, {"ok": False, "error": f"unknown verb: {verb}"},
                         f"error: unknown verb {verb}", code=2)
@@ -393,9 +407,9 @@ def cmd_re(args):
         for item in res.get("imports", [])[:6]:
             lines.append(f"  import  {item['symbol']}")
         human = "\n".join(lines)
-    elif verb in ("annotate", "asar", "netcap", "apk", "decompile", "trace"):
+    elif verb in ("annotate", "asar", "netcap", "apk", "decompile", "trace", "deep-elf", "anchors", "slice", "live-probe", "rbxm"):
         human = res.get("script") or res.get("code") or (
-            f"{verb} ok={res.get('ok')} count={res.get('count', len(res.get('files', res.get('annotations', []))))}"
+            f"{verb} ok={res.get('ok')} count={res.get('count', res.get('chunk_count', len(res.get('files', res.get('annotations', res.get('warnings', []))))))}"
         )
     else:
         human = (f"entropy {res['entropy']}  {res['verdict']}  "

@@ -32,11 +32,17 @@ Assess an unknown executable offline in under a second before committing heavy d
    xt-forge re pe imports target.exe
    xt-forge re pe exports target.dll
    ```
-5. Pull ASCII/UTF-16 strings and compute section entropy to spot packed regions:
+5. Pull ASCII/UTF-16 strings (use `--min-len 3` when hunting short engine symbols like `IsA`) and compute section entropy:
    ```sh
-   xt-forge re strings target.bin --min-len 6
+   xt-forge re strings target.bin --min-len 3
+   ```
+6. Inspect section-header-stripped ELFs (`e_shnum == 0`) or Android Bionic ELFs (`APS2` packed relocations):
+   ```sh
+   xt-forge re deep-elf target.so --json
    ```
 
-## Guardrails
-- Keep analysis strictly read-only (`guard` read-only mode works out of the box).
-- Treat high-entropy sections paired with minimal clear strings as packed or encrypted until proven otherwise.
+## Guardrails (Sober RE Hardened)
+- Keep analysis strictly read-only (`guard` read-only mode works out of the box, including `/var/lib/flatpak` and `/usr`).
+- **Never misdiagnose `e_shnum == 0` as packed**: When `readelf -S` reports 0 sections, run `xt-forge re deep-elf` (`ghidra.inspect_elf_deep`) to parse `PT_LOAD` and `PT_DYNAMIC` directly.
+- **Android Bionic on glibc ABI traps**: If `is_android_bionic: true` or `has_android_aps2_rela: true`, glibc `ld.so` silently skips `SHT_ANDROID_RELA` (`0x60000002`, `"APS2"` magic) leaving `.init_array` NULL (`rip=0x0`), and Bionic `pthread_mutex_t` is 4 bytes vs glibc's 40 bytes (direct glibc `pthread_mutex_lock` overwrites 36 bytes of adjacent struct fields).
+- **Itanium C++ mangled class names vs filenames**: Strings matching `N<len><ns><len><Class>E` (e.g. `N3RBX17ClientAppSettingsE`) are RTTI typeinfo strings (`RBX::ClientAppSettings`), not config filenames on disk.

@@ -37,6 +37,7 @@ from ..core.re import native as re_native
 from ..core.re import pe as re_pe
 from ..core.re import rtti as re_rtti
 from ..core.re import runtimes as re_runtimes
+from ..core.re import sober_re
 from ..version import xt_home
 
 
@@ -876,6 +877,69 @@ TOOLS: list[dict[str, Any]] = [
             "properties": {},
         },
     },
+    {
+        "name": "inspect_elf_deep",
+        "description": "Inspect sectionless ELFs (e_shnum=0 via PT_LOAD + PT_DYNAMIC without false 'packed' diagnosis) and Android Bionic ELFs (SHT_ANDROID_RELA APS2 packed relocations, safe post-.bss VMA, and 4-byte Bionic pthread_mutex_t ABI warnings).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path to ELF binary (e.g. libloader.so or libroblox.so)."},
+            },
+        },
+    },
+    {
+        "name": "resolve_string_anchors",
+        "description": "Streaming RIP-relative lea string-anchor resolver for 100+ MB stripped ELFs: maps diagnostic strings to string VA, RIP-relative lea instruction sites, enclosing function entry prologue VA, and detects string-xref alias collisions without Ghidra OOM.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path to ELF binary."},
+                "queries": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Exact or substring diagnostic literals to resolve.",
+                },
+                "max_sites_per_string": {"type": "integer", "default": 16},
+            },
+            "required": ["queries"],
+        },
+    },
+    {
+        "name": "slice_disasm_window",
+        "description": "O(1) windowed disassembly (objdump --start-address/--stop-address) around a target virtual address with inline RIP-relative .rodata string resolution and power-of-two MiB constant decoding. Never runs whole-binary disassembly on 100+ MB binaries.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path to binary."},
+                "address": {"type": "string", "description": "Center virtual address in hex (e.g. '0x36085e4')."},
+                "before_bytes": {"type": "integer", "default": 64},
+                "after_bytes": {"type": "integer", "default": 256},
+            },
+            "required": ["address"],
+        },
+    },
+    {
+        "name": "probe_live_process",
+        "description": "Safe live process memory probe: tests process_vm_readv directly (even when /proc/pid/mem is EACCES and ptrace is EPERM), discovers /memfd: (deleted) ELF mappings, and parses smaps RSS to prevent 118 GB sparse-page zero-fill OOM kills.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pid": {"type": "integer", "description": "Target Linux process ID."},
+            },
+            "required": ["pid"],
+        },
+    },
+    {
+        "name": "inspect_rbxm_container",
+        "description": "Inspect Roblox .rbxm/.rbxl binary model containers: parses INST/PROP/SIGN/HASH/SSTR chunks, flags chunks covered by SIGN Ed25519 records vs unsigned Luau Source bytecode, and locates 27-byte tagged Color3 constant triples.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path to .rbxm or .rbxl container."},
+            },
+            "required": ["path"],
+        },
+    },
 ]
 
 
@@ -952,6 +1016,7 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
         sec_mit = re_capa.checksec(bin_path)
         capa_res = re_capa.capa(bin_path)
         ov = re_annotate.overlay_map_for_binary(bin_path)
+        deep_elf = sober_re.inspect_elf_deep(bin_path)
         return {
             "ok": True,
             "path": bin_path,
@@ -960,7 +1025,50 @@ def _dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
             "checksec": sec_mit.get("mitigations", sec_mit),
             "capabilities": capa_res.get("capabilities", []),
             "overlay_annotations": ov.get("count", 0),
+            "deep_elf": {
+                "section_header_stripped_not_packed": deep_elf.get("section_header_stripped_not_packed", False),
+                "is_android_bionic": deep_elf.get("is_android_bionic", False),
+                "has_android_aps2_rela": deep_elf.get("has_android_aps2_rela", False),
+                "safe_post_bss_vaddr": deep_elf.get("safe_post_bss_vaddr"),
+                "warnings": deep_elf.get("warnings", []),
+            } if deep_elf.get("ok") else {},
         }
+
+    if name == "inspect_elf_deep":
+        bin_path = STATE.resolve_binary(args)
+        return sober_re.inspect_elf_deep(bin_path)
+
+    if name == "resolve_string_anchors":
+        bin_path = STATE.resolve_binary(args)
+        raw_q = args.get("queries") or args.get("anchors") or []
+        if isinstance(raw_q, str):
+            raw_q = [raw_q]
+        return sober_re.resolve_string_anchors(
+            bin_path,
+            [str(q) for q in raw_q if str(q).strip()],
+        )
+
+    if name == "slice_disasm_window":
+        bin_path = STATE.resolve_binary(args)
+        addr = str(args.get("address") or STATE.current_function or "0x0").strip()
+        return sober_re.slice_disasm_window(
+            bin_path,
+            addr,
+            before_bytes=int(args.get("before_bytes") if args.get("before_bytes") is not None else 64),
+            after_bytes=int(args.get("after_bytes") if args.get("after_bytes") is not None else 256),
+        )
+
+    if name == "probe_live_process":
+        pid = int(args.get("pid") or 0)
+        if pid <= 0:
+            return {"ok": False, "error": "probe_live_process requires positive integer pid"}
+        return sober_re.probe_live_process(pid)
+
+    if name == "inspect_rbxm_container":
+        p = str(args.get("path") or "").strip()
+        if not p:
+            return {"ok": False, "error": "inspect_rbxm_container requires path"}
+        return sober_re.inspect_rbxm_container(p)
 
     if name in ("decompile_function", "decompile_function_by_name", "decompile_function_by_address", "procedure_pseudo_code"):
         bin_path = STATE.resolve_binary(args)

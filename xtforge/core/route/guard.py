@@ -23,7 +23,7 @@ DEFAULT_ROOTS = [
     # System binaries and libraries: what `re info|sections|symbols|strings`
     # exists to inspect. Reads stay subject to DENY_GLOBS below.
     "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/lib64",
-    "/lib", "/lib64", "/opt",
+    "/usr/local", "/usr/share", "/lib", "/lib64", "/opt", "/var/lib/flatpak", "/app",
     # Termux prefix; skipped entirely when PREFIX is unset.
     "${PREFIX}/bin", "${PREFIX}/sbin", "${PREFIX}/lib", "${PREFIX}/share",
 ]
