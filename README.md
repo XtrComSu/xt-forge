@@ -6,7 +6,7 @@
   <a href="https://xtrcom.xyz">
     <img src="docs/assets/xtforge-icon.png" alt="XT-Forge Logo" width="96" />
   </a>
-  <h1>xt-forge &middot; XT-OSS</h1>
+  <h1>xt-forge</h1>
   <p><strong>Supreme local agent workbench for call-graph context, AST correctness auditing, normalized binary diffing, keyless CVE intel, and sub-1KB MCP routing.</strong></p>
   <p>Engineered in <strong>Rust</strong>, <strong>Go</strong>, and zero-dependency <strong>Python 3.11+</strong> under <strong>XT-OSS</strong> by <a href="https://xtrcom.xyz">XtrComSu</a>.</p>
   <p>
