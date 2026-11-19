@@ -64,7 +64,8 @@ Mounting a 229-tool reverse-engineering MCP server like raw **[REA](https://gith
 | Everyday Problem | What `xt-forge` Gives You | Command / Guide |
 | --- | --- | --- |
 | Bloated MCP catalogs eat 10K–40K+ tokens upfront | `--meta` gateway exposes 4 meta-tools (`1,384 B` Go / `1,007 B` Python) across local tools + external MCPs | `xt-forge --meta` |
-| Massive RE/IDE MCPs (`borer`, `rea`, `craft-anything`) break context limits | Connect once (`mcp connect`), SHA-256 trust-pin, and route stateful stdio calls lazily with 1-call `load_binary` optimization | `xt-forge mcp connect borer` |
+| Massive RE/IDE MCPs (`ghidra`, `borer`, `craft-anything`) break context limits | Connect once (`mcp connect`), SHA-256 trust-pin, and route stateful stdio calls lazily with 1-call `load_binary` optimization | `xt-forge mcp connect ghidra` |
+| 100+ MB stripped ELFs (`libroblox.so`), sectionless binaries (`e_shnum=0`), or Android Bionic `APS2` relocations OOM Ghidra or mislead tools | Streaming RIP-relative `lea` string-anchor resolver (**2.7s** on 120.6 MB), O(1) windowed disassembly, `PT_DYNAMIC` sectionless ELF parser (**5.6ms**), and RSS-budgeted `process_vm_readv` live probe | `xt-forge re deep-elf target.so --json` |
 | Multi-file bug hunts burn 10+ file reads and miss subtle defects | One-call AST correctness auditor flags duplicate joins, boundary `<` vs `<=`, stale caches, and floor-div truncation with full function source | `xt-forge audit . --json` |
 | Re-exports and config dispatch tables hide the real handler | Cross-module active-path tracer resolves `__init__.py` aliases and JSON/TOML/YAML/ENV dispatch keys | `xt-forge trace dispatch_request .` |
 | Comparing two binaries requires manual `objdump` diffing & magic-number math | Normalized per-function instruction diffing, inline `.rodata` string annotation, and GCC/Clang reciprocal division decoding | `xt-forge diff v1.bin v2.bin --json` |
@@ -105,7 +106,7 @@ git clone https://github.com/XtrComSu/xt-forge.git; cd xt-forge; .\install.ps1
 npx --yes github:XtrComSu/xt-forge init
 
 # Or install the npm tarball from GitHub Releases:
-npm install -g https://github.com/XtrComSu/xt-forge/releases/download/v0.4.4-Damascus/xt-forge-0.4.4.tgz
+npm install -g https://github.com/XtrComSu/xt-forge/releases/download/v0.4.5-Damascus/xt-forge-0.4.5.tgz
 
 # Python (3.11+) wheel from GitHub Releases or git:
 uv tool install https://github.com/XtrComSu/xt-forge/releases/download/v0.4.5-Damascus/xt_forge-0.4.5-py3-none-any.whl
@@ -145,7 +146,7 @@ Wire `xt-forge` once using `--meta`. Models discover tools on demand (`xt_discov
   <img src="docs/assets/mcp-rea-craft.gif" alt="Connecting REA and Craft Anything through XT-Forge --meta Gateway" width="100%" />
 </p>
 
-It natively connects, trust-pins, and optimizes **Ghidra MCP** (`xtforge.adapters.ghidra_mcp`, **38 MCP tools** compatible with `LaurieWired/GhidraMCP`, `pyghidra-mcp`, and `rea-agents` with persistent SHA-256 function/variable/prototype/comment overlays and live Ghidra HTTP bridge), **[Borer](https://github.com/imjustprism/borer)** (`borer`, **34 MCP tools + 111 `borer://` resources** for certified decompilation, function emulation, symbolic solve, devirtualization, and unpacking), and **[Craft Anything](https://github.com/storytold/craft-anything)** (`craft-anything-cli mcp`, **300+ tools**) behind **persistent stateful stdio sessions**, **1-call `path` auto-`load_binary` optimization**, **`borer://` shorthand URI expansion**, and unified SHA-256 rug-pull checks — replacing heavy Node.js `rea-agents` setups completely:
+It natively connects, trust-pins, and optimizes **Ghidra MCP** (`xtforge.adapters.ghidra_mcp`, **43 MCP tools** compatible with `LaurieWired/GhidraMCP`, `pyghidra-mcp`, and `rea-agents` — featuring persistent SHA-256 function/variable/prototype/comment overlays, live Ghidra HTTP bridge, `inspect_elf_deep` for `e_shnum=0` & Android Bionic `APS2` ELFs, `resolve_string_anchors` + `slice_disasm_window` for 120+ MB stripped binaries without Ghidra OOM, `probe_live_process` with `smaps` RSS zero-page protection, and `inspect_rbxm_container`), **[Borer](https://github.com/imjustprism/borer)** (`borer`, **34 MCP tools + 111 `borer://` resources** for certified decompilation, function emulation, symbolic solve, devirtualization, and unpacking), and **[Craft Anything](https://github.com/storytold/craft-anything)** (`craft-anything-cli mcp`, **300+ tools**) behind **persistent stateful stdio sessions**, **1-call `path` auto-`load_binary` optimization**, **`borer://` shorthand URI expansion**, and unified SHA-256 rug-pull checks — replacing heavy Node.js `rea-agents` setups completely:
 
 ```sh
 # 1. Connect, injection-scan, and SHA-256 pin Ghidra, Borer, or Craft Anything once
@@ -157,6 +158,8 @@ xt-forge mcp connect craft-anything --json
 xt-forge tool run ghidra rename_function '{"path":"/usr/bin/ls","old_name":"0x5620","new_name":"ls_entrypoint"}'
 xt-forge tool run ghidra set_function_prototype '{"path":"/usr/bin/ls","function_address":"0x5620","prototype":"int ls_entrypoint(int argc, char **argv)"}'
 xt-forge tool run ghidra decompile_function '{"path":"/usr/bin/ls","name":"ls_entrypoint"}'
+xt-forge tool run ghidra inspect_elf_deep '{"path":"/usr/bin/ls"}'
+xt-forge tool run ghidra resolve_string_anchors '{"path":"/usr/bin/ls","queries":["POSIX"]}'
 xt-forge tool run borer query '{"path":"/usr/bin/ls","uri":"capabilities"}'
 
 # 3. Or proxy any server directly with auto-refreshing dynamic toolsets
@@ -233,15 +236,19 @@ xt-forge audit . --json
 xt-forge trace dispatch_request . --json
 xt-forge context . --query "verify_sig" --symbols --token-budget 1200
 
-# Normalized Binary Diffing, Decompilation, Swarm RE & Keyless CVE Intel
+# Normalized Binary Diffing, Decompilation, Stripped 100+ MB ELF Anchors & Keyless CVE Intel
 xt-forge diff bin/calc_v1 bin/calc_v2 --json
 xt-forge re decompile payload.elf --symbol apply_tier_discount --json
+xt-forge re deep-elf payload.so --json
+xt-forge re anchors payload.so --target "bytecode version mismatch" --json
+xt-forge re slice payload.so --start 0x36085e4 --json
 xt-forge swarm map payload.elf --workers 8 --json
 xt-forge intel cve CVE-2024-3094 --json
 xt-forge re checksec payload.elf --json
 
-# Connect External MCPs, Crash-Safe Recovery & Security Scanning
-xt-forge mcp connect rea --json
+# Connect Ghidra + Borer MCPs, Crash-Safe Recovery & Security Scanning
+xt-forge mcp connect ghidra --json
+xt-forge mcp connect borer --json
 xt-forge session recover --json
 xt-forge scan secrets .
 ```

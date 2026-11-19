@@ -595,6 +595,42 @@ TOOLS: list[dict[str, Any]] = [
                                *_opt(a, "symbol", "--symbol"), *_opt(a, "rva", "--rva"),
                                *_opt(a, "engine", "--engine"), *_opt(a, "max_instructions", "--max-instructions")])),
     ),
+    _tool(
+        "re_deep_elf",
+        "Inspect sectionless ELFs (e_shnum=0 via PT_LOAD + PT_DYNAMIC without false 'packed' diagnosis) and Android Bionic ELFs (SHT_ANDROID_RELA APS2 packed relocations, safe post-.bss VMA, and 4B Bionic pthread_mutex_t ABI warnings).",
+        {"path": _TEXT}, ["path"],
+        lambda a: ["re", "deep-elf", _str(a, "path")],
+    ),
+    _tool(
+        "re_anchors",
+        "Streaming RIP-relative lea string-anchor resolver for 100+ MB stripped ELFs: maps diagnostic strings to string VA, lea instruction sites, enclosing function prologue VA, and detects string-xref alias collisions without Ghidra OOM.",
+        {"path": _TEXT, "target": _TEXT}, ["path", "target"],
+        lambda a: ["re", "anchors", _str(a, "path"), "--target", _str(a, "target")],
+    ),
+    _tool(
+        "re_slice",
+        "O(1) windowed disassembly (objdump --start-address/--stop-address) around a target virtual address with inline RIP-relative .rodata string resolution and power-of-two MiB constant decoding.",
+        {"path": _TEXT, "address": _TEXT}, ["path", "address"],
+        lambda a: ["re", "slice", _str(a, "path"), "--start", _str(a, "address")],
+    ),
+    _tool(
+        "re_live_probe",
+        "Safe live process memory probe: tests process_vm_readv directly (even when /proc/pid/mem is EACCES and ptrace is EPERM), discovers /memfd: (deleted) ELF mappings, and parses smaps RSS to prevent 118 GB sparse-page zero-fill OOM kills.",
+        {"pid": _INT}, ["pid"],
+        lambda a: ["re", "live-probe", str(_str(a, "pid"))],
+    ),
+    _tool(
+        "re_rbxm",
+        "Inspect Roblox .rbxm/.rbxl binary model containers: parses INST/PROP/SIGN/HASH/SSTR chunks, flags chunks covered by SIGN Ed25519 records vs unsigned Luau Source bytecode, and locates 27-byte tagged Color3 constant triples.",
+        {"path": _TEXT}, ["path"],
+        lambda a: ["re", "rbxm", _str(a, "path")],
+    ),
+    _tool(
+        "re_decompile",
+        "Decompile a binary function using the multi-engine Ghidra + Borer + persistent SHA-256 overlay pipeline.",
+        {"path": _TEXT, "symbol": _TEXT}, ["path"],
+        lambda a: ["re", "decompile", _str(a, "path"), *_opt(a, "symbol", "--symbol")],
+    ),
 ]
 
 _TOOL_MAP = {tool["name"]: tool for tool in TOOLS}
