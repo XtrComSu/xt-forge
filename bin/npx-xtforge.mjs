@@ -149,6 +149,7 @@ function cmdInit(argv) {
     join(HOME, ".dsh", "skills"),
     join(HOME, ".config", "opencode", "skills"),
     join(HOME, ".claude", "skills"),
+    join(HOME, ".kimi-code", "skills"),
   ]
   const installedCounts = {}
   for (const dst of skillTargets) {

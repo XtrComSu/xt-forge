@@ -66,7 +66,7 @@ else
   ln -sf "${ROOT}/bin/xtforge" "${LOCAL_BIN}/xtforge"
   ln -sf "${ROOT}/bin/xtforge" "${LOCAL_BIN}/xtf"
   echo "[xt-forge] Linked ${LOCAL_BIN}/{xt-forge,xtforge,xtf}"
-  for dst in "${HOME}/.agents/skills" "${HOME}/.dsh/skills" "${HOME}/.config/opencode/skills" "${HOME}/.claude/skills"; do
+  for dst in "${HOME}/.agents/skills" "${HOME}/.dsh/skills" "${HOME}/.config/opencode/skills" "${HOME}/.claude/skills" "${HOME}/.kimi-code/skills"; do
     mkdir -p "${dst}"
     for legacy in XTF-Pulse XTF-Compass XTF-Spark XTF-Shield XTF-Lumen XTF-Gage \
                   XTF-Vise XTF-Trace XTF-Beacon XTF-Anvil XTF-Sliver XTF-Chisel \
