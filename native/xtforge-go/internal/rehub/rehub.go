@@ -361,7 +361,23 @@ func extractAXMLStrings(raw []byte, pat string) []string {
 	return out
 }
 
-// Decompile bridges headless rizin/radare2 or Ghidra analyzeHeadless for
+func findBorerBinary() string {
+	if p, err := exec.LookPath("borer"); err == nil {
+		return p
+	}
+	home, _ := os.UserHomeDir()
+	for _, cand := range []string{
+		filepath.Join(home, ".local", "bin", "borer"),
+		filepath.Join(home, ".cargo", "bin", "borer"),
+	} {
+		if st, err := os.Stat(cand); err == nil && !st.IsDir() {
+			return cand
+		}
+	}
+	return ""
+}
+
+// Decompile bridges Borer, headless rizin/radare2, Ghidra, or annotated objdump for
 // token-bounded pseudocode extraction.
 func Decompile(filePath, symbol, rva, engine string, maxLines int) map[string]any {
 	canon, err := guard.ReadGuard(filePath)
@@ -378,8 +394,11 @@ func Decompile(filePath, symbol, rva, engine string, maxLines int) map[string]an
 	if target == "" {
 		target = "main"
 	}
+	borerBin := findBorerBinary()
 	if engine == "" || engine == "auto" {
-		if _, err := exec.LookPath("rizin"); err == nil {
+		if borerBin != "" {
+			engine = "borer"
+		} else if _, err := exec.LookPath("rizin"); err == nil {
 			engine = "rizin"
 		} else if _, err := exec.LookPath("r2"); err == nil {
 			engine = "r2"
@@ -393,10 +412,48 @@ func Decompile(filePath, symbol, rva, engine string, maxLines int) map[string]an
 				"available":    false,
 				"path":         canon,
 				"target":       target,
-				"install_hint": "install objdump, rizin, or Ghidra analyzeHeadless; fallback: xtforge re cfg " + canon,
+				"install_hint": "install borer, objdump, rizin, or Ghidra analyzeHeadless; fallback: xtforge re cfg " + canon,
 				"error":        "no headless decompiler or objdump backend found on PATH",
 			}
 		}
+	}
+
+	if engine == "borer" && borerBin != "" {
+		out, runErr := exec.Command(borerBin, "decompile", canon, target, "full", "0", strconv.Itoa(maxLines)).CombinedOutput()
+		if runErr == nil && strings.TrimSpace(string(out)) != "" && !strings.HasPrefix(strings.TrimSpace(string(out)), "error:") {
+			var notes []string
+			if _, err := exec.LookPath("objdump"); err == nil {
+				objOut, _ := exec.Command("objdump", "-d", "-M", "intel", "--no-show-raw-insn", "--disassemble="+target, canon).CombinedOutput()
+				if len(objOut) > 0 {
+					strMap := extractRodataStringMap(canon)
+					annLines := annotateObjdumpLines(strings.Split(strings.TrimSpace(string(objOut)), "\n"), strMap)
+					notes = annotateObjdumpReciprocalDivs(annLines)
+				}
+			}
+			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+			truncated := false
+			if len(lines) > maxLines {
+				lines = lines[:maxLines]
+				truncated = true
+			}
+			pseudo := strings.Join(lines, "\n")
+			if len(notes) > 0 {
+				pseudo = "// [math-notes] " + strings.Join(notes, " | ") + "\n" + pseudo
+			}
+			return map[string]any{
+				"ok":         true,
+				"available":  true,
+				"engine":     "borer",
+				"path":       canon,
+				"target":     target,
+				"pseudocode": pseudo,
+				"notes":      notes,
+				"lines":      len(lines),
+				"truncated":  truncated,
+			}
+		}
+		// Fall through to objdump_annotated if symbol name requires objdump lookup
+		engine = "objdump_annotated"
 	}
 
 	if engine == "objdump_annotated" || engine == "objdump" {

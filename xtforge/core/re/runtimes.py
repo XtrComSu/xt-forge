@@ -119,6 +119,20 @@ def inspect_apk(path: str | Path) -> dict[str, Any]:
 
 def decompile(path: str | Path, *, target: str = "main") -> dict[str, Any]:
     canon = guard.read_guard(path)
+    try:
+        from ...adapters.ghidra_mcp import _handle_tool
+        out = _handle_tool("decompile_function", {"path": str(canon), "name": target})
+        if out.get("ok") and out.get("pseudocode"):
+            return {
+                "ok": True,
+                "engine": out.get("engine", "ghidra+borer"),
+                "target": target,
+                "code": out["pseudocode"],
+                "rodata_strings": out.get("rodata_strings", {}),
+                "math_notes": out.get("math_notes", []),
+            }
+    except Exception:
+        pass
     rz = shutil.which("rizin") or shutil.which("r2")
     if rz:
         res = subprocess.run(
@@ -133,7 +147,7 @@ def decompile(path: str | Path, *, target: str = "main") -> dict[str, Any]:
                              capture_output=True, text=True, timeout=20)
         if res.returncode == 0 and res.stdout.strip():
             return {"ok": True, "engine": "objdump", "target": target, "code": res.stdout}
-    return {"ok": False, "err": "no supported decompiler/disassembler found (rizin/r2/objdump)"}
+    return {"ok": False, "err": "no supported decompiler/disassembler found (ghidra/borer/rizin/r2/objdump)"}
 
 
 def trace_binary(path: str | Path, *, confirm: str | None = None) -> dict[str, Any]:

@@ -48,6 +48,11 @@ func TestSplitCommandAndPresetResolution(t *testing.T) {
 	if err != nil || bname != "borer" || len(borerCmd) != 1 || borerCmd[0] != "/tmp/fake/borer" {
 		t.Fatalf("unexpected borer preset: name=%s cmd=%v err=%v", bname, borerCmd, err)
 	}
+
+	gname, ghidraCmd, err := ResolvePresetCommand("ghidra-mcp")
+	if err != nil || gname != "ghidra" || len(ghidraCmd) < 3 || ghidraCmd[len(ghidraCmd)-1] != "xtforge.adapters.ghidra_mcp" {
+		t.Fatalf("unexpected ghidra preset: name=%s cmd=%v err=%v", gname, ghidraCmd, err)
+	}
 }
 
 func TestBorerAutoLoadBinaryAndQueryShorthand(t *testing.T) {

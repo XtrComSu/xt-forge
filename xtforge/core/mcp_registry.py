@@ -28,7 +28,7 @@ EXTERNAL_SERVERS: dict[str, dict[str, Any]] = {
         "description": "229+ tools for native binaries, Electron/JS, .NET, websites, Frida, Ghidra, and Hopper.",
         "command": "rea-agents",
         "args": ["mcp"],
-        "aliases": ["rea", "rea-agents", "re-mcp", "rea_mcp", "hopper", "ghidra", "ida", "reverse"],
+        "aliases": ["rea", "rea-agents", "re-mcp", "rea_mcp", "hopper", "ida", "reverse"],
         "tools": [
             {"name": "open_binary", "description": "Open a local binary, archive, Electron ASAR, or JS file for analysis."},
             {"name": "binary_overview", "description": "Inspect architecture, sections, symbols, and format metadata."},
@@ -64,6 +64,23 @@ EXTERNAL_SERVERS: dict[str, dict[str, Any]] = {
             {"name": "query", "description": "Read any borer:// resource (borer://triage, borer://emulate/<addr>, borer://solve/<spec>, borer://taint/<spec>, borer://devirt/<addr>, borer://unpack/<addr>, borer://capabilities, borer://antianalysis, borer://stackstrings)."},
             {"name": "class_layout", "description": "Infer C++ class fields, methods, and vftable layout from member accesses."},
             {"name": "find_crypto_constants", "description": "Find AES, SHA, MD5, CRC-32, ChaCha, Blowfish, FNV, Base64, and hashed API constants."},
+        ],
+    },
+    "ghidra": {
+        "title": "Ghidra — Decompiler, Xref, Symbol Overlay & Headless/GUI Bridge MCP",
+        "description": "38 MCP tools compatible with LaurieWired/GhidraMCP, pyghidra-mcp, and REA binary/ASAR/APK/netcap/JS workflows: decompilation, disassembly, xrefs, call graphs, binary diffing, persistent symbol/variable/prototype/comment overlays, and live Ghidra HTTP bridge.",
+        "command": sys.executable,
+        "args": ["-m", "xtforge.adapters.ghidra_mcp"],
+        "aliases": ["ghidra", "ghidra-mcp", "ghidramcp", "pyghidra", "pyghidra-mcp", "ghidra_mcp", "decompile"],
+        "tools": [
+            {"name": "decompile_function", "description": "Decompile a function by name or address into annotated C pseudocode with persistent overlay rewrites."},
+            {"name": "disassemble_function", "description": "Disassemble a function by name or address with comments and symbol overlay."},
+            {"name": "binary_overview", "description": "Inspect architecture, format, security mitigations, function/import/export/string counts, and active engines."},
+            {"name": "rename_function", "description": "Persistently rename a function in the SQLite overlay DB (and live Ghidra bridge when connected)."},
+            {"name": "rename_variable", "description": "Persistently rename a local variable or parameter in decompiled pseudocode."},
+            {"name": "set_function_prototype", "description": "Persistently set a C function prototype signature for decompilation."},
+            {"name": "set_decompiler_comment", "description": "Set a persistent decompiler comment at an address or function."},
+            {"name": "xrefs_to", "description": "List cross-references targeting a function or address."},
         ],
     },
     "cad3d": {
@@ -130,6 +147,8 @@ def canonical_upstream_name(name: str) -> str:
         return "craft-anything"
     if low in ("borer", "borer-mcp", "borer-cli", "borer_mcp"):
         return "borer"
+    if low in ("ghidra", "ghidra-mcp", "ghidramcp", "pyghidra", "pyghidra-mcp", "ghidra_mcp"):
+        return "ghidra"
     return name.strip()
 
 
@@ -234,10 +253,11 @@ def resolve_upstream_cmd(server_name: str, explicit_cmd: str | None = None) -> t
         for c in cands:
             if c.is_file():
                 return canon, [str(c), "mcp"], None
-        npx = shutil.which("npx") or shutil.which("npx.cmd")
-        if npx:
-            return canon, [npx, "-y", "rea-agents@latest", "mcp"], None
-        return canon, None, "rea executable not found (set REA_CMD or install rea-agents)"
+        if os.environ.get("XT_REA_NPX") == "1":
+            npx = shutil.which("npx") or shutil.which("npx.cmd")
+            if npx:
+                return canon, [npx, "-y", "rea-agents@latest", "mcp"], None
+        return canon, [sys.executable, "-m", "xtforge.adapters.ghidra_mcp"], None
 
     if canon == "craft-anything":
         def _craft_flags(base: list[str]) -> list[str]:
@@ -290,6 +310,19 @@ def resolve_upstream_cmd(server_name: str, explicit_cmd: str | None = None) -> t
                 return canon, _borer_flags([str(cand)]), None
         return canon, None, "borer executable not found (set BORER_CMD or install imjustprism/borer)"
 
+    if canon == "ghidra":
+        env_cmd = os.environ.get("GHIDRA_MCP_CMD", "").strip()
+        if env_cmd:
+            parts = split_cmd(env_cmd)
+            if os.environ.get("GHIDRA_MCP_ARGS", "").strip():
+                parts.extend(split_cmd(os.environ["GHIDRA_MCP_ARGS"]))
+            return canon, parts, None
+        for exe in ("ghidra-mcp", "pyghidra-mcp"):
+            found = shutil.which(exe)
+            if found:
+                return canon, [found], None
+        return canon, [sys.executable, "-m", "xtforge.adapters.ghidra_mcp"], None
+
     info = EXTERNAL_SERVERS.get(canon)
     if not info:
         for s_name, s_info in EXTERNAL_SERVERS.items():
@@ -319,7 +352,7 @@ def known_upstreams() -> list[str]:
     if cache_dir.is_dir():
         for p in sorted(cache_dir.glob("mcp-catalog-*.json")):
             _add(p.name[len("mcp-catalog-"):-len(".json")])
-    for preset in ("rea", "craft-anything", "borer"):
+    for preset in ("rea", "craft-anything", "borer", "ghidra"):
         _, argv, err = resolve_upstream_cmd(preset)
         if not err and argv and Path(argv[0]).name not in ("npx", "npx.cmd"):
             _add(preset)

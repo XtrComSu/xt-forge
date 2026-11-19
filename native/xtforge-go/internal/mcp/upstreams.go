@@ -122,7 +122,7 @@ func LoadCachedCatalog(server string) []ToolDef {
 	return c.Tools
 }
 
-// CanonicalUpstreamName normalizes common aliases for REA, Craft Anything, and Borer.
+// CanonicalUpstreamName normalizes common aliases for REA, Craft Anything, Borer, and Ghidra.
 func CanonicalUpstreamName(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "rea", "rea-agents", "re-mcp", "rea_mcp":
@@ -131,6 +131,8 @@ func CanonicalUpstreamName(name string) string {
 		return "craft-anything"
 	case "borer", "borer-mcp", "borer-cli", "borer_mcp":
 		return "borer"
+	case "ghidra", "ghidra-mcp", "ghidramcp", "pyghidra", "pyghidra-mcp", "ghidra_mcp":
+		return "ghidra"
 	default:
 		return strings.TrimSpace(name)
 	}
@@ -232,6 +234,11 @@ func ResolvePresetCommand(name string) (string, []string, error) {
 	home := homeDir()
 	switch canon {
 	case "rea":
+		if os.Getenv("XT_REPLACE_REA") == "1" {
+			if py := firstExecutable("python3", "python"); py != "" {
+				return canon, []string{py, "-m", "xtforge.adapters.ghidra_mcp"}, nil
+			}
+		}
 		if raw := strings.TrimSpace(os.Getenv("REA_CMD")); raw != "" {
 			parts := SplitCommand(raw)
 			if len(parts) > 0 {
@@ -261,8 +268,13 @@ func ResolvePresetCommand(name string) (string, []string, error) {
 				return canon, []string{cand, "mcp"}, nil
 			}
 		}
-		if npx := firstExecutable("npx", "npx.cmd"); npx != "" {
-			return canon, []string{npx, "-y", "rea-agents@latest", "mcp"}, nil
+		if os.Getenv("XT_REA_NPX") == "1" {
+			if npx := firstExecutable("npx", "npx.cmd"); npx != "" {
+				return canon, []string{npx, "-y", "rea-agents@latest", "mcp"}, nil
+			}
+		}
+		if py := firstExecutable("python3", "python"); py != "" {
+			return canon, []string{py, "-m", "xtforge.adapters.ghidra_mcp"}, nil
 		}
 		return canon, nil, fmt.Errorf("rea executable not found (set REA_CMD or install rea-agents)")
 
@@ -342,13 +354,31 @@ func ResolvePresetCommand(name string) (string, []string, error) {
 			}
 		}
 		return canon, nil, fmt.Errorf("borer executable not found (set BORER_CMD or install imjustprism/borer)")
+
+	case "ghidra":
+		if raw := strings.TrimSpace(os.Getenv("GHIDRA_MCP_CMD")); raw != "" {
+			parts := SplitCommand(raw)
+			if len(parts) > 0 {
+				if extra := strings.TrimSpace(os.Getenv("GHIDRA_MCP_ARGS")); extra != "" {
+					parts = append(parts, SplitCommand(extra)...)
+				}
+				return canon, parts, nil
+			}
+		}
+		if p := firstExecutable("ghidra-mcp", "pyghidra-mcp"); p != "" {
+			return canon, []string{p}, nil
+		}
+		if py := firstExecutable("python3", "python"); py != "" {
+			return canon, []string{py, "-m", "xtforge.adapters.ghidra_mcp"}, nil
+		}
+		return canon, nil, fmt.Errorf("ghidra-mcp or python3 not found (set GHIDRA_MCP_CMD)")
 	}
 
 	return canon, nil, fmt.Errorf("unknown MCP server '%s' (pass --cmd or configure %s)", name, UpstreamsPath())
 }
 
 // KnownUpstreams returns every upstream server configured in $XT_HOME/mcp_upstreams.json,
-// XT_MCP_UPSTREAMS, cached catalogs, or detected locally (rea / craft-anything / borer).
+// XT_MCP_UPSTREAMS, cached catalogs, or detected locally (rea / craft-anything / borer / ghidra).
 func KnownUpstreams() []string {
 	seen := map[string]bool{}
 	var order []string
@@ -378,8 +408,8 @@ func KnownUpstreams() []string {
 			}
 		}
 	}
-	// Also include locally installed rea / craft-anything / borer binaries without running npx downloads.
-	for _, preset := range []string{"rea", "craft-anything", "borer"} {
+	// Also include locally installed rea / craft-anything / borer / ghidra presets without running npx downloads.
+	for _, preset := range []string{"rea", "craft-anything", "borer", "ghidra"} {
 		if !seen[preset] {
 			if _, argv, err := ResolvePresetCommand(preset); err == nil && len(argv) > 0 {
 				base := filepath.Base(argv[0])
@@ -475,6 +505,30 @@ func StartUpstreamSession(name string, argv []string) (*UpstreamSession, error) 
 			envMap = append(envMap, k+"="+v)
 		}
 		cmd.Env = envMap
+	}
+	for _, a := range argv {
+		if strings.HasPrefix(a, "xtforge.") {
+			envMap := cmd.Env
+			if len(envMap) == 0 {
+				envMap = os.Environ()
+			}
+			if exePath, err := os.Executable(); err == nil {
+				for _, rel := range []string{"..", filepath.Join("..", "..")} {
+					cand := filepath.Clean(filepath.Join(filepath.Dir(exePath), rel))
+					if fileExists(filepath.Join(cand, "xtforge", "__init__.py")) {
+						curPy := os.Getenv("PYTHONPATH")
+						if curPy != "" {
+							envMap = append(envMap, "PYTHONPATH="+cand+string(os.PathListSeparator)+curPy)
+						} else {
+							envMap = append(envMap, "PYTHONPATH="+cand)
+						}
+						cmd.Env = envMap
+						break
+					}
+				}
+			}
+			break
+		}
 	}
 	upIn, err := cmd.StdinPipe()
 	if err != nil {

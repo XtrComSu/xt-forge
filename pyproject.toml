@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "xt-forge"
-version = "0.4.4"
+version = "0.4.5"
 description = "Local agent workbench for call-graph context, offline reverse engineering, CVE intel, and sub-1KB MCP routing."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -1,3 +1,12 @@
+## 0.4.5 - 2026-11-19
+
+### Added
+- **Ghidra MCP & Full REA Replacement (`xt-forge mcp connect ghidra`, `xt-forge --meta`, `xt-forge tool run ghidra`)**:
+  - Added `xtforge.adapters.ghidra_mcp` (`python3 -m xtforge.adapters.ghidra_mcp`), a **38-tool stdio MCP server** compatible with `LaurieWired/GhidraMCP`, `pyghidra-mcp`, and `rea-agents` binary, Electron `.asar`, Android `.apk`, `.har`/`.saz` netcap, and JS/TS bundle workflows.
+  - **Tiered Multi-Engine Execution**: Automatically routes across (1) live Ghidra GUI HTTP bridge (`GHIDRA_MCP_URL`, default `http://127.0.0.1:8080/`), (2) headless Ghidra (`analyzeHeadless` + auto-detected `JAVA_HOME`), and (3) instant `<20 ms` `borer` lifter + `xt-forge` `.rodata` string & reciprocal-division math annotator.
+  - **Persistent Inline Decompiler Overlay (`$XT_HOME/re_overlay.db` + `ghidra-var-overlay.json`)**: `rename_function`, `rename_function_by_address`, `rename_variable`, `rename_data`, `set_function_prototype`, `set_decompiler_comment`, and `set_disassembly_comment` rewrite decompiled C signatures, variable names, call targets, and comments inline and allow subsequent `decompile_function` calls by the newly renamed symbol name.
+  - **Zero-Node.js REA Fallback**: When `rea-agents` is not installed locally (or `XT_REPLACE_REA=1`), `xt-forge` automatically serves `rea` MCP requests through `xtforge.adapters.ghidra_mcp` without falling back to `npx rea-agents@latest`.
+
 ## 0.4.4 - 2026-11-19
 
 ### Added

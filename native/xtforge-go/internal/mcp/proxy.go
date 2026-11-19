@@ -693,6 +693,23 @@ func searchUpstreamCatalogs(pool *UpstreamPool, upstreamFilter, query string, li
 					case "binary_info", "strings", "symbols", "functions", "find_crypto_constants", "entropy":
 						argsHint = fmt.Sprintf(`{"name":%q,"arguments":{"path":"/abs/path/to/bin"}}`, prefixed)
 					}
+				} else if srv == "ghidra" {
+					switch t.Name {
+					case "load_binary", "open_binary", "binary_overview", "list_functions", "list_methods", "list_imports", "list_exports", "list_segments", "list_strings":
+						argsHint = fmt.Sprintf(`{"name":%q,"arguments":{"path":"/abs/path/to/bin"}}`, prefixed)
+					case "decompile_function", "decompile_function_by_name", "procedure_pseudo_code", "disassemble_function", "procedure_disassembly", "get_call_graph":
+						argsHint = fmt.Sprintf(`{"name":%q,"arguments":{"path":"/abs/path/to/bin","name":"main"}}`, prefixed)
+					case "decompile_function_by_address", "get_function_by_address", "xrefs_to", "xrefs_from":
+						argsHint = fmt.Sprintf(`{"name":%q,"arguments":{"path":"/abs/path/to/bin","address":"0x1000"}}`, prefixed)
+					case "rename_function", "rename_function_by_address":
+						argsHint = fmt.Sprintf(`{"name":%q,"arguments":{"path":"/abs/path/to/bin","old_name":"sub_1000","new_name":"parse_header"}}`, prefixed)
+					case "rename_variable":
+						argsHint = fmt.Sprintf(`{"name":%q,"arguments":{"path":"/abs/path/to/bin","function_name":"main","old_name":"v1","new_name":"ctx"}}`, prefixed)
+					case "set_decompiler_comment", "set_disassembly_comment":
+						argsHint = fmt.Sprintf(`{"name":%q,"arguments":{"path":"/abs/path/to/bin","address":"0x1000","comment":"verified boundary check"}}`, prefixed)
+					case "set_function_prototype":
+						argsHint = fmt.Sprintf(`{"name":%q,"arguments":{"path":"/abs/path/to/bin","function_address":"0x1000","prototype":"int parse_header(uint8_t *buf, size_t len)"}}`, prefixed)
+					}
 				}
 				hits = append(hits, hit{
 					score: score,
