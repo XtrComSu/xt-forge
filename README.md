@@ -1,9 +1,5 @@
 <div align="center">
   <a href="https://xtrcom.xyz">
-    <img src="docs/assets/xt-oss-banner.png" alt="XT-OSS • XT-Forge v0.4.3-Damascus Banner" width="100%" />
-  </a>
-  <br />
-  <a href="https://xtrcom.xyz">
     <img src="docs/assets/xtforge-icon.png" alt="XT-Forge Logo" width="96" />
   </a>
   <h1>xt-forge</h1>
@@ -18,6 +14,12 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3B82F6?style=flat-square" alt="MIT License" /></a>
   </p>
 </div>
+
+<p align="center">
+  <a href="https://xtrcom.xyz">
+    <img src="docs/assets/xt-oss-banner.png" alt="XT-Forge v0.4.3-Damascus" width="100%" />
+  </a>
+</p>
 
 <p align="center">
   <img src="docs/assets/overview-showcase.gif" alt="XT-Forge v0.4.3-Damascus XT-OSS Overview Showcase" width="100%" />
