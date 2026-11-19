@@ -1,12 +1,19 @@
 # XT-Forge Field Guide
 
-Welcome to **XT-Forge 0.4.0**. If you use coding agents, reverse engineering utilities, or local CLI automations every day, you already know where things usually break down: your tool catalog silently eats half the context window before you even ask a question, the agent keeps trying the same broken fix four times in a row, or a 900 line trace log gets dumped straight into your prompt.
+Welcome to **XT-Forge 0.4.3-Damascus**. If you use coding agents, reverse engineering utilities, or local CLI automations every day, you already know where things usually break down: your tool catalog silently eats half the context window before you even ask a question, the agent keeps trying the same broken fix four times in a row, or a 900 line trace log gets dumped straight into your prompt.
 
 XT-Forge solves those friction points with one local, zero-dependency toolkit. It ships a pure Python reference core alongside native **Rust** and **Go** engines, so quick lookups finish in milliseconds while heavy MCP proxying, LSP calls, and archive unpacking run concurrently without blocking your shell.
 
 ![XT-Forge Hybrid Rust, Go, and Python Architecture](assets/architecture-rust-go.png)
 
-For a full guided walkthrough covering installation, the `--meta` gateway, call graphs, and verification loops, see [xtforge-overview.mp4](videos/xtforge-overview.mp4).
+<p align="center">
+  <video src="videos/xtforge-overview.mp4" controls autoplay loop muted playsinline width="100%">
+    <img src="assets/xtforge-overview-player.gif" alt="XT-Forge Overview Walkthrough Video" width="100%" />
+  </video>
+</p>
+<p align="center">
+  <img src="assets/xtforge-overview-player.gif" alt="XT-Forge Overview Walkthrough Player" width="100%" />
+</p>
 
 ## 1. Quick Start and Layout
 

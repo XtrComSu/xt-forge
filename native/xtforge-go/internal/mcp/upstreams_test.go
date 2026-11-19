@@ -141,8 +141,11 @@ for line in sys.stdin:
 	}
 	pool := NewUpstreamPool()
 	defer pool.CloseAll()
-	hits := searchUpstreamCatalogs(pool, "craft-anything", "disasm", 5)
+	hits, status := searchUpstreamCatalogs(pool, "craft-anything", "disasm", 5)
 	if len(hits) == 0 || hits[0]["name"] != "craft-anything:native_disasm" {
 		t.Fatalf("expected craft-anything:native_disasm search hit, got %#v", hits)
+	}
+	if status["craft-anything"]["status"] != "ready" {
+		t.Fatalf("expected craft-anything status=ready, got %#v", status)
 	}
 }

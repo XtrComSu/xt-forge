@@ -62,18 +62,48 @@ fn detect_lang(p: &Path) -> Option<&'static str> {
     }
 }
 
-fn open_graph_db(p: &Parsed) -> Result<Connection, String> {
-    let db_path = p
-        .fstr("graph-db")
-        .unwrap_or_else(|| paths::xt_home().join("code_graph.db").to_string_lossy().to_string());
+fn open_graph_db(p: &Parsed, canon_root: &Path) -> Result<Connection, String> {
+    let db_path = p.fstr("graph-db").unwrap_or_else(|| {
+        let mut h = Sha256::new();
+        h.update(canon_root.to_string_lossy().as_bytes());
+        let dig = format!("{:x}", h.finalize());
+        paths::xt_home()
+            .join("code_graphs")
+            .join(format!("{}.db", &dig[..16]))
+            .to_string_lossy()
+            .to_string()
+    });
     if let Some(parent) = Path::new(&db_path).parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
-        .map_err(|e| e.to_string())?;
-    conn.execute_batch(GRAPH_SCHEMA).map_err(|e| e.to_string())?;
-    Ok(conn)
+    let mut last_err = String::new();
+    for attempt in 0..10 {
+        let conn = match Connection::open(&db_path) {
+            Ok(c) => c,
+            Err(e) => {
+                last_err = e.to_string();
+                std::thread::sleep(std::time::Duration::from_millis(25 * (attempt + 1)));
+                continue;
+            }
+        };
+        let _ = conn.busy_timeout(std::time::Duration::from_millis(5000));
+        match conn
+            .execute_batch("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
+            .and_then(|_| conn.execute_batch(GRAPH_SCHEMA))
+        {
+            Ok(()) => return Ok(conn),
+            Err(e) => {
+                let msg = e.to_string();
+                last_err = msg.clone();
+                if msg.contains("locked") || msg.contains("busy") {
+                    std::thread::sleep(std::time::Duration::from_millis(25 * (attempt + 1)));
+                    continue;
+                }
+                return Err(msg);
+            }
+        }
+    }
+    Err(last_err)
 }
 
 fn collect_files(root: &Path, out: &mut Vec<std::path::PathBuf>, cap: usize) {
@@ -229,7 +259,7 @@ fn parse_source(lang: &str, text: &str) -> (Vec<ParsedSym>, Vec<ParsedEdge>) {
 pub fn index_workspace(p: &Parsed, root_raw: &str) -> Result<Value, String> {
     let t0 = Instant::now();
     let canon = guard::read_guard(root_raw).map_err(|d| format!("{}: {}", d.code, d.reason))?;
-    let mut conn = open_graph_db(p)?;
+    let mut conn = open_graph_db(p, &canon)?;
 
     let mut files = Vec::new();
     if canon.is_file() {
@@ -248,10 +278,14 @@ pub fn index_workspace(p: &Parsed, root_raw: &str) -> Result<Value, String> {
     }
 
     let mut seen_paths: HashSet<String> = HashSet::new();
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
     let mut updated_files = 0usize;
     let mut skipped_files = 0usize;
     let mut removed_files = 0usize;
+    let mut changed_paths: Vec<String> = Vec::new();
+    let mut removed_paths: Vec<String> = Vec::new();
     let mut total_syms = 0usize;
     let mut total_edges = 0usize;
 
@@ -270,6 +304,7 @@ pub fn index_workspace(p: &Parsed, root_raw: &str) -> Result<Value, String> {
             skipped_files += 1;
             continue;
         }
+        changed_paths.push(fstr.clone());
         let mtime = std::fs::metadata(f)
             .and_then(|m| m.modified())
             .ok()
@@ -314,6 +349,7 @@ pub fn index_workspace(p: &Parsed, root_raw: &str) -> Result<Value, String> {
             let _ = tx.execute("DELETE FROM edges WHERE file_path=?", params![stale]);
             let _ = tx.execute("DELETE FROM files WHERE path=?", params![stale]);
             removed_files += 1;
+            removed_paths.push(stale.clone());
         }
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -328,6 +364,9 @@ pub fn index_workspace(p: &Parsed, root_raw: &str) -> Result<Value, String> {
         "files_updated": updated_files,
         "files_cached": skipped_files,
         "files_removed": removed_files,
+        "stale_detected": updated_files > 0 || removed_files > 0,
+        "stale_files": changed_paths.into_iter().take(20).collect::<Vec<_>>(),
+        "removed_files": removed_paths.into_iter().take(20).collect::<Vec<_>>(),
         "new_symbols": total_syms,
         "new_edges": total_edges,
         "total_symbols": db_syms,
@@ -337,42 +376,195 @@ pub fn index_workspace(p: &Parsed, root_raw: &str) -> Result<Value, String> {
     }))
 }
 
+fn is_test_path(path_str: &str) -> bool {
+    let low = path_str.to_ascii_lowercase().replace('\\', "/");
+    if low.contains("/tests/") || low.contains("/test/") || low.starts_with("tests/") {
+        return true;
+    }
+    let fname = Path::new(&low)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    fname.starts_with("test_") || fname.ends_with("_test.py") || fname.ends_with("_test.rs") || fname.ends_with("_test.go") || fname.contains(".test.") || fname.contains(".spec.")
+}
+
+fn read_excerpt(file_path: &str, target_line: i64) -> String {
+    let Ok(txt) = std::fs::read_to_string(file_path) else {
+        return String::new();
+    };
+    let lines: Vec<&str> = txt.lines().collect();
+    if lines.is_empty() || target_line <= 0 {
+        return String::new();
+    }
+    let idx = (target_line - 1) as usize;
+    let start = idx.saturating_sub(1);
+    let end = (idx + 2).min(lines.len());
+    (start..end)
+        .map(|i| format!("{}: {}", i + 1, lines[i]))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn dotted_module(root: &str, file_path: &str) -> String {
+    let r = Path::new(root).canonicalize().unwrap_or_else(|_| Path::new(root).to_path_buf());
+    let f = Path::new(file_path);
+    let rel = f.strip_prefix(&r).unwrap_or(f);
+    let s = rel.to_string_lossy().replace('\\', "/");
+    let no_ext = s.strip_suffix(".py").or_else(|| s.strip_suffix(".rs")).or_else(|| s.strip_suffix(".go")).unwrap_or(&s);
+    no_ext.trim_end_matches("/__init__").replace('/', ".")
+}
+
+fn classify_caller_edge(file_path: &str, symbol: &str, def_modules: &[String]) -> (&'static str, &'static str) {
+    let Ok(txt) = std::fs::read_to_string(file_path) else {
+        return ("text_match_call", "medium");
+    };
+    for line in txt.lines() {
+        let t = line.trim();
+        if (t.starts_with("from ") || t.starts_with("import ") || t.starts_with("use ")) && t.contains(symbol) {
+            if def_modules.is_empty() || def_modules.iter().any(|m| !m.is_empty() && t.contains(m)) {
+                return ("import_resolved_call", "high");
+            }
+            return ("import_resolved_call", "high");
+        }
+        if t.starts_with("import ") && def_modules.iter().any(|m| !m.is_empty() && t.contains(m)) {
+            return ("import_resolved_call", "high");
+        }
+    }
+    // Check if caller file itself defines a shadowing local `def <symbol>` without importing.
+    let def_pat_py = format!("def {symbol}(");
+    let def_pat_rs = format!("fn {symbol}(");
+    if txt.contains(&def_pat_py) || txt.contains(&def_pat_rs) {
+        return ("local_same_file_call", "medium");
+    }
+    ("text_match_call", "medium")
+}
+
+fn is_builtin_callee(name: &str) -> bool {
+    matches!(
+        name,
+        "get" | "int" | "str" | "float" | "bool" | "list" | "dict" | "set" | "tuple"
+            | "len" | "append" | "extend" | "items" | "keys" | "values" | "pop" | "update"
+            | "join" | "split" | "strip" | "lstrip" | "rstrip" | "lower" | "upper" | "replace"
+            | "format" | "print" | "range" | "enumerate" | "zip" | "sorted" | "reversed"
+            | "min" | "max" | "sum" | "abs" | "round" | "any" | "all" | "isinstance"
+            | "hasattr" | "getattr" | "setattr" | "Exception" | "ValueError" | "RuntimeError"
+            | "TypeError" | "KeyError" | "Path" | "Decimal" | "ROUND_HALF_UP"
+    )
+}
+
 pub fn query_graph(p: &Parsed, symbol: &str, root_raw: &str, depth: usize) -> Result<Value, String> {
     let t0 = Instant::now();
-    // Ensure workspace is indexed first (incremental, takes ~2ms if unchanged).
-    let _ = index_workspace(p, root_raw)?;
-    let conn = open_graph_db(p)?;
+    let canon = guard::read_guard(root_raw).map_err(|d| format!("{}: {}", d.code, d.reason))?;
+    // Refresh incrementally while capturing pre-query staleness.
+    let idx = index_workspace(p, root_raw)?;
+    let conn = open_graph_db(p, &canon)?;
 
-    let mut defs = Vec::new();
+    // Support module-qualified dotted names like `pkg.mod.func`.
+    let (mod_filter, query_sym) = match symbol.rsplit_once('.') {
+        Some((m, s)) if !m.is_empty() && !s.is_empty() => (Some(m), s),
+        _ => (None, symbol),
+    };
+
+    let mut all_defs = Vec::new();
+    let mut def_modules: Vec<String> = Vec::new();
     {
         let mut stmt = conn
-            .prepare("SELECT file_path, name, kind, line, signature FROM symbols WHERE name LIKE ? LIMIT 25")
+            .prepare("SELECT file_path, name, kind, line, signature FROM symbols WHERE name=? LIMIT 25")
             .map_err(|e| e.to_string())?;
-        let pat = format!("%{symbol}%");
         let rows = stmt
-            .query_map(params![pat], |r| {
-                Ok(json!({
-                    "file": r.get::<_, String>(0)?,
-                    "name": r.get::<_, String>(1)?,
-                    "kind": r.get::<_, String>(2)?,
-                    "line": r.get::<_, i64>(3)?,
-                    "signature": r.get::<_, String>(4)?,
-                }))
+            .query_map(params![query_sym], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
             })
             .map_err(|e| e.to_string())?;
         for r in rows.flatten() {
-            defs.push(r);
+            let is_test = is_test_path(&r.0);
+            let module = dotted_module(root_raw, &r.0);
+            if !is_test {
+                def_modules.push(module.clone());
+            }
+            let excerpt = read_excerpt(&r.0, r.3);
+            all_defs.push(json!({
+                "file": r.0,
+                "name": r.1,
+                "kind": r.2,
+                "line": r.3,
+                "signature": r.4,
+                "module": module,
+                "is_test": is_test,
+                "excerpt": excerpt,
+            }));
+        }
+    }
+    let defs: Vec<Value> = if let Some(mf) = mod_filter {
+        let matched: Vec<Value> = all_defs
+            .iter()
+            .filter(|d| {
+                let m = d["module"].as_str().unwrap_or("");
+                m == mf || m.ends_with(&format!(".{mf}"))
+            })
+            .cloned()
+            .collect();
+        if matched.is_empty() { all_defs } else { matched }
+    } else {
+        all_defs
+    };
+    let mut defs = defs;
+    if defs.is_empty() {
+        let mut stmt = conn
+            .prepare("SELECT file_path, name, kind, line, signature FROM symbols WHERE name LIKE ? LIMIT 25")
+            .map_err(|e| e.to_string())?;
+        let pat = format!("%{query_sym}%");
+        let rows = stmt
+            .query_map(params![pat], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        for r in rows.flatten() {
+            let is_test = is_test_path(&r.0);
+            let excerpt = read_excerpt(&r.0, r.3);
+            defs.push(json!({
+                "file": r.0,
+                "name": r.1,
+                "kind": r.2,
+                "line": r.3,
+                "signature": r.4,
+                "module": dotted_module(root_raw, &r.0),
+                "is_test": is_test,
+                "excerpt": excerpt,
+            }));
         }
     }
 
-    let mut seen = HashSet::new();
-    seen.insert(symbol.to_string());
-    let mut queue = VecDeque::new();
-    queue.push_back((symbol.to_string(), 0usize));
+    let mut seen_up = HashSet::new();
+    seen_up.insert(query_sym.to_string());
+    let mut seen_down = HashSet::new();
+    seen_down.insert(query_sym.to_string());
+    let mut seen_caller_edges: HashSet<(String, String, String, i64)> = HashSet::new();
+    let mut seen_callee_edges: HashSet<(String, String, String, i64)> = HashSet::new();
+
+    let mut caller_q = VecDeque::new();
+    caller_q.push_back((query_sym.to_string(), 0usize));
+    let mut callee_q = VecDeque::new();
+    callee_q.push_back((query_sym.to_string(), 0usize));
+
     let mut callers = Vec::new();
+    let mut production_callers = Vec::new();
+    let mut unresolved_candidates = Vec::new();
     let mut callees = Vec::new();
 
-    while let Some((cur, d)) = queue.pop_front() {
+    while let Some((cur, d)) = caller_q.pop_front() {
         if d >= depth.max(1).min(4) {
             continue;
         }
@@ -386,12 +578,50 @@ pub fn query_graph(p: &Parsed, symbol: &str, root_raw: &str, depth: usize) -> Re
                 ))
             }) {
                 for r in rows.flatten() {
-                    callers.push(json!({"caller": r.0, "target": cur, "rel": r.1, "file": r.2, "line": r.3, "hop": d + 1}));
-                    if seen.insert(r.0.clone()) && d + 1 < depth {
-                        queue.push_back((r.0, d + 1));
+                    if !seen_caller_edges.insert((r.0.clone(), cur.clone(), r.2.clone(), r.3)) {
+                        continue;
+                    }
+                    let is_test = is_test_path(&r.2);
+                    let (how, conf) = classify_caller_edge(&r.2, &cur, &def_modules);
+                    let excerpt = read_excerpt(&r.2, r.3);
+                    let item = json!({
+                        "caller": r.0,
+                        "target": cur,
+                        "rel": r.1,
+                        "file": r.2,
+                        "line": r.3,
+                        "hop": d + 1,
+                        "is_test": is_test,
+                        "how": how,
+                        "confidence": conf,
+                        "excerpt": excerpt,
+                    });
+                    if is_test || how == "local_same_file_call" {
+                        let reason = if is_test { "test_file_caller" } else { "shadowed_local_definition" };
+                        let mut cand = item;
+                        cand["reason"] = json!(reason);
+                        unresolved_candidates.push(cand);
+                    } else {
+                        production_callers.push(item);
+                    }
+                    callers.push(json!({
+                        "caller": r.0,
+                        "target": cur,
+                        "file": r.2,
+                        "line": r.3,
+                        "is_test": is_test,
+                    }));
+                    if seen_up.insert(r.0.clone()) && d + 1 < depth {
+                        caller_q.push_back((r.0, d + 1));
                     }
                 }
             }
+        }
+    }
+
+    while let Some((cur, d)) = callee_q.pop_front() {
+        if d >= depth.max(1).min(4) {
+            continue;
         }
         if let Ok(mut stmt) = conn.prepare("SELECT dst_name, rel, file_path, line FROM edges WHERE src_name=? LIMIT 40") {
             if let Ok(rows) = stmt.query_map(params![&cur], |r| {
@@ -403,22 +633,61 @@ pub fn query_graph(p: &Parsed, symbol: &str, root_raw: &str, depth: usize) -> Re
                 ))
             }) {
                 for r in rows.flatten() {
+                    if is_builtin_callee(&r.0) {
+                        continue;
+                    }
+                    if !seen_callee_edges.insert((cur.clone(), r.0.clone(), r.2.clone(), r.3)) {
+                        continue;
+                    }
                     callees.push(json!({"caller": cur, "target": r.0, "rel": r.1, "file": r.2, "line": r.3, "hop": d + 1}));
-                    if seen.insert(r.0.clone()) && d + 1 < depth {
-                        queue.push_back((r.0, d + 1));
+                    if seen_down.insert(r.0.clone()) && d + 1 < depth {
+                        callee_q.push_back((r.0, d + 1));
                     }
                 }
             }
         }
     }
 
+    let prod_defs = defs.iter().filter(|d| !d["is_test"].as_bool().unwrap_or(false)).count();
+    let ambiguous = defs.len() > 1;
+    let prod_ambiguous = prod_defs > 1;
+    let ambiguity_reason: Value = if prod_ambiguous {
+        json!("multiple_production_definitions")
+    } else if ambiguous {
+        json!("test_or_shadow_only")
+    } else {
+        Value::Null
+    };
+    let stale_detected = idx["stale_detected"].as_bool().unwrap_or(false);
+    let follow_up = if prod_ambiguous {
+        Some(format!("Multiple non-test definitions of '{query_sym}' found ({prod_defs}); inspect module imports to disambiguate."))
+    } else if production_callers.is_empty() {
+        Some("No import-resolved or text production callers found; consider route_grep if called dynamically or across languages.".to_string())
+    } else {
+        None
+    };
+
     Ok(json!({
         "ok": true,
         "symbol": symbol,
         "depth": depth,
+        "ambiguous": ambiguous,
+        "production_ambiguous": prod_ambiguous,
+        "ambiguity_reason": ambiguity_reason,
+        "evidence_complete": !prod_ambiguous && !production_callers.is_empty() && !stale_detected,
         "definitions": defs,
+        "production_callers": production_callers,
         "callers": callers,
+        "unresolved_candidates": unresolved_candidates,
         "callees": callees,
+        "index_status": {
+            "stale_detected": stale_detected,
+            "stale_files": idx["stale_files"],
+            "files_updated": idx["files_updated"],
+            "files_removed": idx["files_removed"],
+            "refreshed": true,
+        },
+        "follow_up": follow_up,
         "ms": t0.elapsed().as_millis() as i64,
         "engine": "rust",
     }))
@@ -435,13 +704,20 @@ pub fn run(p: &Parsed) -> Option<i32> {
                 Err(e) => Some(util::fail(p.json, &e, 1)),
             }
         }
-        "graph" => {
-            let Some(sym) = p.pos(0) else {
-                return Some(util::fail(p.json, "code graph requires <symbol>", 2));
+        "graph" | "callers" => {
+            let sym_opt = p.fstr("symbol").or_else(|| p.pos(0).map(String::from));
+            let Some(sym) = sym_opt.filter(|s| !s.is_empty()) else {
+                return Some(util::fail(
+                    p.json,
+                    "code graph requires <symbol> (e.g. xtforge code graph MyFunc . --depth 2)",
+                    2,
+                ));
             };
-            let root = p.fstr("path").or_else(|| p.pos(1).map(String::from)).unwrap_or_else(|| ".".into());
+            let root = p.fstr("path")
+                .or_else(|| if p.fstr("symbol").is_some() { p.pos(0).map(String::from) } else { p.pos(1).map(String::from) })
+                .unwrap_or_else(|| ".".into());
             let depth = p.fint("depth", 2) as usize;
-            match query_graph(p, sym, &root, depth) {
+            match query_graph(p, &sym, &root, depth) {
                 Ok(val) => Some(util::out(p, &val, None)),
                 Err(e) => Some(util::fail(p.json, &e, 1)),
             }

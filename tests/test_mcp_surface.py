@@ -40,10 +40,12 @@ PINNED: dict[str, list[str]] = {
               "build_lint"],
     "ops": ["version", "doctor", "tools_status", "calibrate", "slash",
             "ascii"],
-    "re": ["re_inspect", "re_cfg"],
+    "code": ["code_index", "code_graph", "code_callers", "code_audit",
+             "code_trace", "code_refs"],
+    "re": ["re_diff", "re_inspect", "re_cfg"],
 }
 
-TOOL_CAP = 50
+TOOL_CAP = 57
 
 
 def load_tools() -> list[dict]:

@@ -52,6 +52,8 @@ def cmd_re(args):
         else:
             ann_subverb = "list"
             path = args.path or args.value
+    elif verb == "diff":
+        path = args.value or args.path
 
     if not path:
         return _out(args, {"ok": False, "error": "re needs a path"},

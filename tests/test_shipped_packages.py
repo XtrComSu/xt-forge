@@ -140,7 +140,7 @@ class TestShippedPackages(unittest.TestCase):
             self.assertEqual(doc.returncode, 0, doc.stderr)
             sk = subprocess.run([bpath, "skills", "list", "--json"], env=self.env, text=True, capture_output=True, timeout=15)
             self.assertEqual(sk.returncode, 0, sk.stderr)
-            self.assertEqual(json.loads(sk.stdout)["count"], 18)
+            self.assertEqual(json.loads(sk.stdout)["count"], 24)
 
             init_r, list_r = _mcp_handshake([bpath, "mcp", "serve", "--meta"], self.env)
             self.assertIn("xt-forge", init_r["result"]["serverInfo"]["name"])

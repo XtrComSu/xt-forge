@@ -150,9 +150,41 @@ def _regex_symbols(text: str, language: str) -> list[dict[str, Any]]:
     return out
 
 
+_SKIP_DIRS = {
+    ".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv",
+    "target", "dist", "build", "artifacts", ".pytest_cache", ".mypy_cache",
+}
+
+
+def _iter_code_files(base: Path, limit: int = 80) -> list[Path]:
+    out: list[Path] = []
+    for p in sorted(base.rglob("*")):
+        if any(part in _SKIP_DIRS or part.startswith(".") for part in p.relative_to(base).parts[:-1]):
+            continue
+        if p.is_file() and detect(p) != "text":
+            out.append(p)
+            if len(out) >= limit:
+                break
+    return out
+
+
 def symbols(path: str | Path) -> dict[str, Any]:
-    """Top-level and nested definitions in one file."""
+    """Top-level and nested definitions in one file or a directory."""
     p = Path(path)
+    if p.is_dir():
+        agg: list[dict[str, Any]] = []
+        files = _iter_code_files(p, limit=40)
+        for fp in files:
+            sub = symbols(fp)
+            rel = str(fp)
+            try:
+                rel = str(fp.relative_to(p))
+            except ValueError:
+                pass
+            for s in sub.get("symbols", []):
+                agg.append({**s, "file": rel})
+        return {"path": str(p), "language": "multi", "method": "dir",
+                "files_scanned": len(files), "symbols": agg, "count": len(agg)}
     text, err = _read(p)
     if err:
         return {"path": str(p), "language": detect(p), "method": "none",
@@ -187,8 +219,26 @@ def _generic_symbols(text: str) -> list[dict[str, Any]]:
 
 
 def outline(path: str | Path) -> dict[str, Any]:
-    """Symbol tree for one file, nested by line range (Python) or flat."""
-    info = symbols(path)
+    """Symbol tree for one file or a directory."""
+    p = Path(path)
+    if p.is_dir():
+        files = _iter_code_files(p, limit=40)
+        tree: list[dict[str, Any]] = []
+        total_syms = 0
+        for fp in files:
+            sub = outline(fp)
+            rel = str(fp)
+            try:
+                rel = str(fp.relative_to(p))
+            except ValueError:
+                pass
+            sub_tree = sub.get("tree", [])
+            if sub_tree:
+                total_syms += len(sub.get("symbols", []))
+                tree.append({"name": rel, "kind": "file", "line": 1, "children": sub_tree})
+        return {"path": str(p), "language": "multi", "method": "dir",
+                "files_scanned": len(files), "count": total_syms, "tree": tree}
+    info = symbols(p)
     items = info["symbols"]
     if info["method"] != "ast":
         return {**info, "tree": [{"name": s["name"], "kind": s["kind"],
@@ -217,9 +267,10 @@ def refs(root: str | Path, name: str, limit: int = 50) -> dict[str, Any]:
     scanned = 0
     if base.is_file():
         candidates = [base]
+    elif base.is_dir():
+        candidates = _iter_code_files(base, limit=500)
     else:
-        candidates = [p for p in sorted(base.rglob("*"))
-                      if p.is_file() and detect(p) != "text"]
+        candidates = []
     for path in candidates:
         if len(hits) >= limit:
             break

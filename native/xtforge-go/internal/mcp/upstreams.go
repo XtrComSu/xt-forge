@@ -437,7 +437,7 @@ func StartUpstreamSession(name string, argv []string) (*UpstreamSession, error) 
 	if _, rpcErr := s.callLocked("initialize", map[string]any{
 		"protocolVersion": ProtocolVersion,
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "xtforge-hub", "version": "0.4.2"},
+		"clientInfo":      map[string]any{"name": "xtforge-hub", "version": "0.4.3"},
 	}); rpcErr != nil {
 		s.Close()
 		return nil, fmt.Errorf("initialize %s: %s", s.Name, rpcErr.Message)

@@ -48,7 +48,8 @@ def _env() -> dict[str, str]:
 def _run(argv: list[str], stdin_text: str | None = None,
          timeout: int = DEFAULT_TIMEOUT) -> tuple[str, bool]:
     """Run one CLI command with --json and return (text, is_error)."""
-    cmd = [sys.executable, "-m", "xtforge.cli", *argv, "--json"]
+    tail = argv if "--json" in argv else [*argv, "--json"]
+    cmd = [sys.executable, "-m", "xtforge.cli", *tail]
     try:
         proc = subprocess.run(
             cmd,
@@ -318,7 +319,7 @@ TOOLS: list[dict[str, Any]] = [
          "limit": _INT},
         ["pattern"],
         lambda a: ["route", "grep", a.get("path") or ".",
-                   "--pattern", _str(a, "pattern"),
+                   f"--pattern={_str(a, 'pattern')}",
                    *_opt(a, "glob", "--glob"),
                    *_opt(a, "context", "--context"),
                    *_opt(a, "limit", "--limit")],
@@ -357,10 +358,53 @@ TOOLS: list[dict[str, Any]] = [
     _tool(
         "route_context",
         "Pack a directory into a token-budgeted context packet.",
-        {"path": _TEXT, "token_budget": _INT, "file_limit": _INT}, [],
+        {"path": _TEXT, "query": _TEXT, "symbols": _BOOL, "token_budget": _INT, "file_limit": _INT}, [],
         lambda a: ["route", "context", a.get("path") or ".",
+                   *_opt(a, "query", "--query"),
+                   *_opt(a, "symbols", "--symbols"),
                    *_opt(a, "token_budget", "--token-budget"),
                    *_opt(a, "file_limit", "--file-limit")],
+    ),
+    _tool(
+        "code_index",
+        "Index workspace symbols and call/import edges into code_graph.db.",
+        {"path": _TEXT}, [],
+        lambda a: ["code", "index", a.get("path") or "."],
+    ),
+    _tool(
+        "code_graph",
+        "Query definition, import-resolved callers, excerpts, staleness, and callees for a symbol.",
+        {"symbol": _TEXT, "path": _TEXT, "depth": _INT}, ["symbol"],
+        lambda a: ["code", "graph", f"--symbol={_str(a, 'symbol')}",
+                   "--path", a.get("path") or ".",
+                   *_opt(a, "depth", "--depth")],
+    ),
+    _tool(
+        "code_callers",
+        "Evidence-backed caller lookup returning definition, production callers, excerpts, and ambiguity.",
+        {"symbol": _TEXT, "path": _TEXT, "depth": _INT}, ["symbol"],
+        lambda a: ["code", "callers", f"--symbol={_str(a, 'symbol')}",
+                   "--path", a.get("path") or ".",
+                   *_opt(a, "depth", "--depth")],
+    ),
+    _tool(
+        "code_audit",
+        "Static AST correctness audit across production files (duplicate aggregation, date/range boundary hazards, stale caches, numeric truncation).",
+        {"path": _TEXT, "limit": _INT}, [],
+        lambda a: ["code", "audit", a.get("path") or ".", *_opt(a, "limit", "--limit")],
+    ),
+    _tool(
+        "code_trace",
+        "Trace an entry symbol across module re-exports, same-named handlers, and config-driven dispatch.",
+        {"symbol": _TEXT, "path": _TEXT}, ["symbol"],
+        lambda a: ["code", "trace", f"--symbol={_str(a, 'symbol')}", "--path", a.get("path") or "."],
+    ),
+    _tool(
+        "code_refs",
+        "Find symbol references across a workspace.",
+        {"symbol": _TEXT, "path": _TEXT, "limit": _INT}, ["symbol"],
+        lambda a: ["code", "refs", a.get("path") or ".", f"--name={_str(a, 'symbol')}",
+                   *_opt(a, "limit", "--limit")],
     ),
     _tool(
         "route_errors",
@@ -522,6 +566,12 @@ TOOLS: list[dict[str, Any]] = [
     ),
     # reverse engineering -----------------------------------------------
     _tool(
+        "re_diff",
+        "Compare two binary builds for added/removed/modified functions, instruction diffs, and strings.",
+        {"bin1": _TEXT, "bin2": _TEXT}, ["bin1", "bin2"],
+        lambda a: ["re", "diff", _str(a, "bin1"), _str(a, "bin2")],
+    ),
+    _tool(
         "re_inspect",
         "Inspect binary structures: format headers, sections with entropy, imports, exports, or PE TLS callbacks.",
         {"path": _TEXT, "verb": {"type": "string", "enum": ["info", "sections", "symbols", "pe_info", "pe_sections", "pe_imports", "pe_exports", "pe_tls", "ioc"]}, "limit": _INT},
@@ -588,7 +638,13 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     missing = [key for key in tool["inputSchema"]["required"]
                if arguments.get(key) in (None, "")]
     if missing:
-        raise RpcError(-32602, "missing required argument(s): " + ", ".join(missing))
+        return {
+            "content": [{"type": "text", "text": json.dumps({
+                "ok": False,
+                "error": f"missing required field(s) {', '.join(missing)} for {name}; example: {{\"name\": \"{name}\", \"arguments\": {{{', '.join(f'\"{k}\": \"...\"' for k in missing)}}}}}",
+            })}],
+            "isError": True,
+        }
     try:
         argv = tool["build"](arguments)
         stdin_text = tool["stdin"](arguments) if tool["stdin"] else None
@@ -601,7 +657,7 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
 META_TOOLS = [
     {
         "name": "xt_discover",
-        "description": "Search xt-forge and upstream MCP tools (rea, craft-anything, ...).",
+        "description": "Discover xt-forge tools (code_callers, code_graph, code_audit, code_trace, re_diff, re_cfg, route_context, scan_secrets) and upstream MCP tools.",
         "inputSchema": {
             "type": "object",
             "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}},
@@ -618,7 +674,7 @@ META_TOOLS = [
     },
     {
         "name": "xt_call",
-        "description": "Run xt-forge argv or upstream <server>:<tool> safely with journal recovery.",
+        "description": "Execute xt-forge tool directly: name='code_callers'|'code_graph'|'code_audit'|'code_trace'|'route_context'|'re_diff' with arguments={'symbol':...,'path':'.'} (or argv=['code','audit','.']), or <server>:<tool> with recovery.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -699,38 +755,62 @@ def _handle_meta_call(
         matches = []
         if up_raw in ("", "all", "xt-forge"):
             matches = [
-                {"name": t["name"], "description": t["description"]}
+                {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "params": list(((t.get("inputSchema") or {}).get("properties") or {}).keys()),
+                }
                 for t in TOOLS
                 if not q or q in t["name"].lower() or q in t["description"].lower()
             ][:lim]
         upstream_matches = []
-        if up_raw != "xt-forge":
-            targets = [canonical_upstream_name(up_raw)] if up_raw not in ("", "all") else known_upstreams()
-            for srv in targets:
-                tools = load_cached_catalog(srv)
-                if not tools and (up_raw not in ("", "all") or srv in q or (srv == "craft-anything" and "craft" in q)):
-                    try:
-                        tools = _get_py_upstream(srv).get_tools()
-                    except Exception:
-                        tools = []
-                for t in tools:
-                    hay = f"{srv} {t.get('name', '')} {t.get('description', '')}".lower()
-                    if not q or all(w in hay for w in q.split()):
-                        upstream_matches.append({
-                            "name": f"{srv}:{t.get('name')}",
-                            "upstream": srv,
-                            "tool": t.get("name"),
-                            "description": str(t.get("description", ""))[:140],
-                        })
-                        if len(upstream_matches) >= lim:
-                            break
+        upstream_status: dict[str, Any] = {}
+        all_known = known_upstreams()
+        targets = (
+            [canonical_upstream_name(up_raw)]
+            if up_raw not in ("", "all", "xt-forge")
+            else (all_known if up_raw != "xt-forge" else [])
+        )
+        for srv in all_known:
+            in_scope = srv in targets
+            tools = load_cached_catalog(srv)
+            probe_err = None
+            probed = False
+            if in_scope and (up_raw not in ("", "all") or (not tools and (srv in q or (srv == "craft-anything" and "craft" in q)))):
+                try:
+                    tools = _get_py_upstream(srv).get_tools()
+                    probed = True
+                except Exception as exc:
+                    tools = []
+                    probe_err = str(exc)
+                    probed = True
+            if probe_err is not None:
+                upstream_status[srv] = {"status": "unavailable", "reachable": False, "tools": 0, "error": probe_err}
+            elif tools or probed:
+                upstream_status[srv] = {"status": "ready", "reachable": True, "tools": len(tools)}
+            else:
+                upstream_status[srv] = {"status": "cold_cache", "reachable": None, "tools": 0}
+            if not in_scope:
+                continue
+            for t in tools:
+                hay = f"{srv} {t.get('name', '')} {t.get('description', '')}".lower()
+                if not q or all(w in hay for w in q.split()):
+                    upstream_matches.append({
+                        "name": f"{srv}:{t.get('name')}",
+                        "upstream": srv,
+                        "tool": t.get("name"),
+                        "description": str(t.get("description", ""))[:140],
+                    })
+                    if len(upstream_matches) >= lim:
+                        break
         return {"content": [{"type": "text", "text": json.dumps({
             "ok": True,
             "count": len(matches),
             "total_catalog": len(TOOLS),
             "tools": matches,
             "upstream_matches": upstream_matches[:lim],
-            "known_upstreams": known_upstreams(),
+            "upstream_status": upstream_status,
+            "known_upstreams": all_known,
         })}], "isError": False}
     if name == "xt_schema":
         tname = str(arguments.get("name") or "")
@@ -787,13 +867,16 @@ def _handle_meta_call(
                 return {"content": [{"type": "text", "text": json.dumps(res, ensure_ascii=False)}], "isError": is_err}
             except Exception as exc:
                 return {"content": [{"type": "text", "text": json.dumps({"ok": False, "err": str(exc)})}], "isError": True}
+        argv = [str(x) for x in (arguments.get("argv") or [])]
+        if argv and not call_args:
+            text, is_err = _run(argv)
+            return {"content": [{"type": "text", "text": text}], "isError": is_err}
         if target in _TOOL_MAP:
             return _call_tool(target, call_args)
-        argv = list(arguments.get("argv") or [])
         if not argv and target:
             argv = target.split(".", 1) if "." in target else target.split(" ", 1)
         if argv:
-            text, is_err = _run(_xtforge_cmd() + argv + ["--json"])
+            text, is_err = _run(argv)
             return {"content": [{"type": "text", "text": text}], "isError": is_err}
         return {"content": [{"type": "text", "text": json.dumps({"ok": False, "err": f"unknown tool or empty argv: {target}"})}], "isError": True}
     if name == "xt_batch":

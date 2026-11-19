@@ -1,6 +1,6 @@
 # Agent Self-Install Prompts for xt-forge
 
-Give any coding agent (Claude Code, Codex CLI, OpenCode, DSH, Cursor, Windsurf, or a custom autonomous loop) one of the prompts below so it can install, compile native Rust/Go engines when available, sync all 18 `XTF-*` skills, wire `--meta` MCP, and verify its own setup without manual guidance.
+Give any coding agent (Claude Code, Codex CLI, OpenCode, DSH, Cursor, Windsurf, or a custom autonomous loop) one of the prompts below so it can install, compile native Rust/Go engines when available, sync all 24 `XTF-*` skills, wire `--meta` MCP, and verify its own setup without manual guidance.
 
 ---
 
@@ -15,7 +15,7 @@ Copy and paste this prompt directly to your agent:
 >    - If Node.js is available and package install works, run `npx xt-forge@latest init`; otherwise:
 >    - On **Linux or macOS**: clone `https://github.com/XtrComSu/xt-forge.git` (into `~/.xt-forge-src` if not already inside the repo) and run `./install.sh` (or `curl -fsSL https://raw.githubusercontent.com/XtrComSu/xt-forge/main/install.sh | bash`).
 >    - On **Windows (PowerShell)**: clone `https://github.com/XtrComSu/xt-forge.git` and run `.\install.ps1` (or `irm https://raw.githubusercontent.com/XtrComSu/xt-forge/main/install.ps1 | iex`).
-> 3. Confirm `xt-forge`, `xtf`, and `/xtf` slash commands plus the 18 `XTF-*` skills are installed (ensure `~/.local/bin` or `%USERPROFILE%\.local\bin` is on `PATH`).
+> 3. Confirm `xt-forge`, `xtf`, and `/xtf` slash commands plus the 24 `XTF-*` skills are installed (ensure `~/.local/bin` or `%USERPROFILE%\.local\bin` is on `PATH`).
 > 4. If an MCP client config exists for the active harness (`.mcp.json`, `~/.claude.json`, `~/.config/opencode/opencode.json`, `~/.codex/config.toml`, or `~/.dsh/settings.json`), add or suggest the sub-1KB MCP server entry running `xt-forge --meta` (`0.90 KB` initial schema overhead).
 > 5. Run this verification gate before finishing and report the exact observed outputs:
 >    - `xt-forge version --json`
@@ -27,11 +27,11 @@ Copy and paste this prompt directly to your agent:
 
 ## 2. Minimal MCP-Only Prompt (Fastest Setup, Node.js Required)
 
-> Set up `xt-forge` via `npx` so we get global CLI commands, 18 `XTF-*` skills, `/xtf` slash integration, and the sub-1KB MCP gateway:
+> Set up `xt-forge` via `npx` so we get global CLI commands, 24 `XTF-*` skills, `/xtf` slash integration, and the sub-1KB MCP gateway:
 >
 > 1. Run `npx xt-forge@latest init` (on Windows PowerShell make sure `%USERPROFILE%\.local\bin` is on User `PATH`; on macOS/Linux add `~/.local/bin` to `PATH` if needed).
 > 2. Register `xt-forge` as an MCP server with command `npx` and args `["-y", "xt-forge", "--meta"]` (or command `xt-forge` and args `["--meta"]`).
-> 3. Run `xt-forge version --json` and `xt-forge skills` and confirm all 18 `XTF-*` skills are synced cleanly.
+> 3. Run `xt-forge version --json` and `xt-forge skills` and confirm all 24 `XTF-*` skills are synced cleanly.
 
 ---
 

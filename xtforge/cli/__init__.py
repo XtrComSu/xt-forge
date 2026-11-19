@@ -254,19 +254,20 @@ def _add_tools(sub) -> None:
 
 
 def _add_code(sub) -> None:
-    c = sub.add_parser("code", help="code structure: symbols, outline, refs, syntax, index, graph, lsp")
-    c.add_argument("code_verb", choices=["symbols", "outline", "refs", "syntax", "index", "graph", "lsp"])
+    c = sub.add_parser("code", help="code structure: symbols, outline, refs, syntax, index, graph, callers, audit, trace, lsp")
+    c.add_argument("code_verb", choices=["symbols", "outline", "refs", "syntax", "index", "graph", "callers", "audit", "trace", "lsp"])
     c.add_argument("value", nargs="?", default=None,
-                   help="symbol name for refs/graph, action for lsp, or path for symbols/outline/syntax/index")
+                   help="symbol name for refs/graph/trace, action for lsp, or path for symbols/outline/syntax/index/audit")
     c.add_argument("path", nargs="?", default=None,
                    help="file or directory (default: .)")
     c.add_argument("--name", help="symbol name for refs/graph")
+    c.add_argument("--path", dest="path_flag", help="file or directory override (default: .)")
     c.add_argument("--limit", type=int, default=50)
     c.add_argument("--depth", type=int, default=2, help="graph: BFS depth")
     c.add_argument("--graph-db", dest="graph_db", help="override code_graph.db path")
     c.add_argument("--line", type=int, default=1, help="lsp: 1-based line")
     c.add_argument("--col", type=int, default=1, help="lsp: 1-based column")
-    c.add_argument("--symbol", help="lsp: optional symbol filter")
+    c.add_argument("--symbol", help="symbol name for graph/callers/lsp")
     c.set_defaults(func=cmd_code)
 
 
@@ -793,7 +794,19 @@ def _parse_cli_args(parser: argparse.ArgumentParser, argv: list[str]) -> argpars
             noun = argv[i]
             sub_p = sub_action.choices[noun]
             root_ns = parser.parse_args(prefix)
-            sub_ns = sub_p.parse_intermixed_args(argv[i + 1:])
+            sub_argv: list[str] = []
+            j = i + 1
+            opt_map = getattr(sub_p, "_option_string_actions", {})
+            while j < len(argv):
+                t = argv[j]
+                act = opt_map.get(t)
+                if act is not None and act.nargs != 0 and j + 1 < len(argv) and argv[j + 1].startswith("-"):
+                    sub_argv.append(f"{t}={argv[j + 1]}")
+                    j += 2
+                else:
+                    sub_argv.append(t)
+                    j += 1
+            sub_ns = sub_p.parse_intermixed_args(sub_argv)
             merged = argparse.Namespace(**vars(root_ns))
             merged.noun = noun
             for k, v in vars(sub_ns).items():

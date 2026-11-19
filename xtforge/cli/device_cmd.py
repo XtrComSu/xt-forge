@@ -124,7 +124,7 @@ def cmd_code(args):
     """`xtforge code` — structure extraction (real AST where we can parse)."""
     from ..core.code import parse as codeparse
     verb = args.code_verb
-    path = args.path or (args.value if verb != "refs" else None) or "."
+    path = getattr(args, "path_flag", None) or args.path or (args.value if verb not in ("refs", "graph", "callers", "trace") else None) or "."
     if verb == "symbols":
         info = codeparse.symbols(path)
         human = "\n".join(
@@ -178,21 +178,42 @@ def cmd_code(args):
         info = cg.index_workspace(target_path, db_path=db_ov)
         human = f"indexed {info['files_seen']} files ({info['total_symbols']} symbols, {info['total_edges']} edges) in {info['ms']}ms"
         return _out(args, info, human)
-    if verb == "graph":
+    if verb in ("graph", "callers"):
         from ..core.code import graph as cg
-        sym = args.name or args.value
+        sym = getattr(args, "symbol", None) or args.name or args.value
         if not sym:
-            return _out(args, {"ok": False, "error": "code graph needs <symbol>"},
-                        "error: code graph needs <symbol>", code=2)
+            return _out(args, {"ok": False, "error": "code graph requires <symbol> (e.g. xtforge code graph MyFunc . --depth 2)"},
+                        "error: code graph requires <symbol> (e.g. xtforge code graph MyFunc . --depth 2)", code=2)
         db_ov = Path(args.graph_db) if getattr(args, "graph_db", None) else None
-        info = cg.query_graph(sym, root=args.path or ".", depth=getattr(args, "depth", 2), db_path=db_ov)
-        lines = [f"defs={len(info['definitions'])} callers={len(info['callers'])} callees={len(info['callees'])}"]
+        root_target = getattr(args, "path_flag", None) or args.path or (args.value if (getattr(args, "symbol", None) or args.name) else None) or "."
+        info = cg.query_graph(sym, root=root_target, depth=getattr(args, "depth", 2), db_path=db_ov)
+        lines = [f"defs={len(info['definitions'])} prod_callers={len(info.get('production_callers', info['callers']))} callees={len(info['callees'])}"]
         for d in info["definitions"][:6]:
             lines.append(f"  def {d['file']}:{d['line']} {d['signature']}")
-        for c in info["callers"][:8]:
-            lines.append(f"  <- {c['caller']} ({c['file']}:{c['line']})")
+        for c in info.get("production_callers", info["callers"])[:8]:
+            lines.append(f"  <- {c['caller']} ({c['file']}:{c['line']} [{c.get('how', 'call')}])")
         for c in info["callees"][:8]:
             lines.append(f"  -> {c['target']} ({c['file']}:{c['line']})")
+        return _out(args, info, "\n".join(lines))
+    if verb == "audit":
+        from ..core.code import audit as codeaudit
+        target_path = getattr(args, "path_flag", None) or args.path or args.value or "."
+        info = codeaudit.audit_workspace(target_path, max_findings=int(getattr(args, "limit", 25) or 25))
+        lines = [f"audited {info['production_files']} production file(s); findings={info['finding_count']}"]
+        for f in info["findings"]:
+            lines.append(f"  [{f['severity']}] {f['category']} {f['file']}:{f['line']} ({f['function']}): {f['signal']}")
+        return _out(args, info, "\n".join(lines))
+    if verb == "trace":
+        from ..core.code import trace as codetrace
+        sym = getattr(args, "symbol", None) or args.name or args.value
+        if not sym:
+            return _out(args, {"ok": False, "error": "code trace requires <symbol> (e.g. xtforge code trace dispatch_request .)"},
+                        "error: code trace requires <symbol> (e.g. xtforge code trace dispatch_request .)", code=2)
+        root_target = getattr(args, "path_flag", None) or args.path or (args.value if (getattr(args, "symbol", None) or args.name) else None) or "."
+        info = codetrace.trace_symbol(sym, root_target)
+        lines = [f"trace {sym} found={info['found']} hops={len(info['active_path'])} disputed={len(info['disputed_edges'])}"]
+        for step in info["active_path"]:
+            lines.append(f"  {step.get('kind')}: {step.get('symbol')} ({step.get('file')}:{step.get('line')})")
         return _out(args, info, "\n".join(lines))
     if verb == "lsp":
         from ..core.code import lsp as lspmod

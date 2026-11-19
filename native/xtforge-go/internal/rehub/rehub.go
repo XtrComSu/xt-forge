@@ -8,14 +8,17 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"xtforge-hub/internal/guard"
@@ -382,15 +385,56 @@ func Decompile(filePath, symbol, rva, engine string, maxLines int) map[string]an
 			engine = "r2"
 		} else if _, err := exec.LookPath("analyzeHeadless"); err == nil {
 			engine = "ghidra"
+		} else if _, err := exec.LookPath("objdump"); err == nil {
+			engine = "objdump_annotated"
 		} else {
 			return map[string]any{
 				"ok":           false,
 				"available":    false,
 				"path":         canon,
 				"target":       target,
-				"install_hint": "install rizin (pdc/rz-ghidra) or Ghidra analyzeHeadless; fallback: xtforge re cfg " + canon,
-				"error":        "no headless decompiler backend found on PATH",
+				"install_hint": "install objdump, rizin, or Ghidra analyzeHeadless; fallback: xtforge re cfg " + canon,
+				"error":        "no headless decompiler or objdump backend found on PATH",
 			}
+		}
+	}
+
+	if engine == "objdump_annotated" || engine == "objdump" {
+		args := []string{"-d", "-M", "intel", "--no-show-raw-insn", "--disassemble=" + target, canon}
+		out, runErr := exec.Command("objdump", args...).CombinedOutput()
+		if runErr != nil || !strings.Contains(string(out), "<"+target+">") {
+			out, runErr = exec.Command("objdump", "-d", "--no-show-raw-insn", "--disassemble="+target, canon).CombinedOutput()
+		}
+		if runErr != nil || !strings.Contains(string(out), "<"+target+">") {
+			out, runErr = exec.Command("objdump", "-d", "--disassemble="+target, canon).CombinedOutput()
+		}
+		if runErr != nil || strings.TrimSpace(string(out)) == "" {
+			return map[string]any{
+				"ok":     false,
+				"engine": "objdump_annotated",
+				"path":   canon,
+				"target": target,
+				"error":  fmt.Sprintf("symbol/target '%s' could not be disassembled: %v", target, runErr),
+			}
+		}
+		strMap := extractRodataStringMap(canon)
+		rawLines := annotateObjdumpLines(strings.Split(strings.TrimSpace(string(out)), "\n"), strMap)
+		notes := annotateObjdumpReciprocalDivs(rawLines)
+		truncated := false
+		if len(rawLines) > maxLines {
+			rawLines = rawLines[:maxLines]
+			truncated = true
+		}
+		return map[string]any{
+			"ok":         true,
+			"available":  true,
+			"engine":     "objdump_annotated",
+			"path":       canon,
+			"target":     target,
+			"pseudocode": strings.Join(rawLines, "\n"),
+			"notes":      notes,
+			"lines":      len(rawLines),
+			"truncated":  truncated,
 		}
 	}
 
@@ -514,4 +558,132 @@ func trimLines(s string, max int) string {
 		return strings.Join(lines, "\n")
 	}
 	return strings.Join(lines[:max], "\n") + "\n... [truncated]"
+}
+
+var (
+	reImulConst   = regexp.MustCompile(`\bimul\s+[^#\n]*\b0x([0-9a-fA-F]+)\b`)
+	reShiftConst  = regexp.MustCompile(`\b(?:sar|shr)\s+[^,\n]+,\s*0x([0-9a-fA-F]+)|\b(?:sar|shr)\s+\$?0x([0-9a-fA-F]+)\b`)
+	reRodataLine  = regexp.MustCompile(`^\s*([0-9a-fA-F]+)\s+((?:[0-9a-fA-F]{8}\s+){1,4})`)
+	reAddrComment = regexp.MustCompile(`#\s*(?:0x)?([0-9a-fA-F]+)\b`)
+)
+
+func extractRodataStringMap(canon string) map[uint64]string {
+	outMap := map[uint64]string{}
+	out, err := exec.Command("objdump", "-s", "-j", ".rodata", canon).Output()
+	if err != nil {
+		return outMap
+	}
+	type chunk struct {
+		addr uint64
+		data []byte
+	}
+	var chunks []chunk
+	for _, ln := range strings.Split(string(out), "\n") {
+		m := reRodataLine.FindStringSubmatch(ln)
+		if len(m) < 3 {
+			continue
+		}
+		addr, err := strconv.ParseUint(m[1], 16, 64)
+		if err != nil {
+			continue
+		}
+		var b []byte
+		for _, hx := range strings.Fields(m[2]) {
+			dec, err := hex.DecodeString(hx)
+			if err == nil {
+				b = append(b, dec...)
+			}
+		}
+		chunks = append(chunks, chunk{addr: addr, data: b})
+	}
+	if len(chunks) == 0 {
+		return outMap
+	}
+	base := chunks[0].addr
+	var buf []byte
+	for _, ch := range chunks {
+		if ch.addr > base+uint64(len(buf)) {
+			gap := int(ch.addr - (base + uint64(len(buf))))
+			buf = append(buf, make([]byte, gap)...)
+		}
+		buf = append(buf, ch.data...)
+	}
+	i := 0
+	for i < len(buf) {
+		if buf[i] >= 0x20 && buf[i] <= 0x7e {
+			start := i
+			for i < len(buf) && buf[i] >= 0x20 && buf[i] <= 0x7e {
+				i++
+			}
+			if i < len(buf) && buf[i] == 0 && i-start >= 2 {
+				outMap[base+uint64(start)] = string(buf[start:i])
+			}
+		}
+		i++
+	}
+	return outMap
+}
+
+func annotateObjdumpLines(lines []string, strMap map[uint64]string) []string {
+	var clean []string
+	for _, raw := range lines {
+		trim := strings.TrimSpace(raw)
+		if trim == "" || strings.HasPrefix(trim, "Disassembly of section ") || strings.Contains(trim, ":     file format ") {
+			continue
+		}
+		if m := reAddrComment.FindStringSubmatch(trim); len(m) >= 2 && len(strMap) > 0 {
+			if addr, err := strconv.ParseUint(m[1], 16, 64); err == nil {
+				if s, ok := strMap[addr]; ok {
+					trim = fmt.Sprintf("%s ; str=%q", trim, s)
+				}
+			}
+		}
+		clean = append(clean, trim)
+	}
+	return clean
+}
+
+func annotateObjdumpReciprocalDivs(lines []string) []string {
+	var notes []string
+	seen := map[string]bool{}
+	for i, ln := range lines {
+		ms := reShiftConst.FindStringSubmatch(ln)
+		if len(ms) == 0 {
+			continue
+		}
+		hx := ms[1]
+		if hx == "" {
+			hx = ms[2]
+		}
+		shiftVal, err := strconv.ParseInt(hx, 16, 64)
+		if err != nil || shiftVal < 0 || shiftVal > 16 {
+			continue
+		}
+		start := i - 6
+		if start < 0 {
+			start = 0
+		}
+		for _, prev := range lines[start:i] {
+			mm := reImulConst.FindStringSubmatch(prev)
+			if len(mm) < 2 {
+				continue
+			}
+			mVal, err := strconv.ParseUint(mm[1], 16, 64)
+			if err != nil || mVal == 0 || mVal >= 0x80000000 {
+				continue
+			}
+			ratio := float64(uint64(1)<<uint(32+shiftVal)) / float64(mVal)
+			d := math.Round(ratio)
+			if d >= 2 && math.Abs(ratio-d) < 0.02 {
+				note := fmt.Sprintf("strength-reduced division near '%s': imul 0x%s + shift 0x%x == signed div by %.0f (%.4g%%)",
+					strings.TrimSpace(ln), mm[1], shiftVal, d, 100.0/d)
+				if !seen[note] {
+					seen[note] = true
+					notes = append(notes, note)
+				}
+				break
+			}
+		}
+	}
+	return notes
 }

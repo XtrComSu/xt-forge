@@ -65,7 +65,7 @@ def _search_web(query: str, limit: int = 5) -> list[dict[str, Any]]:
             base = searxng.rstrip("/")
             q_enc = urllib.parse.quote(query)
             url = f"{base}/search?q={q_enc}&format=json&language=auto"
-            req = urllib.request.Request(url, headers={"User-Agent": "xt-forge/0.4.2"})
+            req = urllib.request.Request(url, headers={"User-Agent": "xt-forge/0.4.3"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 out = []

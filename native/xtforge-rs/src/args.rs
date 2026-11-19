@@ -8,6 +8,7 @@ pub struct Parsed {
     pub positionals: Vec<String>,
     pub flags: HashMap<String, Vec<String>>,
     pub json: bool,
+    pub has_help: bool,
 }
 
 const VALUE_FLAGS: &[&str] = &[
@@ -35,9 +36,17 @@ const BOOL_FLAGS: &[&str] = &[
 pub fn parse(argv: &[String]) -> Parsed {
     let mut flags: HashMap<String, Vec<String>> = HashMap::new();
     let mut positionals_raw: Vec<String> = Vec::new();
+    let mut has_help = false;
     let mut i = 0;
     while i < argv.len() {
         let a = &argv[i];
+        if a == "--" {
+            positionals_raw.extend(argv[i + 1..].iter().cloned());
+            break;
+        }
+        if a == "--help" || a == "-h" {
+            has_help = true;
+        }
         if let Some(rest) = a.strip_prefix("--") {
             let (name, inline) = match rest.split_once('=') {
                 Some((n, v)) => (n.to_string(), Some(v.to_string())),
@@ -74,6 +83,7 @@ pub fn parse(argv: &[String]) -> Parsed {
         positionals: it.collect(),
         flags,
         json,
+        has_help,
     }
 }
 

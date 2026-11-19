@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -50,60 +51,70 @@ type CatalogEntry struct {
 func FullCatalog() []CatalogEntry {
 	return []CatalogEntry{
 		// Reverse Engineering
-		{Name: "re_info", Noun: "re", Verb: "info", Category: "re", Description: "Inspect ELF, PE, or Mach-O binary headers, arch, and entry point.", ArgsHint: `{"argv":["info","/path/to/bin"]}`, Tags: []string{"binary", "elf", "pe", "macho"}},
-		{Name: "re_sections", Noun: "re", Verb: "sections", Category: "re", Description: "List binary sections with virtual size, raw size, and Shannon entropy.", ArgsHint: `{"argv":["sections","/path/to/bin"]}`, Tags: []string{"entropy", "sections"}},
-		{Name: "re_symbols", Noun: "re", Verb: "symbols", Category: "re", Description: "List symbols, imports, or exports.", ArgsHint: `{"argv":["symbols","/path/to/bin","--limit","50"]}`, Tags: []string{"symbols", "imports", "exports"}},
-		{Name: "re_strings", Noun: "re", Verb: "strings", Category: "re", Description: "Extract ASCII, stack-constructed, or single-byte XOR strings.", ArgsHint: `{"argv":["strings","/path/to/bin","--xor"]}`, Tags: []string{"strings", "xor", "stack"}},
-		{Name: "re_pack", Noun: "re", Verb: "pack", Category: "re", Description: "Detect packed or encrypted binaries using entropy and string density.", ArgsHint: `{"argv":["pack","/path/to/bin"]}`, Tags: []string{"packer", "entropy"}},
-		{Name: "re_ioc", Noun: "re", Verb: "ioc", Category: "re", Description: "Extract URLs, IPs, domains, hashes, registry keys, and CVEs.", ArgsHint: `{"argv":["ioc","/path/to/bin"]}`, Tags: []string{"ioc", "malware"}},
-		{Name: "re_checksec", Noun: "re", Verb: "checksec", Category: "re", Description: "Inspect exploit mitigations (NX, PIE, Canary, RELRO, ASLR, CFG).", ArgsHint: `{"argv":["checksec","/path/to/bin"]}`, Tags: []string{"checksec", "mitigations"}},
-		{Name: "re_capa", Noun: "re", Verb: "capa", Category: "re", Description: "Detect behavioral capabilities (anti-debug, injection, persistence).", ArgsHint: `{"argv":["capa","/path/to/bin"]}`, Tags: []string{"capa", "behavior"}},
-		{Name: "re_cfg", Noun: "re", Verb: "cfg", Category: "re", Description: "Reconstruct function basic block CFG and cross-references.", ArgsHint: `{"argv":["cfg","/path/to/bin","--symbol","main"]}`, Tags: []string{"cfg", "disasm", "rizin"}},
-		{Name: "re_rtti", Noun: "re", Verb: "rtti", Category: "re", Description: "Extract C++ RTTI classes and vtable pointers.", ArgsHint: `{"argv":["rtti","/path/to/bin"]}`, Tags: []string{"rtti", "cpp", "vtable"}},
-		{Name: "re_diff", Noun: "re", Verb: "diff", Category: "re", Description: "Compare two binaries for added, removed, or modified functions.", ArgsHint: `{"argv":["diff","/bin/v1","/bin/v2"]}`, Tags: []string{"diff", "patch"}},
-		{Name: "re_crash", Noun: "re", Verb: "crash", Category: "re", Description: "Analyze Windows MiniDump or Linux ELF core crash dumps.", ArgsHint: `{"argv":["crash","/path/to/core"]}`, Tags: []string{"crash", "dump", "minidump"}},
-		{Name: "re_hooks", Noun: "re", Verb: "hooks", Category: "re", Description: "Scan disassembly for inline hooks and direct syscall stubs.", ArgsHint: `{"argv":["hooks","/path/to/bin"]}`, Tags: []string{"hooks", "syscalls"}},
-		{Name: "re_patch", Noun: "re", Verb: "patch", Category: "re", Description: "Apply guarded atomic byte patch to a binary copy.", ArgsHint: `{"argv":["patch","/path/to/bin","--offset","0x100","--patch-bytes","9090"]}`, Mutating: true, Tags: []string{"patch", "binary"}},
-		{Name: "re_annotate", Noun: "re", Verb: "annotate", Category: "re", Description: "Read or write persistent per-binary symbol renames, types, and comments.", ArgsHint: `{"argv":["annotate","rename","/path/to/bin","--rva","0x1000","--name","decrypt_cfg"]}`, Mutating: true, Tags: []string{"annotate", "rename", "overlay"}},
-		{Name: "re_decompile", Noun: "re", Verb: "decompile", Category: "re", Description: "Decompile function pseudocode via rizin or headless Ghidra when installed.", ArgsHint: `{"argv":["decompile","/path/to/bin","--symbol","main"]}`, Tags: []string{"decompile", "pseudocode", "ghidra", "rizin"}},
-		{Name: "re_apk", Noun: "re", Verb: "apk", Category: "re", Description: "Inspect Android APK manifest, permissions, components, and native libs.", ArgsHint: `{"argv":["apk","/path/to/app.apk"]}`, Tags: []string{"apk", "android", "jadx"}},
-		{Name: "re_asar", Noun: "re", Verb: "asar", Category: "re", Description: "List or extract Electron ASAR archives and JS source maps.", ArgsHint: `{"argv":["asar","/path/to/app.asar"]}`, Tags: []string{"asar", "electron", "js"}},
-		{Name: "re_netcap", Noun: "re", Verb: "netcap", Category: "re", Description: "Summarize endpoints and masked auth headers from HAR/SAZ captures.", ArgsHint: `{"argv":["netcap","/path/to/capture.har"]}`, Tags: []string{"har", "saz", "network"}},
-		{Name: "re_trace", Noun: "re", Verb: "trace", Category: "re", Description: "Run capability-scoped dynamic tracing via Frida, gdb, or lldb.", ArgsHint: `{"argv":["trace","/path/to/bin","--preset","api_trace"]}`, Mutating: true, Tags: []string{"frida", "trace", "dynamic"}},
+		{Name: "re_info", Noun: "re", Verb: "info", Category: "re", Description: "Inspect ELF, PE, or Mach-O binary headers, arch, and entry point.", ArgsHint: `{"argv":["re","info","/path/to/bin"]}`, Tags: []string{"binary", "elf", "pe", "macho"}},
+		{Name: "re_sections", Noun: "re", Verb: "sections", Category: "re", Description: "List binary sections with virtual size, raw size, and Shannon entropy.", ArgsHint: `{"argv":["re","sections","/path/to/bin"]}`, Tags: []string{"entropy", "sections"}},
+		{Name: "re_symbols", Noun: "re", Verb: "symbols", Category: "re", Description: "List symbols, imports, or exports.", ArgsHint: `{"argv":["re","symbols","/path/to/bin","--limit","50"]}`, Tags: []string{"symbols", "imports", "exports"}},
+		{Name: "re_disasm", Noun: "re", Verb: "disasm", Category: "re", Description: "Disassemble a binary function or section with instruction mnemonic summary.", ArgsHint: `{"argv":["re","disasm","/path/to/bin","--symbol","main"]}`, Tags: []string{"disasm", "disassemble", "assembly", "instructions", "objdump"}},
+		{Name: "re_strings", Noun: "re", Verb: "strings", Category: "re", Description: "Extract ASCII, stack-constructed, or single-byte XOR strings.", ArgsHint: `{"argv":["re","strings","/path/to/bin","--xor"]}`, Tags: []string{"strings", "xor", "stack"}},
+		{Name: "re_pack", Noun: "re", Verb: "pack", Category: "re", Description: "Detect packed or encrypted binaries using entropy and string density.", ArgsHint: `{"argv":["re","pack","/path/to/bin"]}`, Tags: []string{"packer", "entropy"}},
+		{Name: "re_ioc", Noun: "re", Verb: "ioc", Category: "re", Description: "Extract URLs, IPs, domains, hashes, registry keys, and CVEs.", ArgsHint: `{"argv":["re","ioc","/path/to/bin"]}`, Tags: []string{"ioc", "malware"}},
+		{Name: "re_checksec", Noun: "re", Verb: "checksec", Category: "re", Description: "Inspect exploit mitigations (NX, PIE, Canary, RELRO, ASLR, CFG).", ArgsHint: `{"argv":["re","checksec","/path/to/bin"]}`, Tags: []string{"checksec", "mitigations"}},
+		{Name: "re_capa", Noun: "re", Verb: "capa", Category: "re", Description: "Detect behavioral capabilities (anti-debug, injection, persistence).", ArgsHint: `{"argv":["re","capa","/path/to/bin"]}`, Tags: []string{"capa", "behavior"}},
+		{Name: "re_cfg", Noun: "re", Verb: "cfg", Category: "re", Description: "Reconstruct function basic block CFG and cross-references.", ArgsHint: `{"argv":["re","cfg","/path/to/bin","--symbol","main"]}`, Tags: []string{"cfg", "disasm", "rizin"}},
+		{Name: "re_rtti", Noun: "re", Verb: "rtti", Category: "re", Description: "Extract C++ RTTI classes and vtable pointers.", ArgsHint: `{"argv":["re","rtti","/path/to/bin"]}`, Tags: []string{"rtti", "cpp", "vtable"}},
+		{Name: "re_diff", Noun: "re", Verb: "diff", Category: "re", Description: "Compare two binaries for modified functions, normalized disassembly instruction diffs, strength-reduced division/constant notes, and strings diffs.", ArgsHint: `{"argv":["re","diff","/bin/v1","/bin/v2"]}`, Tags: []string{"diff", "patch", "binary", "regression", "disasm"}},
+		{Name: "re_crash", Noun: "re", Verb: "crash", Category: "re", Description: "Analyze Windows MiniDump or Linux ELF core crash dumps.", ArgsHint: `{"argv":["re","crash","/path/to/core"]}`, Tags: []string{"crash", "dump", "minidump"}},
+		{Name: "re_hooks", Noun: "re", Verb: "hooks", Category: "re", Description: "Scan disassembly for inline hooks and direct syscall stubs.", ArgsHint: `{"argv":["re","hooks","/path/to/bin"]}`, Tags: []string{"hooks", "syscalls"}},
+		{Name: "re_patch", Noun: "re", Verb: "patch", Category: "re", Description: "Apply guarded atomic byte patch to a binary copy.", ArgsHint: `{"argv":["re","patch","/path/to/bin","--offset","0x100","--patch-bytes","9090"]}`, Mutating: true, Tags: []string{"patch", "binary"}},
+		{Name: "re_annotate", Noun: "re", Verb: "annotate", Category: "re", Description: "Read or write persistent per-binary symbol renames, types, and comments.", ArgsHint: `{"argv":["re","annotate","rename","/path/to/bin","--rva","0x1000","--name","decrypt_cfg"]}`, Mutating: true, Tags: []string{"annotate", "rename", "overlay"}},
+		{Name: "re_decompile", Noun: "re", Verb: "decompile", Category: "re", Description: "Decompile function pseudocode via rizin/Ghidra or annotated objdump disassembly fallback with reciprocal constant notes.", ArgsHint: `{"argv":["re","decompile","/path/to/bin","--symbol","main"]}`, Tags: []string{"decompile", "pseudocode", "ghidra", "rizin", "disasm"}},
+		{Name: "re_apk", Noun: "re", Verb: "apk", Category: "re", Description: "Inspect Android APK manifest, permissions, components, and native libs.", ArgsHint: `{"argv":["re","apk","/path/to/app.apk"]}`, Tags: []string{"apk", "android", "jadx"}},
+		{Name: "re_asar", Noun: "re", Verb: "asar", Category: "re", Description: "List or extract Electron ASAR archives and JS source maps.", ArgsHint: `{"argv":["re","asar","/path/to/app.asar"]}`, Tags: []string{"asar", "electron", "js"}},
+		{Name: "re_netcap", Noun: "re", Verb: "netcap", Category: "re", Description: "Summarize endpoints and masked auth headers from HAR/SAZ captures.", ArgsHint: `{"argv":["re","netcap","/path/to/capture.har"]}`, Tags: []string{"har", "saz", "network"}},
+		{Name: "re_trace", Noun: "re", Verb: "trace", Category: "re", Description: "Run capability-scoped dynamic tracing via Frida, gdb, or lldb.", ArgsHint: `{"argv":["re","trace","/path/to/bin","--preset","api_trace"]}`, Mutating: true, Tags: []string{"frida", "trace", "dynamic"}},
 
 		// Code Intelligence & LSP
-		{Name: "code_symbols", Noun: "code", Verb: "symbols", Category: "code", Description: "Extract symbols and signatures from source files.", ArgsHint: `{"argv":["symbols","/path/to/file.py"]}`, Tags: []string{"ast", "symbols"}},
-		{Name: "code_refs", Noun: "code", Verb: "refs", Category: "code", Description: "Find symbol references across a workspace.", ArgsHint: `{"argv":["refs","MyFunc","."]}`, Tags: []string{"refs", "callers"}},
-		{Name: "code_index", Noun: "code", Verb: "index", Category: "code", Description: "Index workspace symbols and call/import edges into code_graph.db.", ArgsHint: `{"argv":["index","."]}`, Mutating: true, Tags: []string{"graph", "index"}},
-		{Name: "code_graph", Noun: "code", Verb: "graph", Category: "code", Description: "Query callers, callees, and imports for a symbol up to depth N.", ArgsHint: `{"argv":["graph","Store",".","--depth","2"]}`, Tags: []string{"graph", "callgraph"}},
-		{Name: "code_lsp", Noun: "code", Verb: "lsp", Category: "code", Description: "Query on-demand LSP servers for definition, references, hover, or diagnostics.", ArgsHint: `{"argv":["lsp","diag","main.go"]}`, Tags: []string{"lsp", "serena", "diagnostics"}},
+		{Name: "code_symbols", Noun: "code", Verb: "symbols", Category: "code", Description: "Extract AST symbols and signatures from a source file or directory.", ArgsHint: `{"argv":["code","symbols","."]}`, Tags: []string{"ast", "symbols", "outline"}},
+		{Name: "code_refs", Noun: "code", Verb: "refs", Category: "code", Description: "Text regex references across a workspace (prefer code_callers or code_graph for import-resolved callers).", ArgsHint: `{"argv":["code","refs","MyFunc","."]}`, Tags: []string{"refs", "grep"}},
+		{Name: "code_index", Noun: "code", Verb: "index", Category: "code", Description: "Index workspace symbols and call/import edges into code_graph.db.", ArgsHint: `{"argv":["code","index","."]}`, Mutating: true, Tags: []string{"graph", "index"}},
+		{Name: "code_graph", Noun: "code", Verb: "graph", Category: "code", Description: "Query definition, import-resolved production callers, excerpts, staleness, and callees for a symbol.", ArgsHint: `{"argv":["code","graph","MyFunc",".","--depth","2"]}`, Tags: []string{"graph", "callgraph", "callers", "definition"}},
+		{Name: "code_callers", Noun: "code", Verb: "callers", Category: "code", Description: "Evidence-backed caller lookup returning definition, import-resolved production callers, excerpts, and ambiguity.", ArgsHint: `{"argv":["code","callers","MyFunc",".","--depth","2"]}`, Tags: []string{"callers", "graph", "evidence", "usage"}},
+		{Name: "code_audit", Noun: "code", Verb: "audit", Category: "code", Description: "Fast AST correctness audit across source files (duplicate aggregation, date/range boundary bugs, stale cache, truncation, mutable defaults).", ArgsHint: `{"argv":["code","audit","."]}`, Tags: []string{"audit", "bugs", "defects", "correctness", "static", "review", "issues"}},
+		{Name: "code_trace", Noun: "code", Verb: "trace", Category: "code", Description: "Trace an entry symbol across imports, package __init__ re-exports, shadowed handlers, and runtime config dispatch.", ArgsHint: `{"argv":["code","trace","dispatch_request","."]}`, Tags: []string{"trace", "reexport", "config", "dispatch", "handler", "flow", "routing"}},
+		{Name: "code_lsp", Noun: "code", Verb: "lsp", Category: "code", Description: "Query on-demand LSP servers for definition, references, hover, or diagnostics.", ArgsHint: `{"argv":["code","lsp","diag","main.go"]}`, Tags: []string{"lsp", "serena", "diagnostics"}},
 
 		// Memory, Knowledge & Recall
-		{Name: "mem_search", Noun: "mem", Verb: "search", Category: "memory", Description: "BM25 + hybrid search across durable memory.", ArgsHint: `{"argv":["search","auth bug","--k","5"]}`, Tags: []string{"memory", "search"}},
-		{Name: "mem_put", Noun: "mem", Verb: "put", Category: "memory", Description: "Store a durable memory record (including failed_attempt or anti_pattern).", ArgsHint: `{"argv":["put","--kind","fact","--title","...","--body","..."]}`, Mutating: true, Tags: []string{"memory", "write"}},
-		{Name: "mem_consolidate", Noun: "mem", Verb: "consolidate", Category: "memory", Description: "Merge near-duplicate memory records while preserving provenance links.", ArgsHint: `{"argv":["consolidate","--dry-run"]}`, Mutating: true, Tags: []string{"memory", "dedupe"}},
-		{Name: "mem_record_failure", Noun: "mem", Verb: "record-failure", Category: "memory", Description: "Record a failed attempt with error signature to prevent repeating mistakes.", ArgsHint: `{"argv":["record-failure","--title","...","--error-sig","...","--body","..."]}`, Mutating: true, Tags: []string{"negative_memory", "failure"}},
-		{Name: "recall", Noun: "recall", Category: "memory", Description: "Unified cross-store recall across mem, recon, flash, errors, and artifacts.", ArgsHint: `{"argv":["query text"]}`, Tags: []string{"recall", "cross-store"}},
-		{Name: "knowledge", Noun: "knowledge", Category: "memory", Description: "Lifecycle-tracked knowledge (put, get, search, verify, revise, link, deprecate).", ArgsHint: `{"argv":["search","query"]}`, Tags: []string{"knowledge", "verify"}},
+		{Name: "mem_search", Noun: "mem", Verb: "search", Category: "memory", Description: "BM25 + hybrid search across durable memory.", ArgsHint: `{"argv":["mem","search","auth bug","--k","5"]}`, Tags: []string{"memory", "search"}},
+		{Name: "mem_put", Noun: "mem", Verb: "put", Category: "memory", Description: "Store a durable memory record (including failed_attempt or anti_pattern).", ArgsHint: `{"argv":["mem","put","--kind","fact","--title","...","--body","..."]}`, Mutating: true, Tags: []string{"memory", "write"}},
+		{Name: "mem_consolidate", Noun: "mem", Verb: "consolidate", Category: "memory", Description: "Merge near-duplicate memory records while preserving provenance links.", ArgsHint: `{"argv":["mem","consolidate","--dry-run"]}`, Mutating: true, Tags: []string{"memory", "dedupe"}},
+		{Name: "mem_record_failure", Noun: "mem", Verb: "record-failure", Category: "memory", Description: "Record a failed attempt with error signature to prevent repeating mistakes.", ArgsHint: `{"argv":["mem","record-failure","--title","...","--error-sig","...","--body","..."]}`, Mutating: true, Tags: []string{"negative_memory", "failure"}},
+		{Name: "recall", Noun: "recall", Category: "memory", Description: "Unified cross-store recall across mem, recon, flash, errors, and artifacts.", ArgsHint: `{"argv":["recall","query text"]}`, Tags: []string{"recall", "cross-store"}},
+		{Name: "knowledge", Noun: "knowledge", Category: "memory", Description: "Lifecycle-tracked knowledge (put, get, search, verify, revise, link, deprecate).", ArgsHint: `{"argv":["knowledge","search","query"]}`, Tags: []string{"knowledge", "verify"}},
 
 		// Steering, Guardrails & Loops
-		{Name: "goal_check", Noun: "goal", Verb: "check", Category: "steering", Description: "Vibe-check and anti-loop gate: checks criteria drift, diff bloat, stuck state, and prior failures.", ArgsHint: `{"argv":["check","--criteria","tests pass","--workdir","."]}`, Tags: []string{"vibe_check", "steering", "anti_loop"}},
-		{Name: "goal_verify", Noun: "goal", Verb: "verify", Category: "steering", Description: "Independently verify completion claims and replay approved checks.", ArgsHint: `{"argv":["verify","--body","<goal-done>...</goal-done>","--verify","pytest"]}`, Tags: []string{"verify", "goal"}},
-		{Name: "loop_policy", Noun: "loop", Verb: "policy", Category: "steering", Description: "Manage or inspect loop scheduler policy, schedules, and safety caps.", ArgsHint: `{"argv":["policy"]}`, Tags: []string{"loop", "schedule"}},
-		{Name: "taste_learn", Noun: "taste", Verb: "learn", Category: "steering", Description: "Record deterministic preference evidence without overwriting conflicts.", ArgsHint: `{"argv":["search"]}`, Tags: []string{"taste", "preferences"}},
+		{Name: "goal_check", Noun: "goal", Verb: "check", Category: "steering", Description: "Vibe-check and anti-loop gate: checks criteria drift, diff bloat, stuck state, and prior failures.", ArgsHint: `{"argv":["goal","check","--criteria","tests pass","--workdir","."]}`, Tags: []string{"vibe_check", "steering", "anti_loop"}},
+		{Name: "goal_verify", Noun: "goal", Verb: "verify", Category: "steering", Description: "Independently verify completion claims and replay approved checks.", ArgsHint: `{"argv":["goal","verify","--body","<goal-done>...</goal-done>","--verify","pytest"]}`, Tags: []string{"verify", "goal"}},
+		{Name: "loop_policy", Noun: "loop", Verb: "policy", Category: "steering", Description: "Manage or inspect loop scheduler policy, schedules, and safety caps.", ArgsHint: `{"argv":["loop","policy"]}`, Tags: []string{"loop", "schedule"}},
+		{Name: "taste_learn", Noun: "taste", Verb: "learn", Category: "steering", Description: "Record deterministic preference evidence without overwriting conflicts.", ArgsHint: `{"argv":["taste","search"]}`, Tags: []string{"taste", "preferences"}},
 
 		// Research, Recon, Intel & Security
-		{Name: "research_run", Noun: "research", Verb: "run", Category: "research", Description: "Run parallel multi-source research across code, mem, CVE intel, docs, and web.", ArgsHint: `{"argv":["run","CVE-2024-3094"]}`, Tags: []string{"research", "dossier", "cve"}},
-		{Name: "intel", Noun: "intel", Category: "research", Description: "Keyless threat intel lookup for IP, CVE, CISA KEV, domain, or file hash.", ArgsHint: `{"argv":["cve","CVE-2024-3094"]}`, Tags: []string{"cve", "kev", "ip", "hash"}},
-		{Name: "docs", Noun: "docs", Category: "research", Description: "Fetch live library documentation via Context7.", ArgsHint: `{"argv":["search","tokio"]}`, Tags: []string{"docs", "context7"}},
-		{Name: "recon", Noun: "recon", Category: "security", Description: "Scoped findings ledger and deterministic markdown recon report generator.", ArgsHint: `{"argv":["list","target"]}`, Tags: []string{"recon", "findings"}},
-		{Name: "scan", Noun: "scan", Category: "security", Description: "Read-only scan for secrets, risky patterns, dependency drift, injection, or MCP schemas.", ArgsHint: `{"argv":["secrets","."]}`, Tags: []string{"secrets", "injection", "mcp"}},
-		{Name: "codec", Noun: "codec", Category: "security", Description: "Hash, encode, decode, entropy, and structured JWT/PEM/UUID inspection.", ArgsHint: `{"argv":["inspect","eyJ..."]}`, Tags: []string{"codec", "jwt", "hash"}},
-		{Name: "mcp_audit", Noun: "mcp", Verb: "audit", Category: "security", Description: "Audit mounted MCP servers for schema rug-pulls and hidden prompt injections.", ArgsHint: `{"argv":["audit"]}`, Tags: []string{"mcp", "audit", "rug_pull"}},
-		{Name: "swarm", Noun: "swarm", Category: "re", Description: "High-concurrency CFG map-reduce, speculative solver, and binary audit swarm.", ArgsHint: `{"argv":["audit","/path/to/bin"]}`, Tags: []string{"swarm", "audit"}},
-		{Name: "route_context", Noun: "route", Verb: "context", Category: "code", Description: "Token-budgeted query and symbol-graph context packer.", ArgsHint: `{"argv":["context",".","--query","Store","--symbols"]}`, Tags: []string{"context", "symbols"}},
-		{Name: "compress", Noun: "compress", Category: "ops", Description: "Error-preserving L0-L3 output compressor.", ArgsHint: `{"argv":["L1","--text","..."]}`, Tags: []string{"compress", "tokens"}},
-		{Name: "session", Noun: "session", Category: "ops", Description: "Fork, rewind, list, or delete state checkpoints.", ArgsHint: `{"argv":["list"]}`, Tags: []string{"session", "checkpoint"}},
+		{Name: "research_run", Noun: "research", Verb: "run", Category: "research", Description: "Run parallel multi-source research across code, mem, CVE intel, docs, and web.", ArgsHint: `{"argv":["research","run","CVE-2024-3094"]}`, Tags: []string{"research", "dossier", "cve"}},
+		{Name: "intel", Noun: "intel", Category: "research", Description: "Keyless threat intel lookup for IP, CVE, CISA KEV, domain, or file hash.", ArgsHint: `{"argv":["intel","cve","CVE-2024-3094"]}`, Tags: []string{"cve", "kev", "ip", "hash"}},
+		{Name: "docs", Noun: "docs", Category: "research", Description: "Fetch live library documentation via Context7.", ArgsHint: `{"argv":["docs","search","tokio"]}`, Tags: []string{"docs", "context7"}},
+		{Name: "recon", Noun: "recon", Category: "security", Description: "Scoped findings ledger and deterministic markdown recon report generator.", ArgsHint: `{"argv":["recon","list","target"]}`, Tags: []string{"recon", "findings"}},
+		{Name: "scan", Noun: "scan", Category: "security", Description: "Read-only scan for secrets, risky patterns, dependency drift, injection, or MCP schemas.", ArgsHint: `{"argv":["scan","secrets","."]}`, Tags: []string{"secrets", "injection", "mcp"}},
+		{Name: "scan_secrets", Noun: "scan", Verb: "secrets", Category: "security", Description: "Scan workspace files for hardcoded credentials and API tokens (masked by default).", ArgsHint: `{"argv":["scan","secrets","."]}`, Tags: []string{"secrets", "scan", "tokens"}},
+		{Name: "scan_mcp", Noun: "scan", Verb: "mcp", Category: "security", Description: "Scan MCP config/manifest files for hidden prompt-injection instructions.", ArgsHint: `{"argv":["scan","mcp","/path/to/mcp.json"]}`, Tags: []string{"mcp", "injection", "scan"}},
+		{Name: "scan_injection", Noun: "scan", Verb: "injection", Category: "security", Description: "Scan text or config files for prompt-injection payloads.", ArgsHint: `{"argv":["scan","injection","/path/to/file"]}`, Tags: []string{"injection", "scan"}},
+		{Name: "codec", Noun: "codec", Category: "security", Description: "Hash, encode, decode, entropy, and structured JWT/PEM/UUID inspection.", ArgsHint: `{"argv":["codec","inspect","eyJ..."]}`, Tags: []string{"codec", "jwt", "hash"}},
+		{Name: "mcp_audit", Noun: "mcp", Verb: "audit", Category: "security", Description: "Audit mounted MCP servers for schema rug-pulls and hidden prompt injections.", ArgsHint: `{"argv":["mcp","audit"]}`, Tags: []string{"mcp", "audit", "rug_pull"}},
+		{Name: "swarm", Noun: "swarm", Category: "re", Description: "High-concurrency CFG map-reduce, speculative solver, and binary audit swarm.", ArgsHint: `{"argv":["swarm","audit","/path/to/bin"]}`, Tags: []string{"swarm", "audit"}},
+		{Name: "route_context", Noun: "route", Verb: "context", Category: "code", Description: "Token-budgeted query and symbol-graph context packer.", ArgsHint: `{"argv":["route","context",".","--query","MyFunc","--symbols"]}`, Tags: []string{"context", "symbols"}},
+		{Name: "route_grep", Noun: "route", Verb: "grep", Category: "code", Description: "Ranked identifier-aware code grep across definitions and references.", ArgsHint: `{"argv":["route","grep",".","--pattern","MyFunc","--rank"]}`, Tags: []string{"grep", "search", "definitions"}},
+		{Name: "route_errors", Noun: "route", Verb: "errors", Category: "code", Description: "Extract error-bearing lines from a log file or directory.", ArgsHint: `{"argv":["route","errors","/path/to/log"]}`, Tags: []string{"errors", "logs", "traceback"}},
+		{Name: "compress", Noun: "compress", Category: "ops", Description: "Error-preserving L0-L3 output compressor.", ArgsHint: `{"argv":["compress","L1","--path","/path/to/log"]}`, Tags: []string{"compress", "tokens"}},
+		{Name: "compress_l1", Noun: "compress", Verb: "L1", Category: "ops", Description: "Error-preserving L1 log/output compressor for large files.", ArgsHint: `{"argv":["compress","L1","--path","/path/to/log"]}`, Tags: []string{"compress", "logs", "errors"}},
+		{Name: "session", Noun: "session", Category: "ops", Description: "Fork, rewind, list, or delete state checkpoints.", ArgsHint: `{"argv":["session","list"]}`, Tags: []string{"session", "checkpoint"}},
 	}
 }
 
@@ -155,7 +166,7 @@ func searchCatalog(query string, category string, limit int) []CatalogEntry {
 	return out
 }
 
-func runLocalCommand(selfBin string, argv []string, maxBytes int) (string, bool) {
+func runLocalCommand(selfBin string, argv []string, maxBytes int, workDir string) (string, bool) {
 	if len(argv) == 0 {
 		return "error: empty argv", true
 	}
@@ -191,6 +202,9 @@ func runLocalCommand(selfBin string, argv []string, maxBytes int) (string, bool)
 	}
 
 	cmd := exec.Command(selfBin, fullArgs...)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
 	outBytes, err := cmd.CombinedOutput()
 	exitCode := 0
 	if err != nil {
@@ -201,7 +215,15 @@ func runLocalCommand(selfBin string, argv []string, maxBytes int) (string, bool)
 		}
 	}
 	guard.AuditEvent("mcp", "xt_call", argv[0], map[bool]string{true: "ok", false: "error"}[exitCode == 0], argv, exitCode)
-	clipped, _ := compress.ClipOrSpill(string(outBytes), maxBytes, "xt-"+argv[0])
+	outStr := string(outBytes)
+	trimmed := bytes.TrimSpace(outBytes)
+	if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') && json.Valid(trimmed) {
+		var comp bytes.Buffer
+		if json.Compact(&comp, trimmed) == nil {
+			outStr = comp.String()
+		}
+	}
+	clipped, _ := compress.ClipOrSpill(outStr, maxBytes, "xt-"+argv[0])
 	return clipped, exitCode != 0
 }
 
@@ -567,16 +589,18 @@ func callUpstreamToolContext(ctx context.Context, pool *UpstreamPool, server, to
 	return runRecoverableUpstreamCall(ctx, sess, "mcp", canon, toolName, args, opts, maxBytes)
 }
 
-func searchUpstreamCatalogs(pool *UpstreamPool, upstreamFilter, query string, limit int) []map[string]any {
+func searchUpstreamCatalogs(pool *UpstreamPool, upstreamFilter, query string, limit int) ([]map[string]any, map[string]map[string]any) {
 	q := strings.ToLower(strings.TrimSpace(query))
 	words := strings.Fields(q)
 	filter := CanonicalUpstreamName(strings.TrimSpace(upstreamFilter))
 
+	known := KnownUpstreams()
+	statusMap := make(map[string]map[string]any, len(known))
 	var targets []string
 	if filter != "" && filter != "all" && filter != "xt-forge" {
 		targets = []string{filter}
 	} else if filter != "xt-forge" {
-		targets = KnownUpstreams()
+		targets = known
 	}
 
 	type hit struct {
@@ -584,16 +608,55 @@ func searchUpstreamCatalogs(pool *UpstreamPool, upstreamFilter, query string, li
 		score int
 	}
 	var hits []hit
-	for _, srv := range targets {
+	for _, srv := range known {
+		inScope := false
+		for _, t := range targets {
+			if t == srv {
+				inScope = true
+				break
+			}
+		}
 		var tools []ToolDef
-		if filter != "" && filter != "all" {
-			tools, _ = resolveUpstreamTools(pool, srv)
+		var probeErr error
+		probed := false
+		if inScope && filter != "" && filter != "all" {
+			tools, probeErr = resolveUpstreamTools(pool, srv)
+			probed = true
 		} else {
 			tools = LoadCachedCatalog(srv)
-			// If query explicitly names rea or craft-anything and no cache exists yet, live-probe once.
-			if len(tools) == 0 && (strings.Contains(q, srv) || (srv == "craft-anything" && strings.Contains(q, "craft"))) {
-				tools, _ = resolveUpstreamTools(pool, srv)
+			if inScope && len(tools) == 0 && (strings.Contains(q, srv) || (srv == "craft-anything" && strings.Contains(q, "craft"))) {
+				tools, probeErr = resolveUpstreamTools(pool, srv)
+				probed = true
 			}
+		}
+		if probeErr != nil {
+			statusMap[srv] = map[string]any{
+				"status":    "unavailable",
+				"reachable": false,
+				"tools":     0,
+				"error":     probeErr.Error(),
+			}
+		} else if len(tools) > 0 {
+			statusMap[srv] = map[string]any{
+				"status":    "ready",
+				"reachable": true,
+				"tools":     len(tools),
+			}
+		} else if probed {
+			statusMap[srv] = map[string]any{
+				"status":    "ready",
+				"reachable": true,
+				"tools":     0,
+			}
+		} else {
+			statusMap[srv] = map[string]any{
+				"status":    "cold_cache",
+				"reachable": nil,
+				"tools":     0,
+			}
+		}
+		if !inScope {
+			continue
 		}
 		for _, t := range tools {
 			hay := strings.ToLower(srv + " " + t.Name + " " + t.Description)
@@ -644,6 +707,171 @@ func searchUpstreamCatalogs(pool *UpstreamPool, upstreamFilter, query string, li
 	for _, h := range hits {
 		out = append(out, h.row)
 	}
+	return out, statusMap
+}
+
+func buildLocalArgv(entry CatalogEntry, rawArgv []string, toolArgs map[string]any) []string {
+	if len(rawArgv) > 0 {
+		// Auto-prepend noun (and verb when missing) if caller followed a shorthand hint.
+		if rawArgv[0] == entry.Noun {
+			return append([]string{}, rawArgv...)
+		}
+		if entry.Verb != "" && rawArgv[0] == entry.Verb {
+			return append([]string{entry.Noun}, rawArgv...)
+		}
+		out := []string{entry.Noun}
+		if entry.Verb != "" {
+			out = append(out, entry.Verb)
+		}
+		return append(out, rawArgv...)
+	}
+
+	out := []string{entry.Noun}
+	if entry.Verb != "" {
+		out = append(out, entry.Verb)
+	}
+	if len(toolArgs) == 0 {
+		return out
+	}
+
+	used := map[string]bool{"cwd": true}
+	popStr := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := toolArgs[k]; ok && v != nil {
+				used[k] = true
+				s := strings.TrimSpace(fmt.Sprint(v))
+				if s != "" && s != "<nil>" {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+
+	switch {
+	case entry.Name == "route_context" || entry.Name == "route_grep" || entry.Name == "route_errors":
+		pathVal := popStr("path", "root", "dir", "workspace", "file")
+		if pathVal == "" {
+			pathVal = "."
+		}
+		out = append(out, pathVal)
+	case entry.Name == "code_graph" || entry.Name == "code_callers" || entry.Name == "code_refs" || entry.Name == "code_trace":
+		sym := popStr("symbol", "name", "target")
+		pathVal := popStr("path", "root", "dir", "workspace")
+		if pathVal == "" {
+			pathVal = "."
+		}
+		if sym != "" {
+			out = append(out, "--symbol", sym, "--path", pathVal)
+		} else {
+			out = append(out, pathVal)
+		}
+	case entry.Name == "code_symbols" || entry.Name == "code_index" || entry.Name == "code_audit":
+		pathVal := popStr("path", "root", "dir", "workspace", "file", "target", "repo")
+		if pathVal == "" {
+			pathVal = "."
+		}
+		out = append(out, pathVal)
+	case entry.Name == "code_lsp":
+		if act := popStr("action", "op"); act != "" {
+			out = append(out, act)
+		}
+		if pathVal := popStr("path", "file"); pathVal != "" {
+			out = append(out, pathVal)
+		}
+	case entry.Name == "mem_search":
+		if q := popStr("query", "text"); q != "" {
+			out = append(out, q)
+		}
+	case entry.Name == "recall":
+		if q := popStr("query", "text"); q != "" {
+			out = append(out, q)
+		}
+	case entry.Name == "compress" || strings.HasPrefix(entry.Name, "compress_"):
+		if entry.Verb == "" {
+			level := popStr("level")
+			if level == "" {
+				level = "L1"
+			}
+			out = append(out, level)
+		} else {
+			used["level"] = true
+		}
+	case entry.Name == "scan":
+		if kind := popStr("kind", "subcommand", "mode"); kind != "" {
+			out = append(out, kind)
+		} else {
+			out = append(out, "secrets")
+		}
+		if pathVal := popStr("path", "root", "dir", "file", "value"); pathVal != "" {
+			out = append(out, pathVal)
+		}
+	case strings.HasPrefix(entry.Name, "scan_"):
+		if pathVal := popStr("path", "root", "dir", "file", "value"); pathVal != "" {
+			out = append(out, pathVal)
+		}
+	case entry.Name == "re_diff":
+		if b1 := popStr("bin1", "v1", "path1", "file1", "old", "a", "left", "first", "path", "value"); b1 != "" {
+			out = append(out, b1)
+		}
+		if b2 := popStr("bin2", "v2", "path2", "file2", "new", "b", "right", "second", "other"); b2 != "" {
+			out = append(out, b2)
+		}
+	default:
+		if strings.HasPrefix(entry.Name, "re_") {
+			if act := popStr("action"); act != "" {
+				out = append(out, act)
+			}
+			if pathVal := popStr("path", "file", "binary", "bin", "target_file"); pathVal != "" {
+				out = append(out, pathVal)
+			}
+			if entry.Name == "re_cfg" || entry.Name == "re_decompile" || entry.Name == "re_disasm" {
+				if sym := popStr("symbol", "func", "function", "name"); sym != "" {
+					out = append(out, "--symbol", sym)
+				}
+			} else if sym := popStr("symbol", "func", "function"); sym != "" {
+				out = append(out, "--symbol", sym)
+			}
+		} else if q := popStr("value"); q != "" {
+			out = append(out, q)
+		}
+	}
+
+	keys := make([]string, 0, len(toolArgs))
+	for k := range toolArgs {
+		if !used[k] {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := toolArgs[k]
+		if v == nil {
+			continue
+		}
+		flag := "--" + strings.ReplaceAll(k, "_", "-")
+		switch val := v.(type) {
+		case bool:
+			if val {
+				out = append(out, flag)
+			}
+		case float64:
+			if val == float64(int64(val)) {
+				out = append(out, flag, fmt.Sprintf("%d", int64(val)))
+			} else {
+				out = append(out, flag, fmt.Sprint(val))
+			}
+		default:
+			s := fmt.Sprint(val)
+			if s != "" && s != "<nil>" {
+				if strings.HasPrefix(s, "-") {
+					out = append(out, flag+"="+s)
+				} else {
+					out = append(out, flag, s)
+				}
+			}
+		}
+	}
 	return out
 }
 
@@ -659,7 +887,7 @@ func ServeMeta(selfBin string, maxBytes int) int {
 	metaTools := []ToolDef{
 		{
 			Name:        "xt_discover",
-			Description: "Search xt-forge and upstream MCP tools (rea, craft-anything, ...).",
+			Description: "Discover xt-forge tools (code_callers, code_graph, code_audit, code_trace, re_diff, re_cfg, route_context, scan_secrets) and upstream MCP tools.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -685,15 +913,16 @@ func ServeMeta(selfBin string, maxBytes int) int {
 		},
 		{
 			Name:        "xt_call",
-			Description: "Run xt-forge argv or upstream <server>:<tool> safely with journal recovery.",
+			Description: "Execute xt-forge tool directly: name='code_callers'|'code_graph'|'code_audit'|'code_trace'|'re_diff'|'re_decompile'|'re_disasm'|'route_context' or <server>:<tool> with recovery.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"argv":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"name":            map[string]any{"type": "string"},
+					"argv":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Explicit CLI argv, e.g. ['re','diff','bin/v1','bin/v2'] or ['code','audit','.']"},
+					"name":            map[string]any{"type": "string", "description": "xt-forge tool name (e.g. 'code_callers', 'code_audit', 'code_trace', 're_diff', 're_decompile') or '<server>:<tool>'"},
 					"server":          map[string]any{"type": "string"},
 					"tool":            map[string]any{"type": "string"},
-					"arguments":       map[string]any{"type": "object"},
+					"arguments":       map[string]any{"type": "object", "description": "Args object: {'symbol':...,'path':'.'} for code_*, {'path':'.'} for code_audit, {'bin1':...,'bin2':...} for re_diff, {'path':...,'symbol':...} for re_decompile"},
+					"cwd":             map[string]any{"type": "string"},
 					"idempotency_key": map[string]any{"type": "string"},
 					"verify_tool":     map[string]any{"type": "string"},
 					"verify_args":     map[string]any{"type": "object"},
@@ -740,6 +969,12 @@ func ServeMeta(selfBin string, maxBytes int) int {
 		if uSrv, uTool, ok := splitUpstreamToolRef(rawName); ok {
 			return callUpstreamToolContext(ctx, pool, uSrv, uTool, toolArgs, opts, budget)
 		}
+		workDir, _ := args["cwd"].(string)
+		if workDir == "" && toolArgs != nil {
+			if c, ok := toolArgs["cwd"].(string); ok {
+				workDir = c
+			}
+		}
 		rawArgv, _ := args["argv"].([]any)
 		argv := make([]string, 0, len(rawArgv))
 		for _, item := range rawArgv {
@@ -747,18 +982,61 @@ func ServeMeta(selfBin string, maxBytes int) int {
 				argv = append(argv, s)
 			}
 		}
-		if len(argv) == 0 && rawName != "" {
+		if rawName != "" {
+			norm := strings.ReplaceAll(strings.TrimSpace(rawName), "-", "_")
+			matched := false
+			var matchedEntry CatalogEntry
 			for _, e := range FullCatalog() {
-				if e.Name == rawName {
-					argv = []string{e.Noun}
-					if e.Verb != "" {
-						argv = append(argv, e.Verb)
-					}
+				if e.Name == rawName || e.Name == norm {
+					matchedEntry = e
+					argv = buildLocalArgv(e, argv, toolArgs)
+					matched = true
 					break
 				}
 			}
+			if !matched {
+				if strings.HasPrefix(norm, "scan_") {
+					verb := strings.TrimPrefix(norm, "scan_")
+					matchedEntry = CatalogEntry{Name: norm, Noun: "scan", Verb: verb}
+					argv = buildLocalArgv(matchedEntry, argv, toolArgs)
+					matched = true
+				} else if strings.HasPrefix(norm, "compress_l") && len(norm) == len("compress_l1") {
+					lvl := strings.ToUpper(strings.TrimPrefix(norm, "compress_"))
+					matchedEntry = CatalogEntry{Name: norm, Noun: "compress", Verb: lvl}
+					argv = buildLocalArgv(matchedEntry, argv, toolArgs)
+					matched = true
+				}
+			}
+			if !matched && len(argv) == 0 {
+				return fmt.Sprintf("unknown xt-forge tool '%s'; call xt_discover or pass explicit argv", rawName), true
+			}
+			if matched && len(rawArgv) == 0 {
+				if matchedEntry.Name == "code_graph" || matchedEntry.Name == "code_callers" || matchedEntry.Name == "code_refs" || matchedEntry.Name == "code_trace" {
+					hasSym := false
+					for _, k := range []string{"symbol", "name", "target"} {
+						if v, ok := toolArgs[k]; ok && strings.TrimSpace(fmt.Sprint(v)) != "" && fmt.Sprint(v) != "<nil>" {
+							hasSym = true
+							break
+						}
+					}
+					if !hasSym {
+						return fmt.Sprintf("missing required field 'symbol' for %s; example: {\"name\":%q,\"arguments\":{\"symbol\":\"MyFunc\",\"path\":\".\"}}", matchedEntry.Name, matchedEntry.Name), true
+					}
+				} else if matchedEntry.Name == "route_grep" {
+					hasPat := false
+					for _, k := range []string{"pattern", "regex"} {
+						if v, ok := toolArgs[k]; ok && strings.TrimSpace(fmt.Sprint(v)) != "" && fmt.Sprint(v) != "<nil>" {
+							hasPat = true
+							break
+						}
+					}
+					if !hasPat {
+						return "missing required field 'pattern' for route_grep; example: {\"name\":\"route_grep\",\"arguments\":{\"pattern\":\"MyFunc\",\"path\":\".\"}}", true
+					}
+				}
+			}
 		}
-		return runLocalCommand(selfBin, argv, budget)
+		return runLocalCommand(selfBin, argv, budget, workDir)
 	}
 
 	return serveLoop(metaTools, func(ctx context.Context, name string, args map[string]any) (string, bool) {
@@ -776,14 +1054,15 @@ func ServeMeta(selfBin string, maxBytes int) int {
 			if upNorm == "" || upNorm == "all" || upNorm == "xt-forge" {
 				local = searchCatalog(q, cat, lim)
 			}
-			ext := []map[string]any{}
-			if cat == "" {
-				ext = searchUpstreamCatalogs(pool, up, q, lim)
+			ext, upStatus := searchUpstreamCatalogs(pool, up, q, lim)
+			if cat != "" {
+				ext = []map[string]any{}
 			}
 			payload := map[string]any{
 				"ok":               true,
 				"matches":          local,
 				"upstream_matches": ext,
+				"upstream_status":  upStatus,
 				"known_upstreams":  KnownUpstreams(),
 			}
 			b, _ := json.MarshalIndent(payload, "", "  ")
@@ -1064,7 +1343,7 @@ func serveLoop(tools []ToolDef, handler func(context.Context, string, map[string
 				"result": map[string]any{
 					"protocolVersion": pv,
 					"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
-					"serverInfo":      map[string]any{"name": "xt-forge-hub", "version": "0.4.2"},
+					"serverInfo":      map[string]any{"name": "xt-forge-hub", "version": "0.4.3"},
 				},
 			})
 		case "ping":

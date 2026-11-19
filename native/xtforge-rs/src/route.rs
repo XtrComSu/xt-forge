@@ -1503,12 +1503,22 @@ pub fn run(p: &Parsed) -> Option<i32> {
             }
         }
         "grep" => {
-            let raw = p.pos(0).unwrap_or(".");
-            let pattern = p.fstr("pattern").or_else(|| p.fstr("regex")).unwrap_or_default();
+            let raw = p.fstr("path").or_else(|| p.pos(0).map(String::from)).unwrap_or_else(|| ".".into());
+            let pattern = p.fstr("pattern")
+                .or_else(|| p.fstr("regex"))
+                .or_else(|| if p.fstr("path").is_some() { p.pos(0).map(String::from) } else { None })
+                .unwrap_or_default();
+            if pattern.is_empty() {
+                return Some(util::fail(
+                    p.json,
+                    "route grep requires --pattern <pat> (e.g. xtforge route grep . --pattern MyFunc --rank)",
+                    2,
+                ));
+            }
             let glob_pat = p.fstr("glob");
             let context = p.fint("context", 1) as usize;
             let limit = p.fint("limit", 50) as usize;
-            match guard::read_guard(raw) {
+            match guard::read_guard(&raw) {
                 Err(d) => envelope(false, Value::Null, Some(format!("{}: {}", d.code, d.reason)), 0, false),
                 Ok(canon) => match route_grep(&canon, &pattern, glob_pat.as_deref(), context, limit) {
                     Ok(data) => envelope_tool(true, data, None),
@@ -1569,17 +1579,17 @@ pub fn run(p: &Parsed) -> Option<i32> {
             envelope_tool(true, Value::Array(out), None)
         }
         "context" => {
-            let root = p.pos(0).unwrap_or(".");
+            let root = p.fstr("path").or_else(|| p.pos(0).map(String::from)).unwrap_or_else(|| ".".into());
             let budget = p.fint("token-budget", 1200);
             let file_limit = p.fint("file-limit", 12);
             if let Some(q) = p.fstr("query") {
                 let win = p.fint("context", p.fint("window", 2)).max(1) as usize;
                 let max_m = p.fint("max-matches", 40).max(1) as usize;
-                route_pack_query(p, root, &q, budget, file_limit, win, max_m, p.fbool("symbols"))
+                route_pack_query(p, &root, &q, budget, file_limit, win, max_m, p.fbool("symbols"))
             } else if p.fbool("symbols") {
                 return None;
             } else {
-                route_context(root, budget, file_limit)
+                route_context(&root, budget, file_limit)
             }
         }
         "batch-peek" => {

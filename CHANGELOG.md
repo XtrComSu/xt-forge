@@ -1,3 +1,24 @@
+## 0.4.3 - 2026-11-19
+
+### Added
+- **Normalized Binary Diffing, `.rodata` String Annotation & Reciprocal Division Decoding (`xt-forge diff` / `re diff`)**:
+  - Added `xtforge.core.re.diff` (`diff_binaries`), normalizing absolute/RIP-relative hex offsets across `v1` and `v2` binaries, annotating `function_disasm_v1` and `function_disasm_v2` inline with resolved `.rodata` string literals, and automatically decoding GCC/Clang strength-reduced reciprocal multiplication/shift constants (`imul` + `sar`/`shr`) into human-readable divisors and percentage shifts (`diff_notes`).
+- **Multi-File AST Static Correctness Auditor (`xt-forge audit` / `code audit`)**:
+  - Added `xtforge.core.code.audit` (`audit_workspace`), detecting nested-loop duplicate aggregation without deduplication, asymmetric/off-by-one boundary comparisons (`<` vs `<=`), stale module caches where mutators omit invalidation, integer floor-division truncation in allocation helpers, and mutable defaults, with full line-numbered `function_source` and `reader_source` evidence.
+- **Cross-Module Active Dispatch Tracer (`xt-forge trace` / `code trace`)**:
+  - Added `xtforge.core.code.trace` (`trace_symbol`), resolving runtime execution hops across package `__init__.py` re-exports (`from ... import ... as ...`), duplicate symbol names, and JSON/YAML/TOML/INI/ENV/Python configuration dispatch tables (`active_implementation`, `active_path`, `disputed_edges`, and `inactive_candidates` with line-numbered function excerpts).
+- **High-Concurrency Binary MapReduce & MCTS Hypothesis Solver (`xt-forge swarm`)**:
+  - Added `swarm map` and `swarm mcts` in the Go concurrency hub (`native/xtforge-go/internal/swarm/engine.go`) and Python fallback (`xtforge/core/re/swarm.py`).
+- **Top-Level Ergonomic CLI & `--meta` Gateway Shortcuts**:
+  - Added top-level aliases `xt-forge callers`, `xt-forge audit`, `xt-forge trace`, `xt-forge diff`, and `xt-forge context`, plus first-class `--meta` MCP tools `code_callers`, `code_audit`, `code_trace`, and `re_diff` with zero-dash argument safety and `evidence_complete` flags in both Go (`xtforge-hub`) and Python (`xtforge/adapters/mcp_server.py`).
+- **24 Bundled `XTF-*` Workflow Skills & XT-OSS Visual Suite**:
+  - Added 6 new workflow skills (`XTF-CodeAudit`, `XTF-DispatchTrace`, `XTF-BinaryDiff`, `XTF-LSPNavigate`, `XTF-SwarmRE`, `XTF-SessionRecovery`), expanding the catalog to **24 skills** across Simple (8), Complex (8), and Advanced (8) tiers.
+  - Upgraded README and docs with XT-Style + XT-OSS visuals (`docs/assets/xt-oss-banner.png`, `docs/assets/xtforge-vs-rea-benchmark.png`, `docs/assets/re-diff-decompile.gif`) and inline embedded video players (`docs/videos/xtforge-overview.mp4`, `docs/videos/cve-re-workflow.mp4`).
+
+### Fixed
+- **6-Tier Live Benchmark (`scripts/bench_three_tier.py`)**:
+  - Extended the benchmark suite to 6 tiers (`tier1_find`, `tier2_fix`, `tier3_recover`, `tier4_defects`, `tier5_trace`, `tier6_regression_src`, `tier6_regression_bin`) with live A/B pairing against raw REA (`rea-agents`, 229 tools) and fixed `grade_tier1` so call-site grep lines inside fenced code blocks are not misclassified as definition bindings.
+
 ## 0.4.2 - 2026-11-18
 
 ### Added

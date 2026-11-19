@@ -78,7 +78,7 @@ class PythonUpstreamSession:
         init_res, _, _, _ = self._call("initialize", {
             "protocolVersion": "2025-06-18",
             "capabilities": {},
-            "clientInfo": {"name": "xt-forge-proxy", "version": "0.4.2"},
+            "clientInfo": {"name": "xt-forge-proxy", "version": "0.4.3"},
         })
         if "error" in init_res:
             raise RuntimeError(str(init_res["error"]))
@@ -328,7 +328,7 @@ def serve_proxy_lite(server: str, cmd: str | None = None, *, trust_on_first: boo
                 continue
             if method == "initialize":
                 resp = {"protocolVersion": "2025-06-18", "capabilities": {"tools": {"listChanged": False}},
-                        "serverInfo": {"name": f"xtforge-proxy:{canon}", "version": "0.4.2"}}
+                        "serverInfo": {"name": f"xtforge-proxy:{canon}", "version": "0.4.3"}}
             elif method == "tools/list":
                 resp = {"tools": proxy_tools}
             elif method == "tools/call":

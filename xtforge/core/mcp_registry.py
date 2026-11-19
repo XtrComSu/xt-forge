@@ -413,7 +413,7 @@ def execute_tool(server_name: str, tool_name: str, arguments: dict[str, Any] | N
             "id": 1,
             "method": "initialize",
             "params": {"protocolVersion": "2025-06-18", "capabilities": {},
-                       "clientInfo": {"name": "xt-forge", "version": "0.4.2"}},
+                       "clientInfo": {"name": "xt-forge", "version": "0.4.3"}},
         }) + "\n")
         proc.stdin.flush()
         init_resp, _ = _read_rpc_by_id(proc.stdout, 1, deadline)

@@ -78,7 +78,6 @@ fn python_fallback(argv: &[String]) -> i32 {
     let python = resolve_python();
     let mut cmd = std::process::Command::new(python);
     cmd.arg("-m").arg("xtforge.cli").args(argv);
-    cmd.current_dir(&root);
     let mut pp = root.to_string_lossy().to_string();
     let sep = if cfg!(windows) { ';' } else { ':' };
     if let Ok(existing) = std::env::var("PYTHONPATH") {
@@ -144,9 +143,32 @@ fn wants_hub(p: &args::Parsed) -> bool {
     }
 }
 
+fn normalize_shorthand_argv(argv: Vec<String>) -> Vec<String> {
+    let first = match argv.first().map(|s| s.as_str()) {
+        Some(s) => s,
+        None => return argv,
+    };
+    let prefix = match first {
+        "callers" | "graph" | "audit" | "trace" | "refs" | "symbols" | "index" => Some("code"),
+        "diff" | "disasm" | "decompile" | "cfg" => Some("re"),
+        _ => None,
+    };
+    if let Some(noun) = prefix {
+        let mut out = Vec::with_capacity(argv.len() + 1);
+        out.push(noun.to_string());
+        out.extend(argv);
+        return out;
+    }
+    argv
+}
+
 fn run() -> i32 {
-    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let raw_argv: Vec<String> = std::env::args().skip(1).collect();
+    let argv = normalize_shorthand_argv(raw_argv);
     let p = args::parse(&argv);
+    if p.has_help {
+        return python_fallback(&argv);
+    }
     if p.noun.is_none() && p.fbool("meta") {
         let mut hub_argv = vec!["mcp".to_string(), "serve".to_string()];
         hub_argv.extend(argv.clone());
