@@ -6,8 +6,8 @@
   <p><strong>Supreme local agent workbench for call-graph context, AST correctness auditing, normalized binary diffing, keyless CVE intel, and sub-1KB MCP routing.</strong></p>
   <p>Engineered in <strong>Rust</strong>, <strong>Go</strong>, and zero-dependency <strong>Python 3.11+</strong> under <strong>XT-OSS</strong> by <a href="https://xtrcom.xyz">XtrComSu</a>.</p>
   <p>
-    <a href="https://github.com/XtrComSu/xt-forge/releases/tag/v0.4.5-Damascus"><img src="https://img.shields.io/badge/XT--OSS-v0.4.5--Damascus-FF2E2E?style=flat-square&logo=github" alt="Release v0.4.5-Damascus" /></a>
-    <img src="https://img.shields.io/badge/vs%20Raw%20REA%20(229%20tools)-100%25%20Win%20Rate%20(7%2F7%20Tiers)-34D399?style=flat-square" alt="100% Win Rate vs Raw REA" />
+    <a href="https://github.com/XtrComSu/xt-forge/releases/tag/v0.4.6-Damascus"><img src="https://img.shields.io/badge/XT--OSS-v0.4.6--Damascus-FF2E2E?style=flat-square&logo=github" alt="Release v0.4.6-Damascus" /></a>
+    <img src="https://img.shields.io/badge/vs%20Raw%20REA%20(5%20reps%20median)-93.3%25%20Standalone%20Win%20(42%2F45)-34D399?style=flat-square" alt="93.3% Standalone Pass Rate vs 22.2% Raw REA" />
     <img src="https://img.shields.io/badge/engines-Rust%20%2B%20Go%20%2B%20Python%203.11%2B-0C0D12?style=flat-square" alt="Rust + Go + Python" />
     <img src="https://img.shields.io/badge/MCP%20schema-1.35%20KB%20(--meta)-60A5FA?style=flat-square" alt="1.35 KB MCP Schema" />
     <img src="https://img.shields.io/badge/skills-24%20XTF--*%20Workflows-F59E0B?style=flat-square" alt="24 XTF-* Skills" />
@@ -36,18 +36,24 @@ Mounting a 229-tool reverse-engineering MCP server like raw **[REA](https://gith
 2. **Direct Structural & Binary Analysis (`code_callers`, `code_audit`, `code_trace`, `re_diff`):** Replaces multi-turn `grep`, `read_file`, and `objdump` loops with single-call AST, CFG, and disassembly analysis.
 
 <p align="center">
-  <img src="docs/assets/xtforge-vs-rea-benchmark.png" alt="XT-Forge vs Raw REA Benchmark" width="100%" />
+  <img src="docs/bench_9tier_charts.png" alt="XT-Forge 9-Tier 5-Rep Median Benchmark (Arm A vs B vs C)" width="100%" />
 </p>
 
-| Benchmark Tier | Workload | Raw REA Only (`229` tools) | `xt-forge` + REA (`--meta`) | Key Advantage |
+Across **9 tiers × 5 repetitions each (45 live runs per arm on DSH DeepSeek V4.1 Flash)**, **Standalone XT-Forge (Arm C)** achieved **42/45 (93.3%)** vs **XT-Forge + REA (Arm B, 34/45, 75.6%)** and **Raw REA (Arm A, 10/45, 22.2%)**:
+
+| Benchmark Tier | Workload | Arm A: Raw REA<br/>Pass · Med Time · Tokens | Arm B: XT-Forge + REA<br/>Pass · Med Time · Tokens | Arm C: Standalone XT-Forge<br/>Pass · Med Time · Tokens |
 | --- | --- | --- | --- | --- |
-| **Tier 1 · Find** | Symbol definition + production callers vs test/doc decoys | `28.8s` (8 tools, misses tuple / extra grep) | **PASS · `15.1s` ev** (`code_callers`) | Separates `production_callers` from `unresolved_candidates` (`test_or_shadow_only`) in one indexed query |
-| **Tier 2 · Fix** | Off-by-one retry budget bug fix + test verification | `52.9s` (9 tools, `13,864` tok) | **PASS · `34.2s`** (7 tools, `9,106` tok) | **1.55x faster** and **34% fewer tokens** via direct symbol localization |
-| **Tier 3 · Recover** | Stateful MCP job submission across mid-flight connection drop | **FAIL (`0/1`)** · Duplicate commit (`2` submits) | **PASS (`1/1`) · `22.7s`** (`0` duplicates) | Crash-safe `$XT_HOME/call_journal.json` runs `verify_tool` before retry and recovers committed receipt |
-| **Tier 4 · Defects** | Multi-file static correctness audit (3 bugs + clean decoys) | `72.3s` (10 file reads) | **PASS · `28.8s`** (`5.2s` ev, `1` `xtf` call) | **2.5x faster** — `code_audit` extracts all 3 AST defects (`duplicate_aggregation`, `boundary_comparison`, `stale_cache`) + full `function_source` in one call |
-| **Tier 5 · Trace** | Active runtime path across `__init__.py` re-exports & config dispatch | `32.7s` (9 manual file reads) | **PASS · `20.2s`** (`7.1s` ev, `1` `xtf` call) | **1.62x faster** — `code_trace` resolves `runtime.json` → `active_v2_handle` → `active_v2.py` in one hop |
-| **Tier 6A · Src Diff** | Behavioral regression localization across `v1` vs `v2` C source | `31.6s` (5 tools, `4,650` tok) | **PASS · `20.5s`** (3 tools, `3,109` tok) | **1.54x faster** and **33% fewer tokens** |
-| **Tier 6B · Bin Diff** | Stripped/compiled ELF binary regression (`calc_v1` vs `calc_v2`) | **FAIL (`120.0s` TIMEOUT)** · 12 tools | **PASS · `69.4s`** (`5.2s` ev, `re_diff`) | `re_diff` normalizes instructions, annotates `.rodata` strings, and decodes GCC reciprocal division (`10% -> 5%`) automatically |
+| **T1 · Find** | Symbol definition + production callers vs test/doc decoys | `0/5` · `60.03s` · `7,734` | `2/5` · `27.59s` · `6,587` | **`3/5` · `15.69s` · `6,378`** |
+| **T2 · Fix** | Off-by-one retry budget bug fix + hidden tests | `3/5` · `87.85s` · `16,419` | `3/5` · `66.23s` · `13,422` | **`5/5` · `54.56s` · `13,928`** |
+| **T3 · Recover** | Stateful MCP job submission across mid-flight drop | `1/5` · `90.03s` · `12,505` | **`5/5`** · `39.42s` · `5,792` | `4/5` · **`28.98s`** · `7,042` |
+| **T4 · Defects** | Multi-file AST correctness audit (3 bugs + clean decoys) | `0/5` · `90.03s` · `8,984` | `5/5` · `54.93s` · `11,490` | **`5/5` · `36.06s` · `10,381`** |
+| **T5 · Trace** | Active runtime path across `__init__.py` re-exports & config | `4/5` · `71.50s` · `10,033` | **`5/5` · `21.19s` · `5,915`** | `5/5` · `31.31s` · `10,596` |
+| **T6 · Bin Diff** | Compiled ELF regression (`calc_v1` vs `calc_v2`, 10% → 5%) | `1/5` · `120.03s` · `23,922` | `4/5` · `75.90s` · `20,831` | **`5/5` · `69.73s` · `16,621`** |
+| **T7 · Stripped Decompile** | `-O2 -s` ELF (`gatekeeper`): magic, `/ 7`, `% 13`, offsets `+0x8`/`+0x10`, `42` | `1/5` · `120.03s` · `24,992` | `5/5` · `69.20s` · `14,417` | **`5/5` · `51.05s` · `15,699`** |
+| **T8 · Stripped Auth Diff** | `-O2 -s` ELF (`auth_v1` vs `auth_v2`): `0xa0 → 0x80` & `4 → 1` | `0/5` · `120.03s` · `21,911` | `3/5` · `116.91s` · `20,962` | **`5/5` · `80.02s` · `21,390`** |
+| **T9 · Stripped C++ RTTI** | `-O2 -s` C++ ELF (`router_cpp`): 3 RTTI classes, `0x7A`, `(x^0x55)+19` | `0/5` · `120.03s` · `27,840` | `2/5` · `120.03s` · `19,838` | **`5/5` · `62.96s` · `27,778`** |
+
+See **[Full 9-Tier Benchmark & Root-Cause Analysis](docs/BENCHMARKS.md)** and [raw JSON summary](benchmarks/nine_tier_5rep_summary.json) for why Standalone XT-Forge beats both Raw REA and XT-Forge + REA.
 
 <p align="center">
   <img src="docs/assets/re-diff-decompile.gif" alt="Normalized Binary Diff, Reciprocal Math Decoding, Decompile & AST Audit" width="100%" />
@@ -224,6 +230,12 @@ Drop-in configurations, slash commands (`/xtf --meta`), and tailored setup walkt
 | **OpenCode** | [integrations/opencode/](integrations/opencode/) | `opencode.json` + native `/xtf`, `/taste`, `/goal`, `/loop` TypeScript plugin |
 | **Codex CLI** | [integrations/codex/](integrations/codex/) | Clean `config.toml` entry + compact `AGENTS.md` workflow rules |
 | **Claude Code** | [integrations/claude-code/](integrations/claude-code/) | Project `.mcp.json`, `CLAUDE.md`, and `/xtf` slash command integration |
+| **Kimi Code** | [integrations/kimi-code/](integrations/kimi-code/) | `mcp.json` (`xt-forge`, `ghidra`, `ida`), `config.toml` permission rules, and 24 `XTF-*` skills |
+| **Qoder CLI** | [integrations/qoder/](integrations/qoder/) | `mcp.json` (`xt-forge --meta`, `ghidra`, `ida`) + `XTF-*` skill sync |
+| **Gemini / Antigravity CLI** | [integrations/gemini-cli/](integrations/gemini-cli/) | `settings.json` MCP server wiring + `~/.gemini/skills` sync |
+| **Cursor** | [integrations/cursor/](integrations/cursor/) | Drop-in `~/.cursor/mcp.json` / `.cursor/mcp.json` + skill sync |
+| **Windsurf** | [integrations/windsurf/](integrations/windsurf/) | `mcp_config.json` for `xt-forge --meta`, `ghidra`, and `ida` |
+| **Cline / Roo Code** | [integrations/cline/](integrations/cline/) | `cline_mcp_settings.json` with auto-approved `--meta` primitives |
 
 ---
 

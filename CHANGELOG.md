@@ -1,3 +1,20 @@
+## 0.4.6 - 2026-11-20
+
+### Added
+- **IDA Pro MCP Server & Offline Bridge (`xtforge.adapters.ida_mcp`, `xt-forge re ida`)**:
+  - Added 14-tool stdio MCP server (`python3 -m xtforge.adapters.ida_mcp`) and `xtforge re ida <status|info|functions|decompile|disasm|xrefs|strings|structs>` CLI/MCP commands supporting live `ida-pro-mcp` HTTP bridges (`XT_IDA_MCP_URL`), `idalib` / `idat64` headless batch execution, `.i64`/`.idb` header inspection, and automatic fallback to `borer` + `ghidra` + persistent SHA-256 overlays.
+  - Added `re_ida`, `re_borer`, `re_deep_elf`, `re_anchors`, `re_slice`, `re_live_probe`, and `re_rbxm` to the Go `--meta` hub (`native/xtforge-go/internal/mcp/proxy.go`) with flexible `address`/`target`/`rva`/`va` parameter aliasing.
+- **Stripped Itanium C++ ABI RTTI & Vtable Recovery (`xtforge/core/re/rtti.py`)**:
+  - Upgraded `extract_rtti` on ELF binaries to scan `.rodata` typeinfo name strings and `.rela.dyn` `R_X86_64_RELATIVE` / `R_AARCH64_RELATIVE` relocations, recovering stripped C++ classes, typeinfo addresses, vtables, and virtual method VAs without `.symtab`.
+- **6 New Agent Harness Integrations (`integrations/`, `install.sh`, `bin/npx-xtforge.mjs`)**:
+  - Added configurations and guides for **Kimi Code**, **Qoder**, **Gemini CLI**, **Cursor**, **Windsurf**, and **Cline / Roo Code**, and extended `xt-forge init` / `install.sh` skill sync.
+- **9-Tier, 5-Repetition Median Benchmark Suite (`docs/BENCHMARKS.md`, `benchmarks/nine_tier_5rep_summary.json`)**:
+  - Added 3 hard stripped `-O2 -s` Ghidra/Borer RE tiers (`tier7_re_decompile_hard`, `tier8_re_patch_diff_hard`, `tier9_re_rtti_vtable_hard`) and 5-rep median aggregation comparing Raw REA (`10/45`, 22.2%), XT-Forge + REA (`34/45`, 75.6%), and **Standalone XT-Forge (`42/45`, 93.3%)**.
+
+### Fixed
+- **Immediate Constant Diff Notes (`xtforge/core/re/diff.py`)**: Annotated changed `cmp`/`test` hex immediates with decimal equivalents in `diff_notes` alongside strength-reduced division decoding.
+- **Fresh Index `evidence_complete` & `authoritative_definition` (`xtforge/core/code/graph.py`, `native/xtforge-rs/src/code_graph.rs`)**: `code_callers` now reports `evidence_complete: true` after refreshing stale files and emits an unambiguous `authoritative_definition` object.
+
 ## 0.4.5 - 2026-11-19
 
 ### Added
