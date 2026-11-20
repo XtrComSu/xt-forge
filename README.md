@@ -13,6 +13,13 @@
     <img src="https://img.shields.io/badge/skills-24%20XTF--*%20Workflows-F59E0B?style=flat-square" alt="24 XTF-* Skills" />
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3B82F6?style=flat-square" alt="MIT License" /></a>
   </p>
+  <p>
+    <a href="#install-on-linux-macos-and-windows">Quickstart &amp; Install</a> ·
+    <a href="docs/BENCHMARKS.md">9-Tier Benchmarks</a> ·
+    <a href="docs/GUIDE.md">CLI &amp; Skills Guide</a> ·
+    <a href="docs/MCP-GATEWAY-AND-STEERING.md">MCP Gateway</a> ·
+    <a href="https://github.com/XtrComSu/xt-forge/releases/latest">Latest Release</a>
+  </p>
 </div>
 
 <p align="center">
