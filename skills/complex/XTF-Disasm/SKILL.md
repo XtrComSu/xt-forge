@@ -24,9 +24,9 @@ Follow execution paths inside stripped or C++ binaries from entrypoints to targe
    xt-forge re disasm target.bin --symbol main
    xt-forge re cfg target.bin --symbol main
    ```
-3. Recover C++ RTTI typeinfo/vtables or Go/Rust runtime metadata:
+3. Recover C++ RTTI typeinfo/vtables (including stripped Itanium ABI ELFs with inline vtable method decompilation previews) or Go/Rust runtime metadata:
    ```sh
-   xt-forge re rtti target.bin
+   xt-forge re rtti target.bin --json
    xt-forge re runtimes target.bin
    ```
 4. Annotate addresses cleanly during reversing so notes stay structured across passes:

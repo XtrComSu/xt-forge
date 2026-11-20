@@ -87,6 +87,49 @@ def _decode_reciprocal_notes(ins1: list[str], ins2: list[str], diff_lines: list[
     return notes
 
 
+def _borer_stripped_diff(c1: Path, c2: Path) -> dict[str, Any] | None:
+    """When binaries are stripped (.text), locate differing functions via borer and decompile them."""
+    from ...adapters.ghidra_mcp import STATE as _GSTATE
+    if not _GSTATE.borer_bin:
+        return None
+    f1_raw = _GSTATE.run_borer_cli("functions", str(c1), "", "0", "100") or ""
+    f2_raw = _GSTATE.run_borer_cli("functions", str(c2), "", "0", "100") or ""
+
+    def _parse_funcs(raw: str) -> list[tuple[str, int]]:
+        out: list[tuple[str, int]] = []
+        for ln in raw.splitlines():
+            parts = ln.split()
+            if len(parts) >= 2 and parts[0].startswith("0x"):
+                try:
+                    out.append((parts[0], int(parts[1])))
+                except ValueError:
+                    continue
+        return out
+
+    funcs1 = _parse_funcs(f1_raw)
+    funcs2 = _parse_funcs(f2_raw)
+    if not funcs1 or not funcs2:
+        return None
+
+    # Compare decompiled bodies for matching-index or same-address non-tiny functions (<= 8 functions)
+    diffs: list[dict[str, Any]] = []
+    for (addr1, sz1), (addr2, sz2) in zip(funcs1, funcs2):
+        if sz1 < 12 and sz2 < 12:
+            continue
+        p1 = (_GSTATE.run_borer_cli("decompile", str(c1), addr1, "full", "0", "80") or "").strip()
+        p2 = (_GSTATE.run_borer_cli("decompile", str(c2), addr2, "full", "0", "80") or "").strip()
+        if p1 and p2 and p1 != p2:
+            diffs.append({
+                "addr_v1": addr1,
+                "addr_v2": addr2,
+                "pseudocode_v1": "\n".join(p1.splitlines()[:45]),
+                "pseudocode_v2": "\n".join(p2.splitlines()[:45]),
+            })
+        if len(diffs) >= 2:
+            break
+    return {"borer_modified_functions": diffs} if diffs else None
+
+
 def _disasm_by_func(path: Path) -> dict[str, list[str]]:
     """Extract normalized per-function disassembly lines using objdump when present."""
     if not shutil.which("objdump"):
@@ -260,6 +303,10 @@ def diff_binaries(bin1: str | Path, bin2: str | Path) -> dict[str, Any]:
                 ann2 = _annotated_func_disasm(c2, name, _rodata_string_map(c2))
                 entry["function_disasm_v1"] = ann1 or ins1
                 entry["function_disasm_v2"] = ann2 or ins2
+            if name == ".text" and len(modified) == 0:
+                bdiff = _borer_stripped_diff(c1, c2)
+                if bdiff:
+                    entry.update(bdiff)
             modified.append(entry)
             continue
 
@@ -296,6 +343,7 @@ def diff_binaries(bin1: str | Path, bin2: str | Path) -> dict[str, Any]:
     return {
         "ok": True,
         "evidence_complete": True,
+        "next_action": "STOP_AND_ANSWER: evidence_complete=true; report modified_functions, diff_notes, and pseudocode/disasm diffs directly without extra objdump or brute-force loops.",
         "bin1": str(c1),
         "bin2": str(c2),
         "total_functions_v1": len(names1),

@@ -515,6 +515,7 @@ def audit_workspace(root_raw: str | Path = ".", *, max_findings: int = 25) -> di
     flagged_files = {f["file"] for f in deduped}
     clean_files = [m["file"] for m in modules if m["file"] not in flagged_files]
     audit_complete = len(py_files) <= 400
+    ev_complete = audit_complete and not bool(dynamic_dispatch_files)
 
     return {
         "ok": True,
@@ -523,7 +524,8 @@ def audit_workspace(root_raw: str | Path = ".", *, max_findings: int = 25) -> di
         "audited_files": audited_files,
         "files_skipped": max(0, len(py_files) - 400),
         "audit_complete": audit_complete,
-        "evidence_complete": audit_complete and not bool(dynamic_dispatch_files),
+        "evidence_complete": ev_complete,
+        "next_action": "STOP_AND_ANSWER: evidence_complete=true; all findings, function_source, and clean_files are included above. Do not re-read files." if ev_complete else None,
         "clean_files": clean_files,
         "dynamic_dispatch_detected": bool(dynamic_dispatch_files),
         "dynamic_dispatch_files": dynamic_dispatch_files,

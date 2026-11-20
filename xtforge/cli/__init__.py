@@ -13,7 +13,7 @@ from .slash_cmd import cmd_slash
 from .sync_cmd import cmd_sync
 from .calibrate_cmd import cmd_calibrate
 from .tools_cmd import cmd_tools
-from .scan_cmd import cmd_re, cmd_scan
+from .scan_cmd import cmd_re, cmd_scan, cmd_test
 from .swarm_cmd import cmd_swarm
 from .session_cmd import cmd_session
 from .codec_cmd import cmd_codec
@@ -300,7 +300,7 @@ def _add_re(sub) -> None:
                                        "annotate", "asar", "netcap", "apk",
                                        "decompile", "trace",
                                        "deep-elf", "anchors", "slice", "live-probe", "rbxm",
-                                       "ida", "borer"])
+                                       "ida", "borer", "triage"])
     r.add_argument("value", nargs="?", default=None,
                    help="binary path or subverb (same as --path)")
     r.add_argument("path", nargs="?", default=None)
@@ -349,6 +349,13 @@ def _add_docs(sub) -> None:
     d.add_argument("--limit", type=int, default=None,
                    help="search: result count (show: token budget)")
     d.set_defaults(func=cmd_docs)
+
+
+def _add_test(sub) -> None:
+    t = sub.add_parser("test", help="auto-detect and run project test suite")
+    t.add_argument("path", nargs="?", default=".")
+    t.add_argument("--pattern", default="", help="optional test filter pattern")
+    t.set_defaults(func=cmd_test)
 
 
 def _add_intel(sub) -> None:
@@ -740,6 +747,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_prompt(sub)
     _add_re(sub)
     _add_docs(sub)
+    _add_test(sub)
     _add_intel(sub)
     _add_hub(sub)
     _add_scan(sub)

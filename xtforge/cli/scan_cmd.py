@@ -206,7 +206,7 @@ def cmd_re(args):
                 confidence=float(getattr(args, "confidence", 1.0) or 1.0),
                 fmt=getattr(args, "format", None) or "json",
             )
-        elif verb in ("asar", "netcap", "apk", "decompile", "trace"):
+        elif verb in ("asar", "netcap", "apk", "decompile", "trace", "triage"):
             from ..core.re import runtimes as rt
             if verb == "asar":
                 res = rt.inspect_asar(path, grep=getattr(args, "grep", None) or "", limit=args.limit)
@@ -216,6 +216,8 @@ def cmd_re(args):
                 res = rt.inspect_apk(path)
             elif verb == "decompile":
                 res = rt.decompile(path, target=getattr(args, "symbol", None) or getattr(args, "target", None) or "main")
+            elif verb == "triage":
+                res = rt.triage_binary(path)
             else:
                 res = rt.trace_binary(path, confirm=getattr(args, "confirm", None))
         elif verb in ("deep-elf", "anchors", "slice", "live-probe", "rbxm"):
@@ -441,7 +443,7 @@ def cmd_re(args):
         for item in res.get("imports", [])[:6]:
             lines.append(f"  import  {item['symbol']}")
         human = "\n".join(lines)
-    elif verb in ("annotate", "asar", "netcap", "apk", "decompile", "trace", "deep-elf", "anchors", "slice", "live-probe", "rbxm", "ida", "borer"):
+    elif verb in ("annotate", "asar", "netcap", "apk", "decompile", "trace", "triage", "deep-elf", "anchors", "slice", "live-probe", "rbxm", "ida", "borer"):
         human = res.get("output") or res.get("script") or res.get("code") or res.get("pseudocode") or (
             f"{verb} ok={res.get('ok')} count={res.get('count', res.get('chunk_count', len(res.get('files', res.get('annotations', res.get('warnings', []))))))}"
         )
@@ -453,6 +455,13 @@ def cmd_re(args):
                 f"  @{b['offset']:>8} {b['entropy']:>6} {b['verdict']}"
                 for b in res["blocks"])
     return _out(args, res, human or "(no output)")
+
+
+def cmd_test(args):
+    from ..core.build.test_runner import run_tests
+    res = run_tests(getattr(args, "path", ".") or ".", pattern=getattr(args, "pattern", "") or "")
+    human = f"{res.get('runner')}: rc={res.get('returncode')}\n{res.get('output', '')}"
+    return _out(args, res, human, code=0 if res.get("ok") else 1)
 
 
 def cmd_scan(args):

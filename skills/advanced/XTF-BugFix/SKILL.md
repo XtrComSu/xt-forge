@@ -27,8 +27,9 @@ Navigate large multi-module repositories methodically so bug fixes stay surgical
    ```sh
    xt-forge code syntax path/to/changed.py
    ```
-4. Record structured completion evidence and verify with exit codes before finishing:
+4. Run the project's test suite with automatic runner detection (`pytest` → `unittest` → `cargo test` → `go test` → `npm test`) via `xt-forge test . --json` (or `xt_call` → `test_run`), and record completion evidence:
    ```sh
+   xt-forge test . --json
    xt-forge goal verify --criteria "unit tests pass; caller X intact" --verify "python3 -m unittest discover -s tests" --body-file proof.txt
    ```
 

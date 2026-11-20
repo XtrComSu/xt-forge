@@ -37,17 +37,17 @@ PINNED: dict[str, list[str]] = {
               "taste_export", "taste_stats"],
     "goal": ["goal_status", "goal_run", "goal_verify"],
     "build": ["build_list", "build_status", "build_run", "build_graph",
-              "build_lint"],
+              "build_lint", "test_run"],
     "ops": ["version", "doctor", "tools_status", "calibrate", "slash",
             "ascii"],
     "code": ["code_index", "code_graph", "code_callers", "code_audit",
              "code_trace", "code_refs"],
     "re": ["re_diff", "re_inspect", "re_cfg",
            "re_deep_elf", "re_anchors", "re_slice", "re_live_probe",
-           "re_rbxm", "re_decompile", "re_ida", "re_borer"],
+           "re_rbxm", "re_decompile", "re_ida", "re_borer", "re_triage"],
 }
 
-TOOL_CAP = 65
+TOOL_CAP = 67
 
 
 def load_tools() -> list[dict]:

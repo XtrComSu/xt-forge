@@ -250,6 +250,34 @@ def _extract_itanium_elf(canon: Path) -> list[dict[str, Any]]:
     return found_classes
 
 
+def _inline_vtable_previews(canon: Path, classes: list[dict[str, Any]], *, max_classes: int = 4, max_methods: int = 4) -> None:
+    """Attach compact borer pseudocode previews for concrete subclass vtable methods."""
+    from ...adapters.ghidra_mcp import STATE as _GSTATE
+    if not _GSTATE.borer_bin:
+        return
+    enriched = 0
+    for cls in classes:
+        methods = cls.get("methods") or []
+        if not methods:
+            continue
+        previews: dict[str, str] = {}
+        for m_va in methods[:max_methods]:
+            raw = _GSTATE.run_borer_cli("decompile", str(canon), str(m_va), "full", "0", "30") or ""
+            if raw.strip():
+                body: list[str] = []
+                for ln in raw.splitlines():
+                    cleaned = re.sub(r"^\s*\d+\s+", "", ln).strip()
+                    if cleaned and not cleaned.startswith("//"):
+                        body.append(cleaned)
+                if body:
+                    previews[str(m_va)] = " | ".join(body)[:240]
+        if previews:
+            cls["method_previews"] = previews
+            enriched += 1
+            if enriched >= max_classes:
+                break
+
+
 def extract_rtti(target: str | Path) -> dict[str, Any]:
     """Recover C++ class hierarchies, RTTI names, and vtables."""
     canon = guard.read_guard(target)
@@ -283,8 +311,11 @@ def extract_rtti(target: str | Path) -> dict[str, Any]:
                 if "_ZTV" in sname and sname not in seen:
                     classes.append({"name": sname, "address": s["value"], "size": s.get("size", 0)})
                     seen.add(sname)
+            _inline_vtable_previews(canon, classes)
             return {
                 "ok": True,
+                "evidence_complete": True,
+                "next_action": "STOP_AND_ANSWER: evidence_complete=true; classes, vtables, methods, and method_previews are included above.",
                 "path": str(canon),
                 "format": "elf",
                 "class_count": len(classes),

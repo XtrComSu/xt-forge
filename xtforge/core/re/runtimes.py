@@ -119,6 +119,18 @@ def inspect_apk(path: str | Path) -> dict[str, Any]:
 
 def decompile(path: str | Path, *, target: str = "main") -> dict[str, Any]:
     canon = guard.read_guard(path)
+    targets = [t.strip() for t in str(target).split(",") if t.strip()]
+    if len(targets) > 1:
+        results: dict[str, Any] = {}
+        for t in targets[:8]:
+            results[t] = decompile(canon, target=t)
+        return {
+            "ok": any(v.get("ok") for v in results.values()),
+            "batch": True,
+            "count": len(results),
+            "results": results,
+        }
+    target = targets[0] if targets else "main"
     try:
         from ...adapters.ghidra_mcp import _handle_tool
         out = _handle_tool("decompile_function", {"path": str(canon), "name": target})
@@ -148,6 +160,31 @@ def decompile(path: str | Path, *, target: str = "main") -> dict[str, Any]:
         if res.returncode == 0 and res.stdout.strip():
             return {"ok": True, "engine": "objdump", "target": target, "code": res.stdout}
     return {"ok": False, "err": "no supported decompiler/disassembler found (ghidra/borer/rizin/r2/objdump)"}
+
+
+def triage_binary(path: str | Path) -> dict[str, Any]:
+    """One-shot RE triage: format info, checksec, sections, RTTI, top borer functions, and key strings."""
+    canon = guard.read_guard(path)
+    from . import native, rtti
+    from ...adapters.ghidra_mcp import STATE as _GSTATE
+
+    info = native.get_info(canon)
+    checksec = native.checksec(canon)
+    sections = native.get_sections(canon)
+    rtti_res = rtti.extract_rtti(canon)
+    strings_res = native.extract_strings(canon, min_len=6, limit=40)
+    borer_funcs = (_GSTATE.run_borer_cli("functions", str(canon), "", "0", "40") or "").splitlines()[:25] if _GSTATE.borer_bin else []
+    return {
+        "ok": True,
+        "evidence_complete": True,
+        "path": str(canon),
+        "info": info,
+        "checksec": checksec,
+        "sections": sections.get("sections", [])[:15],
+        "rtti": {"class_count": rtti_res.get("class_count", 0), "classes": (rtti_res.get("classes") or [])[:10]},
+        "borer_functions": borer_funcs,
+        "strings_sample": (strings_res.get("strings") or [])[:30],
+    }
 
 
 def trace_binary(path: str | Path, *, confirm: str | None = None) -> dict[str, Any]:

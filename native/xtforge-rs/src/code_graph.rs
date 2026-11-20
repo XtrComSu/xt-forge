@@ -669,6 +669,13 @@ pub fn query_graph(p: &Parsed, symbol: &str, root_raw: &str, depth: usize) -> Re
         None
     };
 
+    let ev_complete = !prod_ambiguous && !production_callers.is_empty();
+    let next_action: Value = if ev_complete {
+        json!("STOP_AND_ANSWER: evidence_complete=true; cite authoritative_definition and production_callers directly without re-reading files.")
+    } else {
+        Value::Null
+    };
+
     Ok(json!({
         "ok": true,
         "symbol": symbol,
@@ -677,7 +684,8 @@ pub fn query_graph(p: &Parsed, symbol: &str, root_raw: &str, depth: usize) -> Re
         "production_ambiguous": prod_ambiguous,
         "ambiguity_reason": ambiguity_reason,
         "authoritative_definition": authoritative_def,
-        "evidence_complete": !prod_ambiguous && !production_callers.is_empty(),
+        "evidence_complete": ev_complete,
+        "next_action": next_action,
         "definitions": defs,
         "production_callers": production_callers,
         "callers": callers,

@@ -5,9 +5,9 @@ description: Perform offline ELF and PE binary triage for mitigations, sections,
 
 # XTF-BinaryTriage (Complex Tier)
 
-**Quick start:** `xt-forge re inspect target.bin --json && xt-forge re checksec target.bin`
+**Quick start:** `xt-forge re triage target.bin --json` (or `xt_call` → `re_triage`)
 
-Assess an unknown executable offline in under a second before committing heavy decompiler time.
+Assess an unknown executable offline in a single `<200ms` call (`info`, `checksec`, `sections`, `rtti`, top `borer` functions, and strings) before committing heavy decompiler time.
 
 ## When to use
 - Auditing compiled binaries (`ELF`, `PE`/`DLL`, Mach-O) for hardening gaps or suspicious behavior.

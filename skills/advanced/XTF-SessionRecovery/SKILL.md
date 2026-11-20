@@ -25,7 +25,7 @@ Guarantee exactly-once execution for state-mutating MCP calls even when an upstr
      "verify_args": {"job_id": "job-alpha-01"}
    }
    ```
-3. If the upstream drops the connection mid-flight, `xt-forge` records `"status": "unknown"` in `$XT_HOME/call_journal.json` and automatically invokes `verify_tool` before any retry—returning the committed receipt with `"recovered": true` instead of re-running the write.
+3. If the upstream drops the connection mid-flight, `xt-forge` records `"status": "unknown"` in `$XT_HOME/call_journal.json` and returns a `recovery_hint`. **Immediately** re-invoke `xt_call` with the **exact same `idempotency_key` + `verify_tool` + `verify_args`** (never wander `$XT_HOME` with `ls` or `cat`); `xt-forge` runs `verify_tool` before any retry and returns the committed receipt with `"recovered": true`.
 4. Inspect or clean active stateful sessions with:
    ```sh
    xt-forge session list --json

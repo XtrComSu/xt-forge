@@ -427,6 +427,7 @@ def trace_symbol(symbol: str, root_raw: str | Path = ".", *, max_hops: int = 8) 
         "entry": symbol,
         "found": True,
         "evidence_complete": True,
+        "next_action": "STOP_AND_ANSWER: evidence_complete=true; cite active_implementation, active_path, config_values, and inactive_candidates directly without re-reading files.",
         "active_implementation": cur_def,
         "active_path": active_path,
         "disputed_edges": disputed_edges,

@@ -627,11 +627,13 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _tool(
         "re_decompile",
-        "Decompile a binary function using the multi-engine Ghidra + Borer + persistent SHA-256 overlay pipeline.",
-        {"path": _TEXT, "symbol": _TEXT, "target": _TEXT, "address": _TEXT}, ["path"],
+        "Decompile one or more binary functions (`symbol` or `symbols: [...]`) using the multi-engine Ghidra + Borer + SHA-256 overlay pipeline.",
+        {"path": _TEXT, "symbol": _TEXT, "symbols": {"type": "array", "items": _TEXT}, "target": _TEXT, "address": _TEXT}, ["path"],
         lambda a: ["re", "decompile", _str(a, "path"),
-                   *(["--symbol", str(a.get("symbol") or a.get("target") or a.get("address"))]
-                     if (a.get("symbol") or a.get("target") or a.get("address")) else [])],
+                   *(["--symbol", ",".join(str(x) for x in a["symbols"])]
+                     if isinstance(a.get("symbols"), list) and a["symbols"]
+                     else (["--symbol", str(a.get("symbol") or a.get("target") or a.get("address"))]
+                           if (a.get("symbol") or a.get("target") or a.get("address")) else []))],
     ),
     _tool(
         "re_ida",
@@ -645,6 +647,18 @@ TOOLS: list[dict[str, Any]] = [
         "Run Borer native decompiler/lifter subcommand (info, functions, decompile, disasmfn, class, vslot, schema, schemas, protocol, hooks, dispatchers, opcodes, opsends, grep, xrefs).",
         {"subcommand": _TEXT, "path": _TEXT, "target": _TEXT}, ["subcommand", "path"],
         lambda a: ["re", "borer", _str(a, "subcommand"), _str(a, "path"), *([_str(a, "target")] if a.get("target") else [])],
+    ),
+    _tool(
+        "re_triage",
+        "One-shot binary triage: format info, checksec, sections/entropy, stripped RTTI, top borer functions, and key strings.",
+        {"path": _TEXT}, ["path"],
+        lambda a: ["re", "triage", _str(a, "path")],
+    ),
+    _tool(
+        "test_run",
+        "Auto-detect and run the project test suite (pytest -> python3 -m unittest -> cargo test -> go test -> npm test).",
+        {"path": _TEXT, "pattern": _TEXT}, [],
+        lambda a: ["test", _str(a, "path") or ".", *_opt(a, "pattern", "--pattern")],
     ),
 ]
 

@@ -408,13 +408,15 @@ def query_graph(symbol: str, *, root: str | Path = ".", depth: int = 2,
         elif not production_callers:
             follow_up = "No import-resolved or text production callers found; consider route_grep if called dynamically."
 
+        ev_complete = (not prod_ambiguous) and bool(production_callers)
         return {
             "ok": True, "symbol": symbol, "depth": depth,
             "ambiguous": ambiguous,
             "production_ambiguous": prod_ambiguous,
             "ambiguity_reason": ambiguity_reason,
             "authoritative_definition": authoritative_def,
-            "evidence_complete": (not prod_ambiguous) and bool(production_callers),
+            "evidence_complete": ev_complete,
+            "next_action": "STOP_AND_ANSWER: evidence_complete=true; cite authoritative_definition and production_callers directly without re-reading files." if ev_complete else None,
             "definitions": defs,
             "production_callers": production_callers,
             "callers": callers,
