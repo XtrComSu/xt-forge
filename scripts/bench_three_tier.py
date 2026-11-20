@@ -24,6 +24,7 @@ import os
 import re
 import selectors
 import shutil
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -54,13 +55,16 @@ TIER_BUDGETS_S = {
     "tier5_trace": 90,
     "tier6_regression_src": 120,
     "tier6_regression_bin": 120,
+    "tier7_re_decompile_hard": 120,
+    "tier8_re_patch_diff_hard": 120,
+    "tier9_re_rtti_vtable_hard": 120,
 }
 
 SHORT_GENERAL_RULE = (
     "# Workspace Rule\n"
-    "Start with `xt_call` (`code_callers`, `code_audit`, `code_trace`, or `re_diff`) on the workspace root or binaries. "
-    "When a tool returns `evidence_complete: true` (with function excerpts, disassembly, or `production_ambiguous: false`), "
-    "answer immediately from that output without re-reading clean files or re-running objdump/grep. "
+    "Start with `xt_call` (`code_callers`, `code_audit`, `code_trace`, `re_diff`, `re_decompile`, `re_rtti`, `re_borer`, or `re_anchors`) on the workspace root or binaries. "
+    "When a tool returns `evidence_complete: true` (with function excerpts, disassembly, `diff_notes`, pseudocode, or `production_ambiguous: false`), "
+    "answer immediately from that output without re-reading clean files, running brute-force shell/python sweeps, or re-running objdump/grep. "
     "Run an additional check only when `production_ambiguous: true`, `audit_complete: false`, the index is stale, or the evidence conflicts.\n"
 )
 
@@ -671,6 +675,143 @@ int main(int argc, char **argv) {
 }
 '''
 
+TIER7_C = r'''#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+typedef struct {
+    uint32_t magic;
+    uint16_t flags;
+    uint16_t channel;
+    uint64_t nonce;
+    uint32_t quota;
+} TokenPacket;
+
+__attribute__((noinline))
+static uint32_t validate_token(const TokenPacket *pkt) {
+    if (!pkt) return 0;
+    if (pkt->magic != 0x58544639U) return 0;
+    if ((pkt->flags & 0x15U) != 0x15U) return 0;
+    uint64_t bucket = pkt->nonce / 7ULL;
+    uint32_t slot = pkt->quota % 13U;
+    if ((uint32_t)(bucket + slot) == 42U) {
+        return 1U;
+    }
+    return 0U;
+}
+
+__attribute__((noinline))
+static uint32_t decoy_mix(uint32_t x) {
+    return (x ^ 0xA5A55A5AU) + 17U;
+}
+
+int main(int argc, char **argv) {
+    TokenPacket pkt = {0x58544639U, 0x15U, 3U, 252ULL, 19U};
+    if (argc > 1) pkt.quota = (uint32_t)atoi(argv[1]);
+    if (decoy_mix(pkt.channel) == 0U) return 2;
+    if (validate_token(&pkt)) {
+        puts("GATEKEEPER_TOKEN_OK");
+        return 0;
+    }
+    puts("GATEKEEPER_DENIED");
+    return 1;
+}
+'''
+
+TIER8_C_V1 = r'''#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+__attribute__((noinline))
+static uint32_t hash_mix(uint32_t v) {
+    return (v * 2654435761U) ^ (v >> 13);
+}
+
+__attribute__((noinline))
+static int verify_session(uint32_t token, uint32_t level) {
+    if ((token & 0xF0U) != 0xA0U) return 0;
+    if ((level / 7U) < 4U) return 0;
+    return 1;
+}
+
+int main(int argc, char **argv) {
+    uint32_t token = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 0x85U;
+    uint32_t level = argc > 2 ? (uint32_t)strtoul(argv[2], NULL, 0) : 10U;
+    if (hash_mix(token) == 0U) return 2;
+    puts(verify_session(token, level) ? "ALLOW" : "DENY");
+    return 0;
+}
+'''
+
+TIER8_C_V2 = r'''#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+__attribute__((noinline))
+static uint32_t hash_mix(uint32_t v) {
+    return (v * 2654435761U) ^ (v >> 13);
+}
+
+__attribute__((noinline))
+static int verify_session(uint32_t token, uint32_t level) {
+    if ((token & 0xF0U) != 0x80U) return 0;
+    if ((level / 7U) < 1U) return 0;
+    return 1;
+}
+
+int main(int argc, char **argv) {
+    uint32_t token = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 0x85U;
+    uint32_t level = argc > 2 ? (uint32_t)strtoul(argv[2], NULL, 0) : 10U;
+    if (hash_mix(token) == 0U) return 2;
+    puts(verify_session(token, level) ? "ALLOW" : "DENY");
+    return 0;
+}
+'''
+
+TIER9_CPP = r'''#include <iostream>
+#include <memory>
+#include <vector>
+
+class PacketHandler {
+public:
+    virtual ~PacketHandler() = default;
+    virtual int opcode() const = 0;
+    virtual int process(int x) const = 0;
+};
+
+class LegacyDropHandler : public PacketHandler {
+public:
+    int opcode() const override { return 0x11; }
+    int process(int x) const override { return x * 2; }
+};
+
+class SecureVaultHandler : public PacketHandler {
+public:
+    int opcode() const override { return 0x7A; }
+    int process(int x) const override { return (x ^ 0x55) + 19; }
+};
+
+class MetricsTapHandler : public PacketHandler {
+public:
+    int opcode() const override { return 0x33; }
+    int process(int x) const override { return x + 7; }
+};
+
+int main(int argc, char **argv) {
+    std::vector<std::unique_ptr<PacketHandler>> handlers;
+    handlers.push_back(std::make_unique<LegacyDropHandler>());
+    handlers.push_back(std::make_unique<SecureVaultHandler>());
+    handlers.push_back(std::make_unique<MetricsTapHandler>());
+    int x = argc > 1 ? std::atoi(argv[1]) : 10;
+    int total = 0;
+    for (const auto &h : handlers) {
+        total += h->opcode() + h->process(x);
+    }
+    std::cout << "total=" << total << "\n";
+    return 0;
+}
+'''
+
 TIER6_C_V2 = r'''#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -706,6 +847,143 @@ int main(int argc, char **argv) {
 }
 '''
 
+TIER7_C = r'''#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+typedef struct {
+    uint32_t magic;
+    uint16_t flags;
+    uint16_t channel;
+    uint64_t nonce;
+    uint32_t quota;
+} TokenPacket;
+
+__attribute__((noinline))
+static uint32_t validate_token(const TokenPacket *pkt) {
+    if (!pkt) return 0;
+    if (pkt->magic != 0x58544639U) return 0;
+    if ((pkt->flags & 0x15U) != 0x15U) return 0;
+    uint64_t bucket = pkt->nonce / 7ULL;
+    uint32_t slot = pkt->quota % 13U;
+    if ((uint32_t)(bucket + slot) == 42U) {
+        return 1U;
+    }
+    return 0U;
+}
+
+__attribute__((noinline))
+static uint32_t decoy_mix(uint32_t x) {
+    return (x ^ 0xA5A55A5AU) + 17U;
+}
+
+int main(int argc, char **argv) {
+    TokenPacket pkt = {0x58544639U, 0x15U, 3U, 252ULL, 19U};
+    if (argc > 1) pkt.quota = (uint32_t)atoi(argv[1]);
+    if (decoy_mix(pkt.channel) == 0U) return 2;
+    if (validate_token(&pkt)) {
+        puts("GATEKEEPER_TOKEN_OK");
+        return 0;
+    }
+    puts("GATEKEEPER_DENIED");
+    return 1;
+}
+'''
+
+TIER8_C_V1 = r'''#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+__attribute__((noinline))
+static uint32_t hash_mix(uint32_t v) {
+    return (v * 2654435761U) ^ (v >> 13);
+}
+
+__attribute__((noinline))
+static int verify_session(uint32_t token, uint32_t level) {
+    if ((token & 0xF0U) != 0xA0U) return 0;
+    if ((level / 7U) < 4U) return 0;
+    return 1;
+}
+
+int main(int argc, char **argv) {
+    uint32_t token = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 0x85U;
+    uint32_t level = argc > 2 ? (uint32_t)strtoul(argv[2], NULL, 0) : 10U;
+    if (hash_mix(token) == 0U) return 2;
+    puts(verify_session(token, level) ? "ALLOW" : "DENY");
+    return 0;
+}
+'''
+
+TIER8_C_V2 = r'''#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+__attribute__((noinline))
+static uint32_t hash_mix(uint32_t v) {
+    return (v * 2654435761U) ^ (v >> 13);
+}
+
+__attribute__((noinline))
+static int verify_session(uint32_t token, uint32_t level) {
+    if ((token & 0xF0U) != 0x80U) return 0;
+    if ((level / 7U) < 1U) return 0;
+    return 1;
+}
+
+int main(int argc, char **argv) {
+    uint32_t token = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 0x85U;
+    uint32_t level = argc > 2 ? (uint32_t)strtoul(argv[2], NULL, 0) : 10U;
+    if (hash_mix(token) == 0U) return 2;
+    puts(verify_session(token, level) ? "ALLOW" : "DENY");
+    return 0;
+}
+'''
+
+TIER9_CPP = r'''#include <iostream>
+#include <memory>
+#include <vector>
+
+class PacketHandler {
+public:
+    virtual ~PacketHandler() = default;
+    virtual int opcode() const = 0;
+    virtual int process(int x) const = 0;
+};
+
+class LegacyDropHandler : public PacketHandler {
+public:
+    int opcode() const override { return 0x11; }
+    int process(int x) const override { return x * 2; }
+};
+
+class SecureVaultHandler : public PacketHandler {
+public:
+    int opcode() const override { return 0x7A; }
+    int process(int x) const override { return (x ^ 0x55) + 19; }
+};
+
+class MetricsTapHandler : public PacketHandler {
+public:
+    int opcode() const override { return 0x33; }
+    int process(int x) const override { return x + 7; }
+};
+
+int main(int argc, char **argv) {
+    std::vector<std::unique_ptr<PacketHandler>> handlers;
+    handlers.push_back(std::make_unique<LegacyDropHandler>());
+    handlers.push_back(std::make_unique<SecureVaultHandler>());
+    handlers.push_back(std::make_unique<MetricsTapHandler>());
+    int x = argc > 1 ? std::atoi(argv[1]) : 10;
+    int total = 0;
+    for (const auto &h : handlers) {
+        total += h->opcode() + h->process(x);
+    }
+    std::cout << "total=" << total << "\n";
+    return 0;
+}
+'''
+
 
 def fixture_revision_digest() -> str:
     h = hashlib.sha256()
@@ -715,6 +993,10 @@ def fixture_revision_digest() -> str:
             h.update(grp[k].encode())
     h.update(TIER6_C_V1.encode())
     h.update(TIER6_C_V2.encode())
+    h.update(TIER7_C.encode())
+    h.update(TIER8_C_V1.encode())
+    h.update(TIER8_C_V2.encode())
+    h.update(TIER9_CPP.encode())
     h.update(TIER2_HIDDEN_TEST.encode())
     h.update(MOCK_JOB_MCP_SERVER_PY.encode())
     return h.hexdigest()[:12]
@@ -776,6 +1058,60 @@ def prepare_tier_workspace(
             "Observed v2 (./bin/calc_v2): total_cents=5700\n",
             encoding="utf-8",
         )
+
+    if tier == "tier7_re_decompile_hard":
+        bin_dir = ws / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        cc = shutil.which("gcc") or shutil.which("clang")
+        if not cc:
+            raise RuntimeError("gcc or clang required to compile Tier 7 fixture")
+        src_dir = aux / "src"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        c_path = src_dir / "gatekeeper.c"
+        c_path.write_text(TIER7_C, encoding="utf-8")
+        r = subprocess.run([cc, "-O2", "-s", c_path.name, "-o", str(bin_dir / "gatekeeper")], cwd=str(src_dir), text=True, capture_output=True, timeout=20)
+        if r.returncode != 0:
+            raise RuntimeError(f"failed to compile {c_path}: {r.stderr}")
+        shutil.rmtree(src_dir, ignore_errors=True)
+
+    if tier == "tier8_re_patch_diff_hard":
+        bin_dir = ws / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        cc = shutil.which("gcc") or shutil.which("clang")
+        if not cc:
+            raise RuntimeError("gcc or clang required to compile Tier 8 fixtures")
+        src_dir = aux / "src"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        c1 = src_dir / "auth_v1.c"
+        c2 = src_dir / "auth_v2.c"
+        c1.write_text(TIER8_C_V1, encoding="utf-8")
+        c2.write_text(TIER8_C_V2, encoding="utf-8")
+        for c_path, out_bin in ((c1, bin_dir / "auth_v1"), (c2, bin_dir / "auth_v2")):
+            r = subprocess.run([cc, "-O2", "-s", c_path.name, "-o", str(out_bin)], cwd=str(src_dir), text=True, capture_output=True, timeout=20)
+            if r.returncode != 0:
+                raise RuntimeError(f"failed to compile {c_path}: {r.stderr}")
+        shutil.rmtree(src_dir, ignore_errors=True)
+        (ws / "REPRO_INPUT.txt").write_text(
+            "Supplied input: 0x85 10\n"
+            "Observed v1 (./bin/auth_v1 0x85 10): DENY\n"
+            "Observed v2 (./bin/auth_v2 0x85 10): ALLOW\n",
+            encoding="utf-8",
+        )
+
+    if tier == "tier9_re_rtti_vtable_hard":
+        bin_dir = ws / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        cxx = shutil.which("g++") or shutil.which("clang++")
+        if not cxx:
+            raise RuntimeError("g++ or clang++ required to compile Tier 9 fixture")
+        src_dir = aux / "src"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        cpp_path = src_dir / "router_cpp.cpp"
+        cpp_path.write_text(TIER9_CPP, encoding="utf-8")
+        r = subprocess.run([cxx, "-O2", "-s", cpp_path.name, "-o", str(bin_dir / "router_cpp")], cwd=str(src_dir), text=True, capture_output=True, timeout=20)
+        if r.returncode != 0:
+            raise RuntimeError(f"failed to compile {cpp_path}: {r.stderr}")
+        shutil.rmtree(src_dir, ignore_errors=True)
 
     if tier == "tier3_recover":
         srv = aux / "job_mcp_server.py"
@@ -882,6 +1218,28 @@ def build_tier_prompt(tier: str, arm: str, ws: Path, *, use_meta: bool = True, v
             "Inspect/diff the binaries to identify the changed behavior, localize the modified function and cause, and explain how it produces 5700 instead of 5400."
             f"{extra}"
         )
+    if tier == "tier7_re_decompile_hard":
+        return (
+            f"Workspace root: {ws}\n"
+            "Task (READ-ONLY — do not edit files): Analyze the stripped `-O2` binary `bin/gatekeeper` (no source included). "
+            "Recover and report: (1) the exact 32-bit `magic` constant in hex, (2) the divisor and modulo constants applied to the packet fields, "
+            "(3) the struct field byte offsets read for `nonce` and `quota`, and (4) the exact target sum required for `GATEKEEPER_TOKEN_OK`."
+            f"{extra}"
+        )
+    if tier == "tier8_re_patch_diff_hard":
+        return (
+            f"Workspace root: {ws}\n"
+            "Task (READ-ONLY — do not edit files): Two stripped `-O2` binaries `bin/auth_v1` and `bin/auth_v2` (no source included) produce different verdicts on `REPRO_INPUT.txt` (`DENY` vs `ALLOW`). "
+            "Diff the binaries to identify the exact modified mask/comparison constants and threshold change, and explain how `auth_v2` bypasses the `auth_v1` check."
+            f"{extra}"
+        )
+    if tier == "tier9_re_rtti_vtable_hard":
+        return (
+            f"Workspace root: {ws}\n"
+            "Task (READ-ONLY — do not edit files): Analyze the stripped `-O2` C++ binary `bin/router_cpp` (no source included). "
+            "Recover all 3 concrete RTTI subclass names, the constant opcode returned by `SecureVaultHandler`, and the arithmetic/bitwise transform applied by `SecureVaultHandler`'s second virtual method."
+            f"{extra}"
+        )
     if arm in ("B", "C"):
         if use_meta:
             return (
@@ -967,6 +1325,12 @@ def _tier1_extract_bindings(clause: str, syms: tuple[str, ...], files: tuple[str
 
 def grade_tier1(final_text: str, *, variant: str = "primary") -> tuple[bool, str | None]:
     txt = final_text or ""
+    common_meta_backticks = {
+        "true", "false", "null", "none", "test_or_shadow_only", "multiple_production_definitions",
+        "import_resolved_call", "code_callers", "code_audit", "code_graph", "xt_call", "xt_discover",
+        "evidence_complete", "production_ambiguous", "audit_complete", "dynamic_dispatch_detected",
+        "stale_detected", "authoritative_definition",
+    }
     if variant == "heldout":
         expected_file = {
             "allow_backoff_retry": "backoff_policy.py",
@@ -974,7 +1338,7 @@ def grade_tier1(final_text: str, *, variant: str = "primary") -> tuple[bool, str
             "post_hook_event": "hook_sender.py",
         }
         bad_tokens = ("drain_old_pool", "replay_old_hooks", "legacy_backoff_check", "test_fake_backoff_caller", "old_pool.py", "test_backoff_stub.py")
-        extra_backticks = {"backoff_policy", "pool_worker", "hook_sender", "attempt", "cap", "code", "evt_id", "retry", "abort"}
+        extra_backticks = {"backoff_policy", "pool_worker", "hook_sender", "attempt", "cap", "code", "evt_id", "retry", "abort"} | common_meta_backticks
         dec_sym = "allow_backoff_retry"
         dec_file = "backoff_policy.py"
         caller_syms = ("run_pool_task", "post_hook_event")
@@ -985,7 +1349,7 @@ def grade_tier1(final_text: str, *, variant: str = "primary") -> tuple[bool, str
             "flush_webhook": "webhook_pump.py",
         }
         bad_tokens = ("drain_legacy_queue", "replay_dead_letters", "should_retry_legacy", "test_fake_retry_caller", "old_queue.py", "test_retry_helper.py")
-        extra_backticks = {"retry_budget", "job_runner", "webhook_pump", "max_retries", "status_code", "attempt", "delivery_id", "dead_letter", "requeue"}
+        extra_backticks = {"retry_budget", "job_runner", "webhook_pump", "max_retries", "status_code", "attempt", "delivery_id", "dead_letter", "requeue"} | common_meta_backticks
         dec_sym = "should_retry_attempt"
         dec_file = "retry_budget.py"
         caller_syms = ("dispatch_job", "flush_webhook")
@@ -1253,6 +1617,46 @@ def grade_tier6_regression(ws: Path, final_text: str, *, mode: str = "src") -> t
     return True, None
 
 
+def grade_tier7_re_decompile(final_text: str) -> tuple[bool, str | None]:
+    txt = final_text or ""
+    low = txt.lower()
+    if "58544639" not in low and "xtf9" not in low:
+        return False, "missing magic constant 0x58544639"
+    if not ("7" in txt and "13" in txt):
+        return False, "missing divisor 7 or modulo 13"
+    if "42" not in txt and "0x2a" not in low:
+        return False, "missing target sum 42"
+    if not (("0x8" in low or "+8" in low or "offset 8" in low or "+ 8" in low or "0x08" in low)
+            and ("0x10" in low or "+16" in low or "offset 16" in low or "+ 16" in low)):
+        return False, "missing struct offsets +0x8 and +0x10"
+    return True, None
+
+
+def grade_tier8_re_patch_diff(final_text: str) -> tuple[bool, str | None]:
+    txt = final_text or ""
+    low = txt.lower()
+    if "0xa0" not in low and "160" not in txt:
+        return False, "missing v1 token mask/value 0xa0"
+    if "0x80" not in low and "128" not in txt:
+        return False, "missing v2 token mask/value 0x80"
+    if not (("4" in txt and "1" in txt) or "threshold" in low):
+        return False, "missing threshold change (4 -> 1)"
+    return True, None
+
+
+def grade_tier9_re_rtti_vtable(final_text: str) -> tuple[bool, str | None]:
+    txt = final_text or ""
+    low = txt.lower()
+    for cls in ("LegacyDropHandler", "SecureVaultHandler", "MetricsTapHandler"):
+        if cls not in txt:
+            return False, f"missing RTTI class {cls}"
+    if "0x7a" not in low and "122" not in txt:
+        return False, "missing SecureVaultHandler opcode 0x7A (122)"
+    if not (("0x55" in low or "85" in txt) and ("19" in txt or "0x13" in low)):
+        return False, "missing SecureVaultHandler transform (^ 0x55 + 19)"
+    return True, None
+
+
 def grade_tier3(aux: Path, final_text: str) -> tuple[bool, str | None, dict[str, int]]:
     state_path = aux / "server_state.json"
     if not state_path.is_file():
@@ -1478,6 +1882,7 @@ def _build_dsh_patch(
     user_harness: bool = False,
     dsh_keep_mcps: set[str] | None = None,
     use_meta: bool = True,
+    rea_path: str | None = None,
 ) -> Path:
     patch = aux / f"dsh_{tier}_{arm}.yml"
     lines: list[str] = []
@@ -1504,11 +1909,26 @@ def _build_dsh_patch(
 """.strip())
     keep = (dsh_keep_mcps or set()) if arm != "C" else set()
     if keep or not user_harness or arm == "C":
-        for dis in ("mcp-github", "mcp-rea", "mcp-context7", "mcp-glmocr", "mcp-cad3d", "mcp-photoeditor", "mcp-searchd", "mcp-treg"):
+        for dis in ("mcp-github", "mcp-rea", "mcp-context7", "mcp-glmocr", "mcp-cad3d", "mcp-photoeditor", "mcp-searchd", "mcp-treg", "mcp-ghidra"):
             if dis in keep:
                 lines.append(f"- id: {dis}\n  disabled: false")
             else:
                 lines.append(f"- id: {dis}\n  disabled: true")
+    if rea_path and arm in ("A", "B") and Path(rea_path).is_file():
+        node_bin = shutil.which("node") or "/home/xtrcom/.local/bin/node"
+        lines.append(f"""
+- insert:
+    - id: mcp-rea-bench
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: rea
+        transport: stdio
+        command: {node_bin}
+        args:
+          - {rea_path}
+          - mcp
+        failOnStartupError: false
+""".strip())
     if arm == "A":
         lines.append("- id: mcp-xt-forge\n  disabled: true")
     else:
@@ -1799,6 +2219,7 @@ def run_harness_arm(
     variant: str = "primary",
     instructions_mode: str = "short",
     cold_index: bool = False,
+    rea_path: str | None = None,
 ) -> dict[str, Any]:
     env = os.environ.copy()
     if not env.get("HIVE_AI_API_KEY") and env.get("THE_HIVE_API_KEY"):
@@ -1809,7 +2230,7 @@ def run_harness_arm(
 
     if harness == "dsh":
         model_id = "hive-ai/deepseek-ai/deepseek-v4.1-flash-1017#medium"
-        patch = _build_dsh_patch(aux, "hive-deepseek", tier, arm, user_harness=user_harness, dsh_keep_mcps=dsh_keep_mcps, use_meta=use_meta)
+        patch = _build_dsh_patch(aux, "hive-deepseek", tier, arm, user_harness=user_harness, dsh_keep_mcps=dsh_keep_mcps, use_meta=use_meta, rea_path=rea_path)
         prof = "dsh-tui" if (user_harness and not dsh_keep_mcps) else "headless"
         cmd = ["dsh", "--profile", prof, "--patch", str(patch), "--json", prompt]
     elif harness == "codex":
@@ -1854,6 +2275,12 @@ def run_harness_arm(
         passed, fail_reason = grade_tier6_regression(ws, final_text, mode="src")
     elif tier == "tier6_regression_bin":
         passed, fail_reason = grade_tier6_regression(ws, final_text, mode="bin")
+    elif tier == "tier7_re_decompile_hard":
+        passed, fail_reason = grade_tier7_re_decompile(final_text)
+    elif tier == "tier8_re_patch_diff_hard":
+        passed, fail_reason = grade_tier8_re_patch_diff(final_text)
+    elif tier == "tier9_re_rtti_vtable_hard":
+        passed, fail_reason = grade_tier9_re_rtti_vtable(final_text)
     else:
         passed, fail_reason = False, f"unknown_tier:{tier}"
 
@@ -2078,7 +2505,23 @@ def self_test() -> int:
         )
         assert ok6_pass and err6_pass is None, err6_pass
 
-        print("six_tier self-test: OK")
+        # Tier 7-9 (Hard Ghidra/Borer RE tiers):
+        ws7, _ = prepare_tier_workspace(tmp, "tier7_re_decompile_hard", "C")
+        assert (ws7 / "bin" / "gatekeeper").is_file()
+        ok7, err7 = grade_tier7_re_decompile("magic 0x58544639, nonce at +0x8 / 7, quota at +0x10 % 13, target sum == 42.")
+        assert ok7 and err7 is None, err7
+
+        ws8, _ = prepare_tier_workspace(tmp, "tier8_re_patch_diff_hard", "C")
+        assert (ws8 / "bin" / "auth_v1").is_file() and (ws8 / "bin" / "auth_v2").is_file()
+        ok8, err8 = grade_tier8_re_patch_diff("v1 checks 0xa0 and threshold 4; v2 lowers mask to 0x80 and threshold 1.")
+        assert ok8 and err8 is None, err8
+
+        ws9, _ = prepare_tier_workspace(tmp, "tier9_re_rtti_vtable_hard", "C")
+        assert (ws9 / "bin" / "router_cpp").is_file()
+        ok9, err9 = grade_tier9_re_rtti_vtable("Classes: LegacyDropHandler, SecureVaultHandler (opcode 0x7a, (x ^ 0x55) + 19), MetricsTapHandler.")
+        assert ok9 and err9 is None, err9
+
+        print("nine_tier self-test: OK")
         return 0
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -2088,7 +2531,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--self-test", action="store_true", help="Verify fixtures, hidden graders, and mock MCP recovery offline")
     ap.add_argument("--harnesses", default="dsh,codex,opencode")
-    ap.add_argument("--tiers", default="tier1_find,tier2_fix,tier3_recover,tier4_defects,tier5_trace,tier6_regression_src,tier6_regression_bin")
+    ap.add_argument("--tiers", default="tier1_find,tier2_fix,tier3_recover,tier4_defects,tier5_trace,tier6_regression_src,tier6_regression_bin,tier7_re_decompile_hard,tier8_re_patch_diff_hard,tier9_re_rtti_vtable_hard")
     ap.add_argument("--arms", default="A,B", help="Comma-separated arms: A (baseline/REA), B (REA+XT-Forge), C (XT-Forge only)")
     ap.add_argument("--reps", type=int, default=1, help="Repetitions per (tier, variant)")
     ap.add_argument("--variant", choices=["primary", "heldout", "both"], default="primary")
@@ -2097,6 +2540,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dev-check", action="store_true", help="5-10 min dev check: Tier 1 + Tier 4, 2 reps, 60s cap")
     ap.add_argument("--user-harness", action="store_true", help="Keep the user's live harness profile, plugins, and non-xt-forge MCPs; toggle only xt-forge off vs on")
     ap.add_argument("--dsh-keep-mcps", default="", help="Comma-separated DSH MCP ids to keep enabled (e.g. mcp-rea) while disabling other external MCPs")
+    ap.add_argument("--rea-path", default="/tmp/xt_bench_rea/node_modules/rea-agents/scripts/rea.mjs", help="Path to rea.mjs for Arms A/B (ignored in Arm C)")
     ap.add_argument("--no-meta", action="store_true", help="Use direct xt-forge MCP (bin/xtforge mcp serve, no --meta) + mcp proxy in Tier 3")
     ap.add_argument("--out-dir", default="")
     ap.add_argument("--json", action="store_true")
@@ -2111,6 +2555,7 @@ def main(argv: list[str] | None = None) -> int:
     reps = 2 if args.dev_check else max(1, args.reps)
     variants = ["primary", "heldout"] if args.variant == "both" else [args.variant]
     dsh_keep_mcps = {x.strip() for x in args.dsh_keep_mcps.split(",") if x.strip()}
+    rea_path = args.rea_path if (args.rea_path and Path(args.rea_path).is_file()) else None
     use_meta = not args.no_meta
     git_rev = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"], text=True, capture_output=True).stdout.strip() or "unknown"
     h_vers = harness_versions(harnesses)
@@ -2147,6 +2592,7 @@ def main(argv: list[str] | None = None) -> int:
                                     variant=variant,
                                     instructions_mode=args.instructions,
                                     cold_index=args.cold_index,
+                                    rea_path=rea_path,
                                 )
                                 row["rep"] = rep
                                 row["user_harness"] = args.user_harness
@@ -2180,6 +2626,33 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 ties += 1
 
+    # Per-(harness, tier, variant, arm) median aggregation across reps
+    grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+    for r in rows:
+        grouped.setdefault((r["harness"], r["tier"], r["variant"], r["arm"]), []).append(r)
+
+    def _med(vals: list[float | int | None]) -> float | None:
+        clean = [float(v) for v in vals if isinstance(v, (int, float))]
+        return round(statistics.median(clean), 2) if clean else None
+
+    median_summary: list[dict[str, Any]] = []
+    for (h, t, v, arm_id), grp in sorted(grouped.items()):
+        passes = sum(1 for g in grp if g["pass"])
+        median_summary.append({
+            "harness": h,
+            "tier": t,
+            "variant": v,
+            "arm": arm_id,
+            "reps": len(grp),
+            "passes": passes,
+            "pass_rate": round(passes / len(grp), 3),
+            "median_wall_s": _med([g.get("wall_s") for g in grp]),
+            "median_ev_s": _med([g.get("sufficient_evidence_s") for g in grp]),
+            "median_input_tokens": _med([g.get("input_tokens") for g in grp]),
+            "median_tool_calls": _med([g.get("tool_calls") for g in grp]),
+            "median_xtforge_calls": _med([g.get("xtforge_calls") for g in grp]),
+        })
+
     summary = {
         "xt_forge_revision": git_rev,
         "fixture_revision": fixture_revision_digest(),
@@ -2187,6 +2660,7 @@ def main(argv: list[str] | None = None) -> int:
         "harness_versions": h_vers,
         "preflight_smoke": smoke,
         "paired_b_vs_a": {"wins": wins, "ties": ties, "losses": losses},
+        "median_summary": median_summary,
         "rows": rows,
     }
 
@@ -2215,6 +2689,15 @@ def main(argv: list[str] | None = None) -> int:
                 f"{r['wall_s']:>6.1f} {ev_s:>6} {str(r['input_tokens']):>8} "
                 f"{r['tool_calls']:>5} {r['invalid_invocations']:>3} {r['xtforge_calls']:>4}  {note}"
             )
+        if median_summary:
+            print("\n=== MEDIAN SUMMARY ===")
+            print(f"{'tier':<26} {'arm':<3} {'pass':>6} {'med_wall_s':>10} {'med_ev_s':>8} {'med_in_tok':>10} {'med_tools':>9}")
+            for m in median_summary:
+                print(
+                    f"{m['tier']:<26} {m['arm']:<3} {m['passes']}/{m['reps']:<4} "
+                    f"{str(m['median_wall_s'] or '-'):>10} {str(m['median_ev_s'] or '-'):>8} "
+                    f"{str(m['median_input_tokens'] or '-'):>10} {str(m['median_tool_calls'] or '-'):>9}"
+                )
     return 0
 
 

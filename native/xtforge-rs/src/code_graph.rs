@@ -648,7 +648,8 @@ pub fn query_graph(p: &Parsed, symbol: &str, root_raw: &str, depth: usize) -> Re
         }
     }
 
-    let prod_defs = defs.iter().filter(|d| !d["is_test"].as_bool().unwrap_or(false)).count();
+    let prod_def_list: Vec<&Value> = defs.iter().filter(|d| !d["is_test"].as_bool().unwrap_or(false)).collect();
+    let prod_defs = prod_def_list.len();
     let ambiguous = defs.len() > 1;
     let prod_ambiguous = prod_defs > 1;
     let ambiguity_reason: Value = if prod_ambiguous {
@@ -658,6 +659,7 @@ pub fn query_graph(p: &Parsed, symbol: &str, root_raw: &str, depth: usize) -> Re
     } else {
         Value::Null
     };
+    let authoritative_def: Value = if prod_defs == 1 { prod_def_list[0].clone() } else { Value::Null };
     let stale_detected = idx["stale_detected"].as_bool().unwrap_or(false);
     let follow_up = if prod_ambiguous {
         Some(format!("Multiple non-test definitions of '{query_sym}' found ({prod_defs}); inspect module imports to disambiguate."))
@@ -674,7 +676,8 @@ pub fn query_graph(p: &Parsed, symbol: &str, root_raw: &str, depth: usize) -> Re
         "ambiguous": ambiguous,
         "production_ambiguous": prod_ambiguous,
         "ambiguity_reason": ambiguity_reason,
-        "evidence_complete": !prod_ambiguous && !production_callers.is_empty() && !stale_detected,
+        "authoritative_definition": authoritative_def,
+        "evidence_complete": !prod_ambiguous && !production_callers.is_empty(),
         "definitions": defs,
         "production_callers": production_callers,
         "callers": callers,

@@ -232,6 +232,40 @@ def cmd_re(args):
                 res = sober_re.probe_live_process(int(path))
             else:
                 res = sober_re.inspect_rbxm_container(path)
+        elif verb == "ida":
+            from ..core.re import ida as _ida
+            sub = args.value or "status"
+            target_path = args.path or (args.extra[0] if args.extra else "")
+            sym = getattr(args, "symbol", None) or getattr(args, "target", None) or "main"
+            flt = getattr(args, "filter", None) or getattr(args, "grep", None) or ""
+            if sub == "status":
+                res = _ida.ida_status()
+            elif sub == "info":
+                res = _ida.inspect_idb(target_path)
+            elif sub == "functions":
+                res = _ida.ida_functions(target_path, filter_str=flt, limit=args.limit)
+            elif sub == "decompile":
+                res = _ida.ida_decompile(target_path, sym)
+            elif sub == "disasm":
+                res = _ida.ida_disasm(target_path, sym)
+            elif sub == "xrefs":
+                res = _ida.ida_xrefs(target_path, sym)
+            elif sub == "strings":
+                res = _ida.ida_strings(target_path, filter_str=flt, limit=args.limit)
+            elif sub == "structs":
+                res = _ida.ida_structs(target_path)
+            else:
+                res = {"ok": False, "err": f"unknown ida subcommand: {sub}"}
+        elif verb == "borer":
+            from ..adapters.ghidra_mcp import STATE as _GSTATE
+            sub = args.value or "info"
+            target_path = args.path or ""
+            extra = [str(x) for x in (getattr(args, "extra", []) or [])]
+            if not _GSTATE.borer_bin:
+                res = {"ok": False, "err": "borer binary not found"}
+            else:
+                out = _GSTATE.run_borer_cli(sub, target_path, *extra)
+                res = {"ok": bool(out), "subcommand": sub, "path": target_path, "output": out or "", "engine": "borer"}
         else:
             return _out(args, {"ok": False, "error": f"unknown verb: {verb}"},
                         f"error: unknown verb {verb}", code=2)
@@ -407,8 +441,8 @@ def cmd_re(args):
         for item in res.get("imports", [])[:6]:
             lines.append(f"  import  {item['symbol']}")
         human = "\n".join(lines)
-    elif verb in ("annotate", "asar", "netcap", "apk", "decompile", "trace", "deep-elf", "anchors", "slice", "live-probe", "rbxm"):
-        human = res.get("script") or res.get("code") or (
+    elif verb in ("annotate", "asar", "netcap", "apk", "decompile", "trace", "deep-elf", "anchors", "slice", "live-probe", "rbxm", "ida", "borer"):
+        human = res.get("output") or res.get("script") or res.get("code") or res.get("pseudocode") or (
             f"{verb} ok={res.get('ok')} count={res.get('count', res.get('chunk_count', len(res.get('files', res.get('annotations', res.get('warnings', []))))))}"
         )
     else:

@@ -68,6 +68,22 @@ def _decode_reciprocal_notes(ins1: list[str], ins2: list[str], diff_lines: list[
                 f"strength-reduced division changed: /{d1} ({pct1:.4g}%) in v1 -> /{d2} ({pct2:.4g}%) in v2 "
                 f"(shift 0x{sh1} -> 0x{sh2})"
             )
+
+    # Annotate immediate operand changes (e.g., cmp/test/and thresholds & masks)
+    _imm_re = re.compile(r"\$(?:0x([0-9a-fA-F]+)|(-?\d+))\b")
+    minus_lines = [ln[1:].strip() for ln in diff_lines if ln.startswith("-") and not ln.startswith("---")]
+    plus_lines = [ln[1:].strip() for ln in diff_lines if ln.startswith("+") and not ln.startswith("+++")]
+    for l1, l2 in zip(minus_lines, plus_lines):
+        op1 = l1.split(None, 1)[0] if l1 else ""
+        op2 = l2.split(None, 1)[0] if l2 else ""
+        if op1 != op2 or not op1:
+            continue
+        m1 = _imm_re.search(l1)
+        m2 = _imm_re.search(l2)
+        if m1 and m2 and m1.group(0) != m2.group(0):
+            v1 = int(m1.group(1), 16) if m1.group(1) else int(m1.group(2))
+            v2 = int(m2.group(1), 16) if m2.group(1) else int(m2.group(2))
+            notes.append(f"{op1} immediate changed: {m1.group(0)} ({v1}) -> {m2.group(0)} ({v2})")
     return notes
 
 

@@ -42,10 +42,12 @@ PINNED: dict[str, list[str]] = {
             "ascii"],
     "code": ["code_index", "code_graph", "code_callers", "code_audit",
              "code_trace", "code_refs"],
-    "re": ["re_diff", "re_inspect", "re_cfg"],
+    "re": ["re_diff", "re_inspect", "re_cfg",
+           "re_deep_elf", "re_anchors", "re_slice", "re_live_probe",
+           "re_rbxm", "re_decompile", "re_ida", "re_borer"],
 }
 
-TOOL_CAP = 57
+TOOL_CAP = 65
 
 
 def load_tools() -> list[dict]:

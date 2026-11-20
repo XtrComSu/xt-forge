@@ -393,13 +393,15 @@ def query_graph(symbol: str, *, root: str | Path = ".", depth: int = 2,
                     seen_down.add(r["dst_name"])
                     dq.append((r["dst_name"], d + 1))
 
-        prod_defs = sum(1 for d in defs if not d["is_test"])
+        prod_def_list = [d for d in defs if not d["is_test"]]
+        prod_defs = len(prod_def_list)
         ambiguous = len(defs) > 1
         prod_ambiguous = prod_defs > 1
         ambiguity_reason = (
             "multiple_production_definitions" if prod_ambiguous
             else ("test_or_shadow_only" if ambiguous else None)
         )
+        authoritative_def = prod_def_list[0] if prod_defs == 1 else None
         follow_up = None
         if prod_ambiguous:
             follow_up = f"Multiple non-test definitions of '{query_sym}' found ({prod_defs}); inspect module imports to disambiguate."
@@ -411,7 +413,8 @@ def query_graph(symbol: str, *, root: str | Path = ".", depth: int = 2,
             "ambiguous": ambiguous,
             "production_ambiguous": prod_ambiguous,
             "ambiguity_reason": ambiguity_reason,
-            "evidence_complete": (not prod_ambiguous) and bool(production_callers) and not idx["stale_detected"],
+            "authoritative_definition": authoritative_def,
+            "evidence_complete": (not prod_ambiguous) and bool(production_callers),
             "definitions": defs,
             "production_callers": production_callers,
             "callers": callers,

@@ -628,8 +628,23 @@ TOOLS: list[dict[str, Any]] = [
     _tool(
         "re_decompile",
         "Decompile a binary function using the multi-engine Ghidra + Borer + persistent SHA-256 overlay pipeline.",
-        {"path": _TEXT, "symbol": _TEXT}, ["path"],
-        lambda a: ["re", "decompile", _str(a, "path"), *_opt(a, "symbol", "--symbol")],
+        {"path": _TEXT, "symbol": _TEXT, "target": _TEXT, "address": _TEXT}, ["path"],
+        lambda a: ["re", "decompile", _str(a, "path"),
+                   *(["--symbol", str(a.get("symbol") or a.get("target") or a.get("address"))]
+                     if (a.get("symbol") or a.get("target") or a.get("address")) else [])],
+    ),
+    _tool(
+        "re_ida",
+        "IDA Pro bridge & offline fallback: status, info (.i64/.idb), functions, decompile, disasm, xrefs, strings, structs.",
+        {"subcommand": _TEXT, "path": _TEXT, "symbol": _TEXT, "filter": _TEXT, "limit": _INT}, ["subcommand"],
+        lambda a: ["re", "ida", _str(a, "subcommand"), *([_str(a, "path")] if a.get("path") else []),
+                   *_opt(a, "symbol", "--symbol"), *_opt(a, "filter", "--filter"), *_opt(a, "limit", "--limit")],
+    ),
+    _tool(
+        "re_borer",
+        "Run Borer native decompiler/lifter subcommand (info, functions, decompile, disasmfn, class, vslot, schema, schemas, protocol, hooks, dispatchers, opcodes, opsends, grep, xrefs).",
+        {"subcommand": _TEXT, "path": _TEXT, "target": _TEXT}, ["subcommand", "path"],
+        lambda a: ["re", "borer", _str(a, "subcommand"), _str(a, "path"), *([_str(a, "target")] if a.get("target") else [])],
     ),
 ]
 

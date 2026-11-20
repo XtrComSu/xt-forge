@@ -140,6 +140,116 @@ def _extract_msvc_pe(pe: PEFile) -> list[dict[str, Any]]:
     return classes
 
 
+def _extract_itanium_elf(canon: Path) -> list[dict[str, Any]]:
+    """Recover stripped Itanium C++ ABI RTTI classes, typeinfos, and vtables from ELF."""
+    from . import elf
+
+    raw = canon.read_bytes()
+    info = elf.info(canon)
+    bits = int(info.get("bits") or 64)
+    step = 8 if bits == 64 else 4
+    endian = "<" if info.get("endian") != "big" else ">"
+    ptr_fmt = f"{endian}{'Q' if bits == 64 else 'I'}"
+
+    def _as_int(v: Any) -> int:
+        if isinstance(v, int):
+            return v
+        s = str(v)
+        return int(s, 16) if s.startswith(("0x", "0X")) else int(s)
+
+    secs = elf.sections(canon).get("sections", [])
+    text_ranges = [
+        (_as_int(s["addr"]), _as_int(s["addr"]) + _as_int(s["size"]))
+        for s in secs if (_as_int(s.get("flags", 0)) & 0x4 or "X" in str(s.get("flags", ""))) and _as_int(s.get("size", 0)) > 0
+    ]
+
+    def _is_exec(va: int) -> bool:
+        return any(lo <= va < hi for lo, hi in text_ranges)
+
+    # Parse .rela.dyn / .rela.* R_X86_64_RELATIVE / R_AARCH64_RELATIVE relocations (r_offset -> r_addend)
+    rel_map: dict[int, int] = {}
+    if bits == 64:
+        for s in secs:
+            if str(s.get("type", "")) in ("RELA", "SHT_RELA"):
+                off = _as_int(s["offset"])
+                sz = _as_int(s["size"])
+                for pos in range(off, min(len(raw), off + sz) - 23, 24):
+                    r_offset, r_info, r_addend = struct.unpack_from(f"{endian}QQq", raw, pos)
+                    r_type = r_info & 0xFFFFFFFF
+                    if r_type in (8, 1027) and r_addend > 0:  # R_X86_64_RELATIVE, R_AARCH64_RELATIVE
+                        rel_map[r_offset] = r_addend
+
+    # Also build raw pointer lookup across data sections for non-PIE ELFs
+    ptr_map: dict[int, int] = dict(rel_map)
+    for s in secs:
+        sname = str(s.get("name", ""))
+        if sname in (".rodata", ".data.rel.ro", ".data"):
+            off = _as_int(s["offset"])
+            sz = _as_int(s["size"])
+            va_base = _as_int(s["addr"])
+            for rel_off in range(0, sz - step + 1, step):
+                va = va_base + rel_off
+                if va not in ptr_map:
+                    (val,) = struct.unpack_from(ptr_fmt, raw, off + rel_off)
+                    if val != 0:
+                        ptr_map[va] = val
+
+    # Invert ptr_map: target_va -> [pointing_va, ...]
+    rev_ptrs: dict[int, list[int]] = {}
+    for src_va, dst_va in ptr_map.items():
+        rev_ptrs.setdefault(dst_va, []).append(src_va)
+
+    # Scan .rodata for Itanium mangled typeinfo names: <len><Ident>\0 (e.g. 18SecureVaultHandler)
+    ro_secs = [s for s in secs if str(s.get("name", "")) == ".rodata"]
+    found_classes: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    ti_pat = re.compile(rb"(?<=\x00)(\d{1,3})([A-Za-z_][A-Za-z0-9_]{2,120})\x00")
+
+    for rs in ro_secs:
+        ro_off = _as_int(rs["offset"])
+        ro_sz = _as_int(rs["size"])
+        ro_va = _as_int(rs["addr"])
+        chunk = raw[ro_off : ro_off + ro_sz]
+        for m in ti_pat.finditer(chunk):
+            decl_len = int(m.group(1))
+            ident = m.group(2).decode("ascii", errors="ignore")
+            if decl_len != len(ident) or ident.startswith("__"):
+                continue
+            name_va = ro_va + m.start()
+            if ident in seen_names:
+                continue
+            # TypeInfo struct has __type_name pointer at offset +step
+            ti_vas = [src - step for src in rev_ptrs.get(name_va, [])]
+            if not ti_vas:
+                # Try nested namespace N<len><ns><len><cls>E if not direct
+                continue
+            seen_names.add(ident)
+            vtables: list[dict[str, Any]] = []
+            for ti_va in ti_vas:
+                # Vtable has RTTI pointer at vtable_slot[-1] (offset -step from first virtual method)
+                for rtti_slot_va in rev_ptrs.get(ti_va, []):
+                    vt_va = rtti_slot_va + step
+                    methods: list[str] = []
+                    cur = vt_va
+                    for _ in range(128):
+                        m_va = ptr_map.get(cur)
+                        if m_va is None or not _is_exec(m_va):
+                            break
+                        methods.append(hex(m_va))
+                        cur += step
+                    if methods:
+                        vtables.append({"vtable_va": hex(vt_va), "methods": methods, "method_count": len(methods)})
+            found_classes.append({
+                "name": ident,
+                "typeinfo_va": hex(ti_vas[0]),
+                "vtables": vtables,
+                "address": vtables[0]["vtable_va"] if vtables else hex(ti_vas[0]),
+                "methods": vtables[0]["methods"] if vtables else [],
+                "method_count": vtables[0]["method_count"] if vtables else 0,
+            })
+    return found_classes
+
+
 def extract_rtti(target: str | Path) -> dict[str, Any]:
     """Recover C++ class hierarchies, RTTI names, and vtables."""
     canon = guard.read_guard(target)
@@ -161,20 +271,24 @@ def extract_rtti(target: str | Path) -> dict[str, Any]:
         except PeError as exc:
             return {"ok": False, "err": str(exc), "path": str(canon)}
     elif fmt == "elf":
-        # For ELF binaries, inspect symbol table for vtable / typeinfo symbols
+        # Recover stripped Itanium ABI RTTI classes from .rodata + .rela.dyn first,
+        # then supplement with any unstripped _ZTV symbols.
         from . import elf
         try:
+            classes = _extract_itanium_elf(canon)
+            seen = {c["name"] for c in classes}
             syms = elf.symbols(canon, limit=2000).get("symbols", [])
-            vtables = [
-                {"name": s["name"], "address": s["value"], "size": s.get("size", 0)}
-                for s in syms if "_ZTV" in s.get("name", "")
-            ]
+            for s in syms:
+                sname = s.get("name", "")
+                if "_ZTV" in sname and sname not in seen:
+                    classes.append({"name": sname, "address": s["value"], "size": s.get("size", 0)})
+                    seen.add(sname)
             return {
                 "ok": True,
                 "path": str(canon),
                 "format": "elf",
-                "class_count": len(vtables),
-                "classes": vtables,
+                "class_count": len(classes),
+                "classes": classes,
             }
         except Exception as exc:
             return {"ok": False, "err": str(exc), "path": str(canon)}

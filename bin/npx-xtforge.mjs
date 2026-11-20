@@ -151,6 +151,12 @@ function cmdInit(argv) {
     join(HOME, ".claude", "skills"),
     join(HOME, ".kimi-code", "skills"),
   ]
+  for (const extraHarness of [".qoder", ".gemini", ".codex", ".cursor"]) {
+    const hDir = join(HOME, extraHarness)
+    if (existsSync(hDir)) {
+      skillTargets.push(join(hDir, "skills"))
+    }
+  }
   const installedCounts = {}
   for (const dst of skillTargets) {
     installedCounts[dst] = copyDir(skillsSrc, dst)

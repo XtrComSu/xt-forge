@@ -299,7 +299,8 @@ def _add_re(sub) -> None:
                                        "capa", "crash",
                                        "annotate", "asar", "netcap", "apk",
                                        "decompile", "trace",
-                                       "deep-elf", "anchors", "slice", "live-probe", "rbxm"])
+                                       "deep-elf", "anchors", "slice", "live-probe", "rbxm",
+                                       "ida", "borer"])
     r.add_argument("value", nargs="?", default=None,
                    help="binary path or subverb (same as --path)")
     r.add_argument("path", nargs="?", default=None)

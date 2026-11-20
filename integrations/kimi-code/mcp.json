@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "xt-forge": {
+      "command": "xt-forge",
+      "args": ["--meta"]
+    },
+    "ghidra": {
+      "command": "python3",
+      "args": ["-m", "xtforge.adapters.ghidra_mcp"],
+      "deferred": true
+    },
+    "ida": {
+      "command": "python3",
+      "args": ["-m", "xtforge.adapters.ida_mcp"],
+      "deferred": true
+    }
+  }
+}

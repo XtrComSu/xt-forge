@@ -1,0 +1,24 @@
+[[permission.rules]]
+decision = "ask"
+pattern = "mcp__xt-forge__xt_re_patch_apply"
+reason = "Applying binary hex patches writes patched executables"
+
+[[permission.rules]]
+decision = "ask"
+pattern = "mcp__ghidra__patch_apply"
+reason = "Applying binary hex patches writes patched executables"
+
+[[permission.rules]]
+decision = "allow"
+pattern = "mcp__xt-forge__*"
+reason = "Local xt-forge workbench tools are safe local operations"
+
+[[permission.rules]]
+decision = "allow"
+pattern = "mcp__ghidra__*"
+reason = "Local Ghidra / Sober RE analysis tools are read-only"
+
+[[permission.rules]]
+decision = "allow"
+pattern = "mcp__ida__*"
+reason = "Local IDA Pro / Borer fallback RE analysis tools are read-only"

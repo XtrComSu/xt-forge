@@ -67,7 +67,14 @@ func FullCatalog() []CatalogEntry {
 		{Name: "re_hooks", Noun: "re", Verb: "hooks", Category: "re", Description: "Scan disassembly for inline hooks and direct syscall stubs.", ArgsHint: `{"argv":["re","hooks","/path/to/bin"]}`, Tags: []string{"hooks", "syscalls"}},
 		{Name: "re_patch", Noun: "re", Verb: "patch", Category: "re", Description: "Apply guarded atomic byte patch to a binary copy.", ArgsHint: `{"argv":["re","patch","/path/to/bin","--offset","0x100","--patch-bytes","9090"]}`, Mutating: true, Tags: []string{"patch", "binary"}},
 		{Name: "re_annotate", Noun: "re", Verb: "annotate", Category: "re", Description: "Read or write persistent per-binary symbol renames, types, and comments.", ArgsHint: `{"argv":["re","annotate","rename","/path/to/bin","--rva","0x1000","--name","decrypt_cfg"]}`, Mutating: true, Tags: []string{"annotate", "rename", "overlay"}},
-		{Name: "re_decompile", Noun: "re", Verb: "decompile", Category: "re", Description: "Decompile function pseudocode via rizin/Ghidra or annotated objdump disassembly fallback with reciprocal constant notes.", ArgsHint: `{"argv":["re","decompile","/path/to/bin","--symbol","main"]}`, Tags: []string{"decompile", "pseudocode", "ghidra", "rizin", "disasm"}},
+		{Name: "re_decompile", Noun: "re", Verb: "decompile", Category: "re", Description: "Decompile function pseudocode via Borer/Ghidra/rizin with reciprocal division notes and SHA-256 overlay.", ArgsHint: `{"argv":["re","decompile","/path/to/bin","--symbol","main"]}`, Tags: []string{"decompile", "pseudocode", "ghidra", "borer", "rizin", "disasm"}},
+		{Name: "re_deep_elf", Noun: "re", Verb: "deep-elf", Category: "re", Description: "Inspect sectionless ELFs and Android Bionic ELFs without false packed diagnosis.", ArgsHint: `{"argv":["re","deep-elf","/path/to/bin"]}`, Tags: []string{"elf", "bionic", "android", "sectionless"}},
+		{Name: "re_anchors", Noun: "re", Verb: "anchors", Category: "re", Description: "Streaming RIP-relative lea string-anchor resolver for large stripped ELFs.", ArgsHint: `{"argv":["re","anchors","/path/to/bin","--target","needle"]}`, Tags: []string{"anchors", "strings", "xrefs", "stripped"}},
+		{Name: "re_slice", Noun: "re", Verb: "slice", Category: "re", Description: "O(1) windowed disassembly around a VA with RIP-relative .rodata string resolution.", ArgsHint: `{"argv":["re","slice","/path/to/bin","--start","0x401000"]}`, Tags: []string{"slice", "disasm", "window"}},
+		{Name: "re_live_probe", Noun: "re", Verb: "live-probe", Category: "re", Description: "Safe live process memory probe via process_vm_readv and smaps RSS.", ArgsHint: `{"argv":["re","live-probe","1234"]}`, Tags: []string{"pid", "memory", "proc"}},
+		{Name: "re_rbxm", Noun: "re", Verb: "rbxm", Category: "re", Description: "Inspect Roblox .rbxm/.rbxl binary containers, SIGN Ed25519 chunks, and Luau bytecode.", ArgsHint: `{"argv":["re","rbxm","/path/to/model.rbxm"]}`, Tags: []string{"rbxm", "roblox", "luau"}},
+		{Name: "re_ida", Noun: "re", Verb: "ida", Category: "re", Description: "IDA Pro bridge & offline fallback: status, info (.i64/.idb), functions, decompile, disasm, xrefs, strings, structs.", ArgsHint: `{"argv":["re","ida","decompile","/path/to/bin","--symbol","main"]}`, Tags: []string{"ida", "idb", "i64", "decompile", "hexrays"}},
+		{Name: "re_borer", Noun: "re", Verb: "borer", Category: "re", Description: "Run Borer native decompiler/lifter subcommand (functions, decompile, class, vslot, schema, protocol, dispatchers, opcodes).", ArgsHint: `{"argv":["re","borer","functions","/path/to/bin"]}`, Tags: []string{"borer", "decompile", "vslot", "schema", "rtti"}},
 		{Name: "re_apk", Noun: "re", Verb: "apk", Category: "re", Description: "Inspect Android APK manifest, permissions, components, and native libs.", ArgsHint: `{"argv":["re","apk","/path/to/app.apk"]}`, Tags: []string{"apk", "android", "jadx"}},
 		{Name: "re_asar", Noun: "re", Verb: "asar", Category: "re", Description: "List or extract Electron ASAR archives and JS source maps.", ArgsHint: `{"argv":["re","asar","/path/to/app.asar"]}`, Tags: []string{"asar", "electron", "js"}},
 		{Name: "re_netcap", Noun: "re", Verb: "netcap", Category: "re", Description: "Summarize endpoints and masked auth headers from HAR/SAZ captures.", ArgsHint: `{"argv":["re","netcap","/path/to/capture.har"]}`, Tags: []string{"har", "saz", "network"}},
@@ -852,15 +859,27 @@ func buildLocalArgv(entry CatalogEntry, rawArgv []string, toolArgs map[string]an
 		}
 	default:
 		if strings.HasPrefix(entry.Name, "re_") {
-			if act := popStr("action"); act != "" {
+			if act := popStr("action", "subcommand"); act != "" {
 				out = append(out, act)
 			}
-			if pathVal := popStr("path", "file", "binary", "bin", "target_file"); pathVal != "" {
+			if pathVal := popStr("path", "file", "binary", "bin", "target_file", "pid"); pathVal != "" {
 				out = append(out, pathVal)
 			}
-			if entry.Name == "re_cfg" || entry.Name == "re_decompile" || entry.Name == "re_disasm" {
-				if sym := popStr("symbol", "func", "function", "name"); sym != "" {
+			if entry.Name == "re_cfg" || entry.Name == "re_decompile" || entry.Name == "re_disasm" || entry.Name == "re_ida" {
+				if sym := popStr("symbol", "func", "function", "name", "target", "address", "addr", "rva", "va"); sym != "" {
 					out = append(out, "--symbol", sym)
+				}
+			} else if entry.Name == "re_anchors" {
+				if tgt := popStr("target", "symbol", "query", "pattern", "string"); tgt != "" {
+					out = append(out, "--target", tgt)
+				}
+			} else if entry.Name == "re_slice" {
+				if addr := popStr("start", "address", "addr", "rva", "va", "target"); addr != "" {
+					out = append(out, "--start", addr)
+				}
+			} else if entry.Name == "re_borer" {
+				if tgt := popStr("target", "symbol", "filter"); tgt != "" {
+					out = append(out, tgt)
 				}
 			} else if sym := popStr("symbol", "func", "function"); sym != "" {
 				out = append(out, "--symbol", sym)
