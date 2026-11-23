@@ -228,6 +228,37 @@ def _render_guidance(res):
     return human
 
 
+def _render_gdb(res):
+    if not res.get("ok"):
+        return "gdb: " + str(res.get("error", "unknown"))
+    lines = [f"gdb  {res.get('gdb') or ''}  {res.get('path')}".rstrip()]
+    if "instructions" in res:
+        lines.append(f"  {res.get('target')}: {res.get('count')} instruction(s)")
+        for item in (res["instructions"] or [])[:24]:
+            lines.append(f"    {item['address']}  {str(item['instruction'])[:60]}")
+    elif "breakpoints" in res:
+        lines.append(f"  {res.get('resolved')} of {res.get('count')} symbol(s) resolved")
+        for item in res["breakpoints"]:
+            if item.get("ok"):
+                lines.append(f"    {item['symbol']:<28} {item['address']}  "
+                             f"{item.get('function') or ''}  line {item.get('line')}")
+            else:
+                lines.append(f"    {item['symbol']:<28} ! {item.get('error')}")
+    elif "registers" in res:
+        lines.append(f"  {res.get('count')} register(s)")
+        for item in (res["registers"] or [])[:20]:
+            lines.append(f"    {item['name']:<8} {item['value']}")
+    elif "mappings" in res:
+        lines.append(f"  {res.get('mapping_count')} mapping(s), "
+                     f"{res.get('shared_library_count')} shared library(ies)")
+        for item in (res["mappings"] or [])[:16]:
+            lines.append(f"    {item['start']}  {item['perms']}  {item['path'][:44]}")
+    else:
+        lines.append(f"  {res.get('function_symbol_count')} function symbol(s), "
+                     f"{res.get('source_file_count')} source file(s)")
+    return chr(10).join(lines)
+
+
 def _render_cdp(res):
     if not res.get("ok"):
         lines = ["cdp: " + str(res.get("error", "unknown"))]
@@ -851,6 +882,27 @@ def cmd_re(args):
         elif verb in ("v8cache", "codecache"):
             from ..core.re import v8cache
             res = v8cache.inspect_v8_code_cache(path)
+        elif verb in ("gdb", "gdbmi"):
+            from ..core.re import gdbmi as _gdbmi
+            sub = (args.value or "inspect").lower()
+            target_path = args.path or (args.extra[0] if args.extra else "")
+            if sub == "inspect":
+                res = _gdbmi.inspect(target_path)
+            elif sub in ("disasm", "disassemble"):
+                res = _gdbmi.disassemble(
+                    target_path,
+                    function=(args.extra[0] if args.extra else None),
+                    count=int(args.count or 40))
+            elif sub in ("break", "breakpoints"):
+                res = _gdbmi.breakpoints(target_path, list(args.extra or []))
+            elif sub in ("registers", "regs"):
+                res = _gdbmi.registers(target_path)
+            elif sub in ("segments", "maps"):
+                res = _gdbmi.segments(target_path)
+            else:
+                res = {"ok": False, "error": f"unknown gdb subcommand: {sub!r}",
+                       "subcommands": ["inspect", "disasm", "break", "registers",
+                                       "segments"]}
         elif verb == "ptrace":
             from ..core.re import proctrace as _proctrace
             res = _proctrace.inspect(path)
@@ -1818,6 +1870,8 @@ def cmd_re(args):
             if res.get("truncated"):
                 lines.append(f"  WARNING     {res.get('warning')}")
             human = "\n".join(lines)
+    elif verb in ("gdb", "gdbmi"):
+        human = _render_gdb(res)
     elif verb == "ptrace":
         human = _render_ptrace(res)
     elif verb in ("playwright", "trace"):

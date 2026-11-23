@@ -46,7 +46,7 @@ KNOWN_VERBS = frozenset({
     "playwright", "objc", "objc-classes", "objc-protocols", "keyed", "keyed-archive", "jvm",
     "maven", "nuget", "appbundle", "bundle", "bookmarks", "bulk",
     # The guidance verbs themselves, so a workflow may reference them.
-    "guidance", "workflows", "guide", "cdp",
+    "guidance", "workflows", "guide", "cdp", "gdb",
 })
 
 # A step is (verb, purpose, what-the-result-tells-you). Every field is required: a purpose with

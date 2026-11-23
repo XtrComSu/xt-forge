@@ -219,8 +219,15 @@ cap("Rizin / Cutter command shells",
                          "own engine instead")
 cap("GDB session control", ["gdb_command", "start_debug_session",
                             "list_debug_sessions"],
-    None, "out-of-lane", "wraps GDB; xt-forge does live probing (re live-probe) "
-                         "rather than driving a debugger")
+    "gdb", "covered",
+    "`re gdb <inspect|disasm|break|registers|segments> <binary>` drives gdb over its Machine "
+    "Interface, the documented protocol rather than a screen-scraped TUI: real disassembly at "
+    "a resolved symbol address, symbol-to-address resolution via break-insert, registers and "
+    "memory mappings read from a live inferior stopped at entry. The exclusion said "
+    "\"xt-forge does live probing rather than driving a debugger\", which described a "
+    "preference as a limit — gdb 18.1 is installed, and live probing cannot answer what is "
+    "executing or what a breakpoint sees. Verified against nm and objdump as independent "
+    "oracles. What is absent is an interactive stepping console, deliberately")
 cap("Frida instrumentation", ["list_frida_devices", "start_frida_session",
                               "instrument_frida_target"],
     None, "out-of-lane", "requires an attached Frida server on a device")
