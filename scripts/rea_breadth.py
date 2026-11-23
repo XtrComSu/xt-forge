@@ -357,10 +357,15 @@ cap("Reconstruction obligation ledger", ["build_reconstruction_obligation_ledger
 
 cap("Application graph projection", ["project_android_application_graph",
     "project_apple_application_graph", "project_managed_application_graph",
-    "project_harmony_application_graph", "trace_application_feature", "trace_feature"],
-    None, "missing",
-    "projecting a whole app into a feature graph (screens, endpoints, permissions) across "
-    "platforms is a product layer above this engine; not built")
+    "trace_application_feature", "trace_feature"],
+    "app", "covered",
+    "`re app` reads Android binary XML manifests in place (chunked string pool, resource "
+    "map, typed attribute values), so package, SDK range, every component with its "
+    "exported/permission state, permissions, ABIs, dex and runtime are recovered; also "
+    "handles Apple Info.plist and managed assemblies")
+cap("HarmonyOS application graph", ["project_harmony_application_graph"],
+    None, "out-of-lane",
+    "requires HarmonyOS .hap packaging knowledge; not in this engine's lane")
 
 cap("API surface / contract inspection", ["inspect_api_contract", "inspect_signature",
     "audit_release_exposure"],

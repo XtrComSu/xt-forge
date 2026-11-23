@@ -541,6 +541,9 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("app", "appgraph", "application-graph"):
+            from ..core.re import appgraph
+            res = appgraph.inspect_application(path, limit=args.limit or 200)
         elif verb in ("il2cpp", "il2cpp-metadata", "global-metadata"):
             from ..core.re import il2cpp
             res = il2cpp.inspect_il2cpp_metadata(path)
@@ -1074,6 +1077,44 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("app", "appgraph", "application-graph"):
+        if not res.get("ok"):
+            human = "application graph: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"Application graph ({', '.join(res.get('platforms') or [])}, "
+                     f"{res.get('container')}, {res.get('entry_count', '?')} entries)"]
+            manifest = res.get("manifest") or {}
+            if manifest:
+                lines.append(f"  package     {manifest.get('package')} "
+                             f"v{manifest.get('version_name')} "
+                             f"({manifest.get('version_code')})")
+                lines.append(f"  sdk         min {manifest.get('min_sdk')} -> "
+                             f"target {manifest.get('target_sdk')}")
+                counts = manifest.get("component_counts") or {}
+                lines.append("  components  " + ", ".join(
+                    f"{k} {v}" for k, v in counts.items() if v) or "  components  -")
+                for component in (manifest.get("components") or [])[:20]:
+                    guard_flag = ""
+                    if component.get("exported"):
+                        guard_flag = (" EXPORTED"
+                                      + (f" perm={component['permission']}"
+                                         if component.get("permission") else " NO-PERMISSION"))
+                    lines.append(f"    {component['kind']:<10} {component['name']}"
+                                 f"{guard_flag}")
+                for permission in (manifest.get("permissions") or [])[:15]:
+                    lines.append(f"  permission  {permission}")
+            if res.get("bundle_id"):
+                lines.append(f"  bundle      {res.get('bundle_id')} "
+                             f"({res.get('version')})")
+            if res.get("dex_count") is not None:
+                lines.append(f"  code        {res.get('dex_count')} dex, "
+                             f"{res.get('native_library_count')} native libs "
+                             f"[{', '.join(res.get('abis') or [])}]")
+            if res.get("primary_runtime"):
+                lines.append(f"  runtime     {res.get('primary_runtime')}")
+            for flag in (res.get("risk_flags") or [])[:10]:
+                lines.append(f"  RISK        {flag}")
+            human = "\n".join(lines)
     elif verb in ("il2cpp", "il2cpp-metadata", "global-metadata"):
         if not res.get("ok"):
             human = "il2cpp metadata: " + str(res.get("error", "unknown"))
