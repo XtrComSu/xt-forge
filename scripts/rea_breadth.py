@@ -189,10 +189,12 @@ cap("SQLite database", ["inspect_sqlite_database"],
     "not refused; schema names cross-checked against the sqlite3 module")
 cap("NTFS journal", ["inspect_ntfs_journal"],
     "ntfs", "partial",
-    "volume, MFT and resident-value reading with update-sequence fixups verified "
-    "against ntfsls, and $LogFile located via delta-coded data runs. Transaction "
-    "records are NOT decoded: mkntfs writes no restart area, and no tool on this host "
-    "writes NTFS journal records to test against")
+    "volume, MFT, resident values with update-sequence fixups verified against ntfsls; "
+    "$LogFile located via delta-coded data runs and its restart area parsed (RSTR=clean, "
+    "CHKD=dirty, plus page sizes and log version), with erased/zeroed logs reported as "
+    "no-journal rather than clean. Transaction RECORDS are not decoded: ntfs-3g formats "
+    "$LogFile and never writes one (ntfsrecover agrees: 'log file has been wiped out'), "
+    "so there is no real oracle on this host and the record layout stays unclaimed")
 cap("EVM interface", ["inspect_evm_interface"],
     "evm", "covered",
     "selectors from the PUSH4/EQ dispatcher; raw bytecode or hex text")

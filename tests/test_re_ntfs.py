@@ -383,3 +383,105 @@ class DataRunTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RestartAreaParsingTest(unittest.TestCase):
+    """The restart-area path, exercised with a synthetic but correctly shaped area.
+
+    This is deliberately separate from the real-image tests. No tool on this host writes an
+    NTFS journal — `mkntfs` formats `$LogFile` and leaves it all-0xFF, `ntfscp` refuses to
+    run on a volume with a scheduled check, and mounting needs root — so the `RSTR`/`CHKD`
+    branch cannot be reached from a real image here.
+
+    Building the restart area by hand tests the *parser*, and it is worth doing because the
+    alternative is an untested branch that silently mis-reads a real Windows log. What it
+    does NOT prove is that the record layout matches a real Windows `$LogFile`; that needs a
+    Windows-written image. The reader's own coverage row stays `partial` for that reason.
+    """
+
+    def _volume(self) -> object:
+        """A minimal volume built from a real boot sector, 512-byte / 8-sector clusters."""
+        boot = bytearray(512)
+        boot[3:11] = b"NTFS    "
+        struct.pack_into("<H", boot, 11, 512)     # bytes per sector
+        boot[13] = 8                              # sectors per cluster -> 4096 bytes
+        struct.pack_into("<Q", boot, 40, 1024)    # total sectors
+        struct.pack_into("<Q", boot, 48, 4)       # $MFT cluster
+        struct.pack_into("<Q", boot, 72, 0x1234)  # serial
+        return ntfs._Volume(bytes(boot))
+
+    def _image_with_log(self, log: bytes, cluster: int = 4) -> tuple[bytes, dict]:
+        """An image whose $MFT record 2 points at `log`, plus that MFT record."""
+        start = cluster * 4096
+        raw = bytearray(start + len(log) + 4096)
+        raw[start:start + len(log)] = log
+        record = {"record": 2, "_runs": [(cluster, len(log) // 4096 or 1)]}
+        return bytes(raw), record
+
+    def test_clean_restart_area_is_parsed(self) -> None:
+        log = bytearray(4096)
+        log[0:4] = b"RSTR"
+        struct.pack_into("<IIHHh", log, 8, 4096, 4096, 0x30, 1, 5)
+        raw, record = self._image_with_log(bytes(log))
+        area = ntfs._logfile_restart(raw, self._volume(), [record])
+        self.assertEqual(area["restart_signature"], "RSTR")
+        self.assertEqual(area["shutdown"], "clean")
+        self.assertEqual(area["system_page_size"], 4096)
+        self.assertEqual(area["log_page_size"], 4096)
+        self.assertEqual(area["major_version"], 5)
+
+    def test_dirty_restart_area_is_parsed(self) -> None:
+        """CHKD means the volume was not shut down cleanly."""
+        log = bytearray(4096)
+        log[0:4] = b"CHKD"
+        raw, record = self._image_with_log(bytes(log))
+        area = ntfs._logfile_restart(raw, self._volume(), [record])
+        self.assertEqual(area["restart_signature"], "CHKD")
+        self.assertEqual(area["shutdown"], "dirty")
+
+    def test_restart_area_offset_is_reported(self) -> None:
+        """A restart area need not start at the beginning of the log."""
+        log = bytearray(4096)
+        log[1024:1028] = b"RSTR"
+        raw, record = self._image_with_log(bytes(log))
+        area = ntfs._logfile_restart(raw, self._volume(), [record])
+        self.assertEqual(area["offset_in_log"], 1024)
+
+    def test_erased_log_is_not_a_clean_shutdown(self) -> None:
+        """All-0xFF is "no journal", which must not be reported as "clean"."""
+        raw, record = self._image_with_log(b"\xff" * 4096)
+        area = ntfs._logfile_restart(raw, self._volume(), [record])
+        self.assertFalse(area.get("shutdown") == "clean")
+        self.assertTrue(area["formatted_only"])
+        self.assertEqual(area["erased_bytes"], 4096)
+
+    def test_zeroed_log_is_also_not_a_clean_shutdown(self) -> None:
+        raw, record = self._image_with_log(bytes(4096))
+        area = ntfs._logfile_restart(raw, self._volume(), [record])
+        self.assertFalse(area.get("shutdown") == "clean")
+        self.assertTrue(area["formatted_only"])
+        self.assertEqual(area["zero_bytes"], 4096)
+
+    def test_partially_written_log_is_not_formatted_only(self) -> None:
+        """Real content mixed with erased space must not be called formatted-only."""
+        log = bytearray(b"\xff" * 4096)
+        log[2048:2064] = b"some transaction"
+        raw, record = self._image_with_log(bytes(log))
+        area = ntfs._logfile_restart(raw, self._volume(), [record])
+        self.assertFalse(area.get("formatted_only"))
+        self.assertFalse(area.get("shutdown") == "clean")
+
+    def test_no_logfile_record_returns_empty(self) -> None:
+        area = ntfs._logfile_restart(bytes(8192), self._volume(), [])
+        self.assertEqual(area, {})
+
+    def test_truncated_restart_area_does_not_raise(self) -> None:
+        """A signature with no room for the rest must not raise."""
+        log = bytearray(4096)
+        log[0:4] = b"RSTR"
+        raw, record = self._image_with_log(bytes(log))
+        try:
+            area = ntfs._logfile_restart(raw[:16], self._volume(), [record])
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"raised {type(exc).__name__}: {exc}")
+        self.assertIsInstance(area, dict)
