@@ -1637,6 +1637,40 @@ def cmd_re(args):
             if res.get("native_methods"):
                 lines.append(f"  native      {len(res['native_methods'])} methods")
             human = "\n".join(lines)
+    elif verb == "netcap" and res.get("engine") == "pcap":
+        if not res.get("ok"):
+            human = "capture: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"{res.get('format')} capture ({res.get('endianness')}-endian, "
+                     f"{res.get('resolution') or 'default'} timestamps)",
+                     f"  linktype    {res.get('linktype_name')}",
+                     f"  packets     {res.get('packet_count')} "
+                     f"(parsed {res.get('parsed_packets')}, "
+                     f"unparsed {res.get('unparsed_packets')})",
+                     f"  flows       {res.get('flow_count')}"]
+            if res.get("first_packet"):
+                lines.append(f"  window      {res.get('first_packet')} .. "
+                             f"{res.get('last_packet')}")
+            if res.get("protocols"):
+                summary = ", ".join(f"{name} {count}"
+                                    for name, count in res["protocols"].items())
+                lines.append(f"  protocols   {summary}")
+            for flow in (res.get("flows") or [])[:20]:
+                pair = f"{flow.get('src')}"
+                if flow.get("src_port") is not None:
+                    pair += f":{flow['src_port']}"
+                pair += " -> " + str(flow.get("dst"))
+                if flow.get("dst_port") is not None:
+                    pair += f":{flow['dst_port']}"
+                lines.append(f"    {flow.get('protocol'):<5} {pair}  "
+                             f"{flow.get('packets')} pkts")
+            if res.get("http_requests"):
+                lines.append(f"  http        {res.get('http_request_count')} request(s)")
+                for request in res["http_requests"][:15]:
+                    lines.append(f"    {request.get('method')} {request.get('url')}")
+            if res.get("truncated"):
+                lines.append("  WARNING     capture is truncated")
+            human = "\n".join(lines)
     elif verb in ("annotate", "asar", "netcap", "apk", "dex", "decompile", "trace", "triage", "deep-elf", "anchors", "slice", "live-probe", "rbxm", "ida", "borer"):
         human = res.get("output") or res.get("script") or res.get("code") or res.get("pseudocode") or (
             f"{verb} ok={res.get('ok')} count={res.get('count', res.get('chunk_count', len(res.get('files', res.get('annotations', res.get('warnings', []))))))}"

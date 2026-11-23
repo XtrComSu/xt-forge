@@ -163,6 +163,28 @@ func InspectASAR(filePath string, extractDir string, limit int) map[string]any {
 	}
 }
 
+// captureMagic reports which capture format a file is, by magic number only.
+// Returns "" for anything else so the caller can continue to HAR/SAZ.
+func captureMagic(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	head := make([]byte, 4)
+	if _, err := io.ReadFull(f, head); err != nil {
+		return ""
+	}
+	magic := hex.EncodeToString(head)
+	if magic == pcapngSHB {
+		return "pcapng"
+	}
+	if _, ok := pcapMagics[magic]; ok {
+		return "pcap"
+	}
+	return ""
+}
+
 // InspectNetcap parses HAR JSON or SAZ (Fiddler zip) HTTP capture files,
 // masking Authorization/Cookie credentials automatically.
 func InspectNetcap(filePath string, limit int) map[string]any {
@@ -172,6 +194,14 @@ func InspectNetcap(filePath string, limit int) map[string]any {
 	}
 	if limit <= 0 {
 		limit = 50
+	}
+	// Dispatch on the magic before anything else. A pcap is binary, so falling
+	// through to the HAR JSON decoder reports "invalid character" on a perfectly good
+	// capture — the format was never the problem, the reader was.
+	if info := captureMagic(canon); info != "" {
+		result := InspectCapture(canon, limit, true)
+		result["engine"] = "pcap"
+		return result
 	}
 	ext := strings.ToLower(filepath.Ext(canon))
 	if ext == ".saz" {

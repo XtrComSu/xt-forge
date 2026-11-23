@@ -207,8 +207,10 @@ cap("JADX / apktool / JEB providers", ["inspect_jeb_client", "open_jeb_project",
                                        "inspect_apktool_client"],
     None, "out-of-lane", "provider clients for third-party tools")
 cap("Packet capture (TShark)", ["inspect_packet_capture", "inspect_packet_fields"],
-    "netcap", "partial", "netcap reads captures with its own parser; TShark field "
-                         "extraction and display filters are not implemented")
+    "netcap", "covered",
+    "pcap and pcapng (both byte orders, micro/nano timestamps), HAR and SAZ: flows, "
+    "endpoint attribution, plaintext HTTP requests with query redaction. No display "
+    "filter language of its own")
 cap("Signal decoding (sigrok)", ["decode_signal_recording",
                                  "inspect_signal_decoders"],
     None, "out-of-lane", "requires sigrok decoders and a saved logic capture")

@@ -50,6 +50,21 @@ def inspect_asar(path: str | Path, *, grep: str = "", limit: int = 200) -> dict[
     return {"ok": True, "path": str(canon), "count": len(files), "files": files, "engine": "python"}
 
 
+def _redact_query(url: str) -> str:
+    """Replace query-string values with a length hint, keeping parameter names."""
+    if "?" not in url:
+        return url
+    base, _, query = url.partition("?")
+    redacted = []
+    for pair in query.split("&"):
+        name, sep, value = pair.partition("=")
+        if sep and value:
+            redacted.append(f"{name}=<{len(value)} chars>")
+        else:
+            redacted.append(pair)
+    return base + "?" + "&".join(redacted)
+
+
 def _mask_secret(val: str, reveal: bool) -> str:
     if reveal or len(val) <= 8:
         return val
@@ -58,6 +73,25 @@ def _mask_secret(val: str, reveal: bool) -> str:
 
 def inspect_netcap(path: str | Path, *, reveal: bool = False, limit: int = 100) -> dict[str, Any]:
     canon = guard.read_guard(path)
+    # A raw capture is a different animal from HAR/SAZ: HAR and SAZ are browser
+    # exports (already-decoded transactions), pcap/pcapng are link-layer frames that
+    # have to be parsed. Dispatch on the magic before attempting JSON, because
+    # json.loads on a binary capture raises rather than returning nothing useful.
+    try:
+        head = canon.read_bytes()[:4]
+    except OSError as exc:
+        return {"ok": False, "path": str(canon), "error": str(exc)}
+    from . import capture as _capture
+    if head in _capture._PCAP_MAGICS or head == _capture._PCAPNG_SHB:
+        result = _capture.inspect_capture(canon, limit=limit)
+        result["engine"] = "pcap"
+        if not reveal and result.get("http_requests"):
+            # Captured request lines routinely carry tokens in the query string.
+            # Mask the *values*, not the URL: redacting a whole URL to "http...html"
+            # hides which endpoint was called, which is the one thing worth keeping.
+            for request in result["http_requests"]:
+                request["url"] = _redact_query(request.get("url") or "")
+        return result
     endpoints: list[dict[str, Any]] = []
     if zipfile.is_zipfile(canon):
         with zipfile.ZipFile(canon, "r") as zf:
