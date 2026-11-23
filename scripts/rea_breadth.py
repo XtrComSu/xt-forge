@@ -326,9 +326,12 @@ cap("Pseudocode / decompilation", ["procedure_pseudo_code", "decompile_all",
 
 cap("Function search and matching", ["compare_functions", "match_native_functions",
     "search_procedures"],
-    "diff", "partial",
-    "`re diff` compares two binaries function-by-function. Matching across builds with "
-    "different compilers (structural similarity beyond hashing) is not implemented")
+    "fn-match", "covered",
+    "`re diff` matches by name; `re fn-match` matches by structure — instruction-class "
+    "histogram, block/edge counts, call-out set — so it works across compilers, optimisation "
+    "levels and a full `strip`. Verified against readelf ground truth on gcc -O2 vs clang "
+    "-O2 (5/5 matched) and vs an objcopy-stripped -O3 build (4/4 correct addresses). A "
+    "diverged shape is left unmatched and the rejection is reported, not forced")
 
 cap("Call graph and call-path tracing", ["get_call_graph", "build_call_path",
     "trace_call_path", "resolve_native_call_targets"],

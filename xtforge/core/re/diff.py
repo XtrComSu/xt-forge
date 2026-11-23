@@ -255,11 +255,31 @@ def diff_binaries(bin1: str | Path, bin2: str | Path) -> dict[str, Any]:
     if not c2.is_file():
         return {"ok": False, "err": f"bin2 not a file: {bin2}"}
 
-    syms1 = {s["name"]: s for s in get_symbols(c1, limit=2000).get("symbols", []) if s.get("name")}
-    syms2 = {s["name"]: s for s in get_symbols(c2, limit=2000).get("symbols", []) if s.get("name")}
+    # Only FUNC symbols are functions. A symbol table also holds STT_FILE entries — the
+    # source filename, `v1.c` — plus STT_OBJECT data and STT_NOTYPE labels. Taking every
+    # named symbol reports a rebuilt binary as having "added v2.c, removed v1.c", which is a
+    # source file being renamed, not a function being added. Guarded by
+    # test_source_file_symbol_is_not_a_function.
+    def _functions(path: Path) -> dict[str, dict[str, Any]]:
+        out: dict[str, dict[str, Any]] = {}
+        for symbol in get_symbols(path, limit=4000).get("symbols", []):
+            name = symbol.get("name")
+            if not name:
+                continue
+            kind = (symbol.get("type") or symbol.get("kind") or "").upper()
+            # PE exports carry kind="export" and are always real code entry points.
+            if kind in ("FILE", "OBJECT", "TLS", "SECTION", "NOTYPE", "COMMON"):
+                continue
+            out[name] = symbol
+        return out
+
+    syms1 = _functions(c1)
+    syms2 = _functions(c2)
     dis1 = _disasm_by_func(c1)
     dis2 = _disasm_by_func(c2)
 
+    # `_disasm_by_func` keys come from `<name>:` headers in objdump output, which only
+    # appear for real code, so they are safe to union in.
     names1 = set(syms1.keys()) | set(dis1.keys())
     names2 = set(syms2.keys()) | set(dis2.keys())
 
@@ -338,7 +358,8 @@ def diff_binaries(bin1: str | Path, bin2: str | Path) -> dict[str, Any]:
 
     matched_user = sorted(
         n for n in (set(identical) | {m["name"] for m in modified})
-        if not n.startswith(_SKIP_FN_PREFIXES) and not n.endswith("@plt") and not n.endswith(".o")
+        if not n.startswith(_SKIP_FN_PREFIXES) and not n.endswith("@plt")
+        and not n.endswith(".o") and not n.endswith(".c") and not n.endswith(".cc")
     )
     return {
         "ok": True,

@@ -229,7 +229,11 @@ def cmd_re(args):
         else:
             ann_subverb = "list"
             path = args.path or args.value
-    elif verb == "diff":
+    elif verb in ("diff", "fn-match", "fnmatch", "match-functions"):
+        # These take two positionals: bin1 in `value`, bin2 in `path`. Resolve bin2 BEFORE
+        # `path` is rewritten to bin1, otherwise both sides point at the same file and the
+        # matcher reports a perfect self-match.
+        second_binary = args.path or (getattr(args, "extra", None) or [None])[0]
         path = args.value or args.path
 
     # 'llvm' routes like 'pe': the subverb is the second positional argument.
@@ -581,6 +585,22 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("fn-match", "fnmatch", "match-functions"):
+            from ..core.re import fnmatch as _fnmatch
+            # Like `diff`, the second binary arrives as args.path: `re fn-match A B` puts A
+            # in args.value and B in args.path.
+            second = second_binary
+            if not second:
+                return _out(args,
+                            {"ok": False, "error": "fn-match needs two binaries: "
+                                                   "xtforge re fn-match <A> <B>"},
+                            "error: fn-match needs two binaries: xtforge re fn-match <A> <B>",
+                            code=2)
+            # --confidence defaults to 1.0 for other verbs, so `or 0.55` never fires.
+            # Only an explicitly-lowered value should be treated as a threshold.
+            confidence = getattr(args, "confidence", 1.0)
+            threshold = confidence if confidence < 1.0 else 0.55
+            res = _fnmatch.compare_functions(path, second, threshold=threshold)
         elif verb in ("firmware-carve", "carve", "extract-firmware"):
             from ..core.re import firmwarecarve
             res = firmwarecarve.carve_firmware(path)
@@ -1120,6 +1140,28 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("fn-match", "fnmatch", "match-functions"):
+        if not res.get("ok"):
+            human = "fn-match: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"Function match ({res.get('mode_a')} vs {res.get('mode_b')}, "
+                     f"threshold {res.get('threshold')})",
+                     f"  matched     {res.get('match_count')} of "
+                     f"{res.get('fingerprinted_a')}/{res.get('fingerprinted_b')} "
+                     f"({res.get('renamed_count')} renamed)"]
+            for match in (res.get("matches") or [])[:20]:
+                flag = "renamed" if match["renamed"] else "same   "
+                ev = match["evidence"]
+                lines.append(f"    {match['score']:.2f} {flag} {match['function_a']}"
+                             f" -> {match['function_b']}  "
+                             f"blocks={ev['blocks']} insns={ev['instructions']}")
+            if res.get("unmatched_a"):
+                lines.append(f"  unmatched A {len(res['unmatched_a'])}: "
+                             + ", ".join(res["unmatched_a"][:8]))
+            if res.get("rejected_count"):
+                lines.append(f"  rejected    {res['rejected_count']} pair(s) failed "
+                             f"structural guards")
+            human = chr(10).join(lines)
     elif verb in ("firmware-carve", "carve", "extract-firmware"):
         if not res.get("ok"):
             human = "firmware carve: " + str(res.get("error", "unknown"))
