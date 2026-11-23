@@ -462,9 +462,13 @@ cap("PCAP / web-capture comparison", ["compare_web_captures", "compare_process_c
     "compare_web_screenshots", "compare_static_and_observed_endpoints",
     "correlate_static_and_runtime", "find_changed_behavior", "compare_managed_members",
     "compare_javascript_export_shapes", "compare_source_to_bundle"],
-    None, "partial",
-    "`re diff` compares artifacts; correlating a static binary against a *runtime* "
-    "observation (a capture or a trace) is not implemented")
+    "capture-diff", "covered",
+    "`re capture-diff` diffs two captures at endpoint level plus HTTP paths, so a same-host "
+    "v1->v2 path change is caught when host and port are unchanged; `re correlate` compares "
+    "the endpoints a binary references against those it was observed using, resolving IPs "
+    "through the capture's own DNS answers so hostname-vs-IP never silently yields 0%. Reports "
+    "dormant static endpoints and runtime-only hosts. Verified against pcaps written from the "
+    "libpcap and DNS wire formats")
 
 cap("Analysis session and navigation state", ["binary_session", "close_binary",
     "current_address", "goto_address", "next_address", "prev_address", "address_name",

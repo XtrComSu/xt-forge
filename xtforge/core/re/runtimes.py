@@ -107,7 +107,19 @@ def inspect_netcap(path: str | Path, *, reveal: bool = False, limit: int = 100) 
         return {"ok": True, "format": "saz", "count": len(endpoints),
                 "endpoints": endpoints, "engine": "python"}
 
-    data = json.loads(canon.read_text(encoding="utf-8", errors="replace"))
+    # Anything that is not HAR or SAZ lands here, and `json.loads` on an arbitrary binary
+    # raises rather than returning something the caller can inspect. A capture reader must
+    # answer "this is not a capture I understand", not throw at the caller — the whole point of
+    # inspecting an unknown file is to find out what it is.
+    try:
+        data = json.loads(canon.read_text(encoding="utf-8", errors="replace"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as exc:
+        return {"ok": False, "path": str(canon), "format": "unknown",
+                "error": f"not a recognised capture format (pcap, pcapng, HAR or SAZ): {exc}",
+                "engine": "python"}
+    if not isinstance(data, dict):
+        return {"ok": False, "path": str(canon), "format": "unknown",
+                "error": "JSON capture is not an object", "engine": "python"}
     entries = ((data.get("log") or {}).get("entries") or [])[:limit]
     secret_headers = {"authorization", "cookie", "set-cookie", "x-api-key", "x-auth-token"}
     for ent in entries:

@@ -232,7 +232,8 @@ def cmd_re(args):
     elif verb in ("diff", "fn-match", "fnmatch", "match-functions",
                   "bundle-diff", "compare-bundles", "bundle-compare",
                   "api", "api-contract", "abi",
-                  "coverage", "recon-coverage", "evaluate-coverage"):
+                  "coverage", "recon-coverage", "evaluate-coverage",
+                  "capture-diff", "capture-compare", "correlate"):
         # These take two positionals: bin1 in `value`, bin2 in `path`. Resolve bin2 BEFORE
         # `path` is rewritten to bin1, otherwise both sides point at the same file and the
         # matcher reports a perfect self-match.
@@ -588,6 +589,18 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("capture-diff", "capture-compare", "correlate"):
+            from ..core.re import capcmp as _capcmp
+            if not second_binary:
+                return _out(args,
+                            {"ok": False, "error": "capture-diff needs two paths: "
+                                                   "xtforge re capture-diff <A> <B>"},
+                            "error: capture-diff needs two paths", code=2)
+            if verb == "correlate":
+                # `re correlate <binary> <capture>` — static against observed.
+                res = _capcmp.correlate_static_runtime(path, second_binary)
+            else:
+                res = _capcmp.compare_captures(path, second_binary)
         elif verb in ("coverage", "recon-coverage", "evaluate-coverage"):
             from ..core.re import reccoverage as _reccoverage
             source_root = second_binary or getattr(args, "target", None)
@@ -1164,6 +1177,46 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("capture-diff", "capture-compare"):
+        if not res.get("ok"):
+            human = "capture diff: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"Capture diff ({res.get('endpoints_a')} -> "
+                     f"{res.get('endpoints_b')} endpoints)",
+                     f"  packets     {res.get('packets_a')} -> {res.get('packets_b')}"]
+            if res.get("added_endpoints"):
+                lines.append(f"  added       {len(res['added_endpoints'])}: "
+                             + ", ".join(res["added_endpoints"][:8]))
+            if res.get("removed_endpoints"):
+                lines.append(f"  removed     {len(res['removed_endpoints'])}: "
+                             + ", ".join(res["removed_endpoints"][:8]))
+            if res.get("added_paths"):
+                lines.append(f"  new paths   " + ", ".join(res["added_paths"][:6]))
+            if res.get("removed_paths"):
+                lines.append(f"  gone paths  " + ", ".join(res["removed_paths"][:6]))
+            if not res.get("changed"):
+                lines.append("  verdict     no change")
+            human = chr(10).join(lines)
+    elif verb == "correlate":
+        if not res.get("ok"):
+            human = "correlate: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"Static vs runtime ({res.get('static_hosts')} static hosts, "
+                     f"{res.get('runtime_hosts')} observed)",
+                     f"  correlated  {res.get('correlation_pct')}%"
+                     f"  ({len(res.get('in_both') or [])} in both)"]
+            if res.get("in_both"):
+                lines.append("    both      " + ", ".join(res["in_both"][:8]))
+            if res.get("static_only"):
+                lines.append(f"  dormant     {res.get('static_only_count')}: "
+                             + ", ".join(res["static_only"][:8]))
+            if res.get("runtime_only"):
+                lines.append(f"  runtime     {res.get('runtime_only_count')} unseen in "
+                             f"strings: " + ", ".join(res["runtime_only"][:8]))
+            for entry in (res.get("port_mismatches") or [])[:4]:
+                lines.append(f"    port      {entry['host']} static {entry['static_port']}"
+                             f" vs observed {entry['observed_port']}")
+            human = chr(10).join(lines)
     elif verb in ("coverage", "recon-coverage", "evaluate-coverage"):
         if not res.get("ok"):
             human = "coverage: " + str(res.get("error", "unknown"))
