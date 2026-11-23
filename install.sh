@@ -24,9 +24,43 @@ resolve_root() {
   local dst="${HOME}/.xt-forge-src"
   if [ -d "${dst}/.git" ]; then
     echo "[xt-forge] Updating existing checkout at ${dst}..." >&2
-    git -C "${dst}" fetch --depth 1 origin "${BRANCH}" >/dev/null 2>&1 || true
+    # A failed fetch used to be swallowed with `|| true` and followed by an
+    # unconditional `reset --hard`, which meant a network failure silently
+    # reinstalled whatever `origin/${BRANCH}` already pointed at — an old build
+    # reported as a fresh install. Fail loudly instead: installing a stale tree
+    # while the user believes they upgraded is worse than not installing.
+    if ! git -C "${dst}" fetch --depth 1 origin "${BRANCH}"; then
+      echo "[xt-forge] ERROR: could not fetch ${BRANCH} from ${REPO_URL}." >&2
+      echo "[xt-forge] The checkout at ${dst} was left untouched." >&2
+      echo "[xt-forge] Re-run when the network is available, or set XT_SKIP_FETCH=1" >&2
+      echo "[xt-forge] to build from the existing checkout as-is." >&2
+      if [ "${XT_SKIP_FETCH:-0}" != "1" ]; then
+        return 1
+      fi
+      echo "${dst}"
+      return 0
+    fi
+    # `reset --hard` discards uncommitted work. That is destructive and this is an
+    # installer, not a checkout manager: someone who edited files under
+    # ${dst} must not lose them to a convenience update. Refuse unless they say
+    # otherwise, and tell them exactly how to say otherwise.
+    if [ -n "$(git -C "${dst}" status --porcelain 2>/dev/null)" ]; then
+      if [ "${XT_FORCE_RESET:-0}" = "1" ]; then
+        echo "[xt-forge] XT_FORCE_RESET=1: discarding local changes in ${dst}." >&2
+      else
+        echo "[xt-forge] ERROR: ${dst} has local changes; refusing to discard them." >&2
+        git -C "${dst}" status --short >&2 || true
+        echo "[xt-forge] Commit or stash them, or re-run with XT_FORCE_RESET=1 to discard." >&2
+        return 1
+      fi
+    fi
     git -C "${dst}" checkout "${BRANCH}" >/dev/null 2>&1 || true
-    git -C "${dst}" reset --hard "origin/${BRANCH}" >/dev/null 2>&1 || true
+    # stdout is the function's return value, captured by the caller as
+    # ROOT="$(resolve_root)". `git reset` writes "HEAD is now at <sha>" to stdout,
+    # so an unredirected reset makes ROOT the literal string
+    # "HEAD is now at 7f1a2f6 init\n/home/.../.xt-forge-src" and every later path
+    # built from ROOT is nonsense. Send progress to stderr; keep the real errors.
+    git -C "${dst}" reset --hard "origin/${BRANCH}" >&2
   else
     echo "[xt-forge] Cloning xt-forge (${BRANCH}) to ${dst}..." >&2
     git clone --depth 1 --branch "${BRANCH}" "${REPO_URL}" "${dst}"
@@ -45,15 +79,38 @@ fi
 
 echo "[xt-forge] Installing from ${ROOT} (${OS_NAME})"
 
+# Rebuild only when the shipped native artifact is missing or older than its sources,
+# so re-running the installer is cheap. Set XT_FORCE_REBUILD=1 to always rebuild.
+# A build from scratch costs ~2 minutes (the Rust dependency set includes bundled SQLite).
+xtf_stale() {
+  local artifact="$1"
+  shift
+  if [ "${XT_FORCE_REBUILD:-0}" = "1" ]; then return 0; fi
+  if [ ! -f "${artifact}" ]; then return 0; fi
+  [ -n "$(find "$@" -newer "${artifact}" -print -quit 2>/dev/null)" ]
+}
+
 # Build native Rust and Go engines automatically when toolchains exist.
 if command -v cargo >/dev/null 2>&1 && [ -f "${ROOT}/native/xtforge-rs/Cargo.toml" ]; then
-  echo "[xt-forge] Building Rust core (native/xtforge-rs)..."
-  (cd "${ROOT}/native/xtforge-rs" && cargo build --release --quiet)
+  if xtf_stale "${ROOT}/native/xtforge-rs/target/release/xtforge-native" \
+      "${ROOT}/native/xtforge-rs/src" "${ROOT}/native/xtforge-rs/Cargo.toml" \
+      "${ROOT}/native/xtforge-rs/Cargo.lock"; then
+    echo "[xt-forge] Building Rust core (native/xtforge-rs)..."
+    (cd "${ROOT}/native/xtforge-rs" && cargo build --release --quiet)
+  else
+    echo "[xt-forge] Rust core is up to date (set XT_FORCE_REBUILD=1 to rebuild)."
+  fi
 fi
 
 if command -v go >/dev/null 2>&1 && [ -f "${ROOT}/native/xtforge-go/go.mod" ]; then
-  echo "[xt-forge] Building Go service hub (native/xtforge-go)..."
-  (cd "${ROOT}/native/xtforge-go" && go build -ldflags="-s -w" -o xtforge-hub ./cmd/xtforge-hub)
+  if xtf_stale "${ROOT}/native/xtforge-go/xtforge-hub" \
+      "${ROOT}/native/xtforge-go/cmd" "${ROOT}/native/xtforge-go/internal" \
+      "${ROOT}/native/xtforge-go/go.mod"; then
+    echo "[xt-forge] Building Go service hub (native/xtforge-go)..."
+    (cd "${ROOT}/native/xtforge-go" && go build -ldflags="-s -w" -o xtforge-hub ./cmd/xtforge-hub)
+  else
+    echo "[xt-forge] Go service hub is up to date (set XT_FORCE_REBUILD=1 to rebuild)."
+  fi
 fi
 
 chmod +x "${ROOT}/bin/xtforge" "${ROOT}/bin/xtforge-termux" "${ROOT}/bin/npx-xtforge.mjs"
