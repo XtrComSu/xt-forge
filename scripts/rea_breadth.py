@@ -379,9 +379,12 @@ cap("HarmonyOS application graph", ["project_harmony_application_graph"],
 
 cap("API surface / contract inspection", ["inspect_api_contract", "inspect_signature",
     "audit_release_exposure"],
-    None, "partial",
-    "`re imports`, `re exports` and `re rtti` expose the symbol surface. Grading release "
-    "exposure or diffing API contracts against a baseline is not built")
+    "api", "covered",
+    "`re api` grades the export surface in tiers (forbidden / risky / public) with a reason "
+    "per symbol, and diffs against a baseline binary to report added, removed and changed "
+    "exports with severity — a removed public symbol is graded `breaking`, a removed leaked "
+    "`test_` symbol is graded cleanup. Reads `.dynsym` only, so a relocatable object is "
+    "correctly reported as having no ABI. Export set verified against `nm -D --defined-only`")
 
 cap("Native initializer discovery", ["inspect_native_initializers"],
     "hooks", "covered",

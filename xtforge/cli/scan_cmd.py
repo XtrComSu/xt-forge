@@ -230,7 +230,8 @@ def cmd_re(args):
             ann_subverb = "list"
             path = args.path or args.value
     elif verb in ("diff", "fn-match", "fnmatch", "match-functions",
-                  "bundle-diff", "compare-bundles", "bundle-compare"):
+                  "bundle-diff", "compare-bundles", "bundle-compare",
+                  "api", "api-contract", "abi"):
         # These take two positionals: bin1 in `value`, bin2 in `path`. Resolve bin2 BEFORE
         # `path` is rewritten to bin1, otherwise both sides point at the same file and the
         # matcher reports a perfect self-match.
@@ -586,6 +587,9 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("api", "api-contract", "abi"):
+            from ..core.re import apicontract as _apicontract
+            res = _apicontract.audit_contract(path, baseline=second_binary)
         elif verb in ("bundle-diff", "compare-bundles", "bundle-compare"):
             from ..core.re import bundlecmp as _bundlecmp
             second = second_binary
@@ -1150,6 +1154,32 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("api", "api-contract", "abi"):
+        if not res.get("ok"):
+            human = "api audit: " + str(res.get("error", "unknown"))
+        else:
+            tiers = res.get("tiers") or {}
+            lines = [f"API contract ({res.get('export_count')} exports)",
+                     f"  tiers       public {tiers.get('public', 0)}, "
+                     f"risky {tiers.get('risky', 0)}, forbidden {tiers.get('forbidden', 0)}"]
+            for entry in (res.get("findings") or [])[:12]:
+                lines.append(f"    {entry['tier']:<10} {entry['name']}  ({entry['why']})")
+            if res.get("baseline"):
+                lines.append(f"  baseline    {res.get('baseline_export_count')} exports "
+                             f"-> verdict {res.get('verdict')}")
+                if res.get("added"):
+                    lines.append(f"  added       {res['added_count']}: "
+                                 + ", ".join(res["added"][:8]))
+                if res.get("removed"):
+                    lines.append(f"  removed     {res['removed_count']} "
+                                 f"({res.get('breaking_removal_count', 0)} breaking): "
+                                 + ", ".join(res["removed"][:8]))
+                if res.get("changed"):
+                    lines.append(f"  changed     {res['changed_count']}: "
+                                 + ", ".join(c["name"] for c in res["changed"][:8]))
+                if res.get("compatible"):
+                    lines.append("  compatible  yes")
+            human = chr(10).join(lines)
     elif verb in ("bundle-diff", "compare-bundles", "bundle-compare"):
         if not res.get("ok"):
             human = "bundle diff: " + str(res.get("error", "unknown"))
