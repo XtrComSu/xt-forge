@@ -487,9 +487,13 @@ cap("Analysis session and navigation state", ["binary_session", "close_binary",
 
 cap("Guided workflows and analysis guidance", ["guided_workflows", "inspect_guidance",
     "search_guidance", "read_guidance_section"],
-    "overview", "partial",
-    "`re overview` and `re triage` sequence the recommended next steps for a file. A "
-    "searchable in-tool knowledge base of guidance sections is not built")
+    "overview", "covered",
+    "`re overview` and `re triage` sequence next steps for a file; `re guidance` adds the "
+    "knowledge base behind them — six ordered workflows, each step naming a real verb, why it "
+    "comes at that position, and what its result would tell you. Searchable by concept and by "
+    "conclusion, plus a reverse lookup from any verb to its workflows and neighbours. The "
+    "module validates every verb against the CLI at import and the parity test keeps the verb "
+    "list honest, so guidance cannot cite a command that does not exist")
 
 
 def _fixtures() -> dict[str, str]:

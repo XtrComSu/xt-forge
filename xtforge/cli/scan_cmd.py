@@ -182,6 +182,44 @@ def _flatten_graph(value, depth: int, limit: int = 40) -> list[str]:
     return [f"{indent}{value!r}"]
 
 
+def _render_guidance(res):
+    if not res.get("ok"):
+        callable_hint = ""
+        if res.get("available"):
+            callable_hint = chr(10) + "  try: " + ", ".join(res["available"][:6])
+        human = "guidance: " + str(res.get("error", "unknown")) + callable_hint
+    elif "hits" in res:
+        lines = [f"Guidance search {res.get('query')!r}: {res.get('count')} match(es)"]
+        for hit in res["hits"][:6]:
+            lines.append(f"  {hit['id']}")
+            for step in hit["steps"][:3]:
+                lines.append(f"    {step['n']}. {step['verb']:<16} {step['purpose'][:56]}")
+        human = chr(10).join(lines)
+    elif "uses" in res:
+        lines = [f"Step {res.get('verb')} appears in {res.get('count')} workflow(s)"]
+        for use in res["uses"][:6]:
+            before = use.get("after") or "(start)"
+            after = use.get("then") or "(end)"
+            lines.append(f"  {use['workflow']:<28} {use['position']}"
+                         f"  {before} -> {after}")
+        if res.get("note"):
+            lines.append("  " + res["note"])
+        human = chr(10).join(lines)
+    elif "steps" in res and isinstance(res["steps"], list) and res["steps"]                 and isinstance(res["steps"][0], dict):
+        lines = [f"{res['title']}  ({res['id']})", f"  when: {res['when']}"]
+        for step in res["steps"]:
+            lines.append(f"  {step['n']}. {step['verb']:<16} {step['purpose']}")
+            lines.append(f"     -> {step['tells_you'][:100]}")
+        human = chr(10).join(lines)
+    else:
+        lines = [f"Guided workflows ({res.get('count')})"]
+        for workflow in res.get("workflows") or []:
+            lines.append(f"  {workflow['id']:<30} {workflow['steps']} steps  "
+                         f"{workflow['title']}")
+        human = chr(10).join(lines)
+    return human
+
+
 def cmd_re(args):
     from pathlib import Path
     from ..core.re import elf
@@ -234,7 +272,8 @@ def cmd_re(args):
                   "api", "api-contract", "abi",
                   "coverage", "recon-coverage", "evaluate-coverage",
                   "capture-diff", "capture-compare", "correlate",
-                  "goto", "nav", "resume", "bookmark", "step"):
+                  "goto", "nav", "resume", "bookmark", "step",
+                  "guidance", "workflows", "guide"):
         # These take two positionals: bin1 in `value`, bin2 in `path`. Resolve bin2 BEFORE
         # `path` is rewritten to bin1, otherwise both sides point at the same file and the
         # matcher reports a perfect self-match.
@@ -289,6 +328,24 @@ def cmd_re(args):
         human = "\n".join(f"{row['symbol']} -> {row['demangled'] or '(not swift)'}"
                           for row in res.get("results", []))
         return _out(args, res, human, code=0 if res.get("ok") else 1)
+
+    if verb in ("guidance", "workflows", "guide"):
+        # No binary needed: listing workflows, searching them and the reverse verb lookup are
+        # all self-contained. Handled before the path requirement rather than demanding a
+        # target that is never read.
+        from ..core.re import guidance as _guidance
+        sub = (getattr(args, "value", None) or "").strip()
+        if sub.startswith("search="):
+            res = _guidance.search_guidance(sub.split("=", 1)[1])
+        elif sub.startswith("for="):
+            res = _guidance.guidance_for_verb(sub.split("=", 1)[1])
+        elif sub.startswith("verb="):
+            res = _guidance.guidance_for_verb(sub.split("=", 1)[1])
+        elif sub:
+            res = _guidance.show_workflow(sub)
+        else:
+            res = _guidance.list_workflows()
+        return _out(args, res, _render_guidance(res), code=0 if res.get("ok") else 2)
 
     if not path:
         return _out(args, {"ok": False, "error": "re needs a path"},
