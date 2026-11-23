@@ -83,6 +83,12 @@ def _compressed_uint(value: int) -> bytes:
                   (value >> 8) & 0xFF, value & 0xFF])
 
 
+# Offsets of the two CIL method bodies inside the .text section. Module level so the
+# metadata builder and the PE wrapper agree on them.
+TEXT_TINY_OFFSET = 0x40
+TEXT_FAT_OFFSET = 0x60
+
+
 def build() -> bytes:
     strings = StringsHeap()
     blobs = BlobHeap()
@@ -133,6 +139,17 @@ def build() -> bytes:
         + typedef_or_ref(1) + u16(1) + u16(4),
     ]
 
+    # Real CIL method bodies, so the body reader has something to read. Built here
+    # (before the MethodDef rows that reference their RVAs) so the RVAs exist.
+    # Two formats exist and both are represented, because the discriminator is the
+    # low two bits of the first byte and confusing them changes the reported code
+    # size by a factor of ~100:
+    #
+    #   tiny  (0b10): one byte, code size in the top 6 bits, max stack fixed at 8
+    #   fat   (0b11): u16 flags/size, u16 max stack, u32 code size, u32 local sig
+    tiny_body_rva = 0x1000 + TEXT_TINY_OFFSET
+    fat_body_rva = 0x1000 + TEXT_FAT_OFFSET
+
     # ---- MethodDef (0x06): rva, implflags, flags, name, sig, paramlist -----
     # RVA 0 means "no IL body", which is what a P/Invoke has.
     # ECMA-335 II.23.1.10. The bit positions matter and are easy to mix up:
@@ -144,9 +161,9 @@ def build() -> bytes:
     impl_il = 0x0000
     impl_pinvoke = 0x0001 | 0x2000  # Native | PreserveSig
     method_def_rows = [
-        u32(0x2050) + u16(impl_il) + u16(method_flags_private_static)
+        u32(tiny_body_rva) + u16(impl_il) + u16(method_flags_private_static)
         + s(METHOD_NAMES[0]) + b(b"\x00\x00\x01") + u16(1),
-        u32(0x2060) + u16(impl_il) + u16(method_flags_public_virtual)
+        u32(fat_body_rva) + u16(impl_il) + u16(method_flags_public_virtual)
         + s(METHOD_NAMES[1]) + b(b"\x00\x00\x01") + u16(1),
         u32(0) + u16(impl_il) + u16(method_flags_public_abstract)
         + s(METHOD_NAMES[2]) + b(b"\x00\x00\x01") + u16(1),
@@ -269,8 +286,19 @@ def _wrap_in_pe(metadata: bytes) -> bytes:
     section_alignment = 0x1000
     headers_size = 0x200
 
-    text = bytearray(0x200)           # a tiny .text with a ret
+    text = bytearray(0x200)           # .text: native stub plus two CIL bodies
     text[0] = 0xC3
+    text[TEXT_TINY_OFFSET] = (7 << 2) | 0x02      # tiny, 7 bytes of code
+    text[TEXT_TINY_OFFSET + 1:TEXT_TINY_OFFSET + 8] = bytes(
+        [0x00, 0x16, 0x2A, 0x00, 0x00, 0x00, 0x00])   # nop; ldc.i4.0; ret; pad
+    text[TEXT_FAT_OFFSET:TEXT_FAT_OFFSET + 12] = struct.pack(
+        "<HHII",
+        (3 << 12) | 0x03,      # flags: fat (0b11), size/4 = 3 words
+        4,                     # max stack
+        12,                    # code size
+        0x11000001,            # local var sig token (non-nil => locals exist)
+    )
+    text[TEXT_FAT_OFFSET + 12:TEXT_FAT_OFFSET + 24] = bytes(12)
 
     # Layout: .text at RVA 0x1000, .mdat at RVA 0x2000 (metadata + CLI header)
     cli_header_offset_in_mdat = 0

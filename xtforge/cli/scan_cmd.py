@@ -1209,6 +1209,16 @@ def cmd_re(args):
                 lines.append(f"  {type_row.get('full_name')}")
                 for m in (type_row.get("methods") or [])[:20]:
                     lines.append(f"     {str(m.get('name')):<28} {m.get('access')}")
+                    body = m.get("body") or {}
+                    if body:
+                        extra = [f"{body.get('format')} body",
+                                 f"{body.get('code_size')} bytes",
+                                 f"stack {body.get('max_stack')}"]
+                        if body.get("locals"):
+                            extra.append("locals")
+                        if body.get("exception_handlers"):
+                            extra.append("try/catch")
+                        lines.append(f"        {' · '.join(extra)}")
             human = "\n".join(lines)
         else:
             lines = [f"{res.get('pinvoke_count', 0)} P/Invoke(s) across "

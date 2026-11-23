@@ -620,7 +620,69 @@ class ManagedAssembly:
         result["module_refs"] = [r.get("name") for r in self.tables.get("ModuleRef") or []]
         return result
 
-    def members(self, *, limit: int = 500) -> dict[str, Any]:
+
+    def _rva_to_file(self, rva: int) -> int | None:
+        """Map a method RVA to a file offset using the section table."""
+        if not rva:
+            return None
+        for section in self._sections:
+            start = section["vaddr"]
+            span = max(section["vsize"], section["raw_size"])
+            if start <= rva < start + span:
+                delta = rva - start
+                offset = section["raw_ptr"] + delta
+                if offset < len(self.data):
+                    return offset
+                return None
+        return None
+
+    def method_body(self, rva: int) -> dict[str, Any] | None:
+        """Read a CIL method body header (ECMA-335 II.25.4).
+
+        WHY this matters: `members` reports a method's RVA but not what it does, so
+        every method looks alike. The body header gives the code size, the max stack
+        depth, whether locals are initialised, and whether exception handlers exist —
+        enough to separate a one-line stub from a real implementation, and `tiny` vs
+        `fat` correctness is what tells you the code size is trustworthy.
+
+        The discriminator is the low two bits of the first byte: 0b10 means a small
+        ("tiny") header with a single length byte; 0b11 means a "fat" header with an
+        explicit 4-byte code size. Reading a tiny body as fat (or the reverse) reports
+        a code size off by a factor of ~100 and a max stack that does not exist.
+        """
+        offset = self._rva_to_file(rva)
+        if offset is None or offset >= len(self.data):
+            return None
+        first = self.data[offset]
+        flags = first & 0x3
+        if flags == 0x2:  # CorILMethod_TinyFormat
+            return {"format": "tiny", "code_size": first >> 2,
+                    "max_stack": 8, "locals": False, "exception_handlers": 0,
+                    "init_locals": False, "header_size": 1}
+        if flags != 0x3:
+            return None  # not a CIL body (e.g. native code emitted by NGEN)
+        if offset + 12 > len(self.data):
+            return None
+        # Fat header: u16 flags/size, u16 maxstack, u32 codesize, u32 localvarsig.
+        header = struct.unpack_from("<HHII", self.data, offset)
+        code_size = header[2]
+        local_var_sig = header[3]
+        header_size = (header[0] >> 12) * 4
+        more_sects = bool(header[0] & 0x8)
+        return {
+            "format": "fat",
+            "code_size": code_size,
+            "max_stack": header[1],
+            # The signature token being non-nil is what actually tells you locals
+            # exist; the InitLocals flag only says whether they are zeroed.
+            "locals": bool(local_var_sig),
+            "init_locals": bool(header[0] & 0x10),
+            "exception_handlers": 1 if more_sects else 0,
+            "header_size": header_size,
+        }
+
+    def members(self, *, limit: int = 500,
+                bodies: bool = True) -> dict[str, Any]:
         """Types and methods: the `inspect_managed_members` question."""
         type_defs = self.tables.get("TypeDef") or []
         method_defs = self.tables.get("MethodDef") or []
@@ -641,7 +703,8 @@ class ManagedAssembly:
                 m = method_defs[rid - 1]
                 flags = m.get("flags", 0)
                 impl = m.get("impl_flags", 0)
-                methods.append({
+                rva = m.get("rva") or 0
+                record = {
                     "name": m.get("name"),
                     "rid": rid,
                     "access": _method_access(flags),
@@ -651,9 +714,14 @@ class ManagedAssembly:
                     "is_virtual": bool(flags & 0x0040),
                     "is_abstract": bool(flags & 0x0400),
                     "is_pinvoke": bool(impl & 0x2000) or bool(impl & 0x0004),
-                    "rva": m.get("rva"),
+                    "rva": rva,
                     "signature_size": len(m.get("signature") or b""),
-                })
+                }
+                if bodies and rva:
+                    body = self.method_body(rva)
+                    if body:
+                        record["body"] = body
+                methods.append(record)
             fields = []
             for rid in range(field_start, min(next_field, len(field_defs) + 1)):
                 if rid <= 0:
@@ -737,9 +805,10 @@ def inspect_artifact(path: str | Path) -> dict[str, Any]:
         return {"ok": False, "path": str(path), "error": str(exc)}
 
 
-def inspect_members(path: str | Path, *, limit: int = 500) -> dict[str, Any]:
+def inspect_members(path: str | Path, *, limit: int = 500,
+                    bodies: bool = True) -> dict[str, Any]:
     try:
-        return ManagedAssembly(path).members(limit=limit)
+        return ManagedAssembly(path).members(limit=limit, bodies=bodies)
     except (ManagedError, Denied) as exc:
         return {"ok": False, "path": str(path), "error": str(exc)}
 

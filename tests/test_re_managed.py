@@ -202,6 +202,71 @@ class ManagedMembersTest(unittest.TestCase):
         self.assertEqual([m["name"] for m in inner["methods"]], ["NativeCall"])
 
 
+class ManagedMethodBodyTest(unittest.TestCase):
+    """CIL method body headers (ECMA-335 II.25.4).
+
+    The discriminator is the low two bits of the first byte: 0b10 is a tiny header
+    with the code size in the remaining six bits, 0b11 is a fat header with an
+    explicit u32 code size. Confusing them reports a code size wrong by a factor of
+    ~100 and invents a max stack for tiny bodies, so both formats are asserted.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.path = build_fixture(Path(cls._tmp.name))
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._tmp.cleanup()
+
+    def setUp(self) -> None:
+        if self.path is None:
+            self.skipTest("cannot build the managed fixture")
+        report = inspect_members(self.path)
+        self.by_name = {m["name"]: m
+                        for t in report["types"] for m in t["methods"]}
+
+    def test_tiny_body(self) -> None:
+        body = self.by_name["Main"].get("body")
+        self.assertIsNotNone(body, "Main has an RVA into .text and must have a body")
+        self.assertEqual(body["format"], "tiny")
+        self.assertEqual(body["code_size"], 7)
+        # A tiny header carries no max-stack field; the CLI fixes it at 8.
+        self.assertEqual(body["max_stack"], 8)
+        self.assertEqual(body["header_size"], 1)
+
+    def test_fat_body(self) -> None:
+        body = self.by_name["VirtualThing"].get("body")
+        self.assertIsNotNone(body)
+        self.assertEqual(body["format"], "fat")
+        self.assertEqual(body["code_size"], 12)
+        self.assertEqual(body["max_stack"], 4)
+        self.assertEqual(body["header_size"], 12)
+
+    def test_locals_come_from_the_signature_token_not_the_flag(self) -> None:
+        """`locals` is decided by the local var sig token being non-nil.
+
+        The InitLocals flag only says whether locals are zeroed; a method can have
+        locals without initialising them. Reading the flag as `locals` misses those.
+        """
+        body = self.by_name["VirtualThing"]["body"]
+        self.assertTrue(body["locals"])
+        self.assertFalse(body["init_locals"])
+
+    def test_methods_without_code_have_no_body(self) -> None:
+        """A P/Invoke and an abstract method both have RVA 0 — no IL to read."""
+        self.assertIsNone(self.by_name["NativeCall"].get("body"))
+        self.assertIsNone(self.by_name["AbstractThing"].get("body"))
+
+    def test_bodies_can_be_skipped(self) -> None:
+        """The cheap path must still work when bodies are not wanted."""
+        report = inspect_members(self.path, bodies=False)
+        for type_record in report["types"]:
+            for method in type_record["methods"]:
+                self.assertNotIn("body", method)
+
+
 class ManagedBoundariesTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

@@ -223,9 +223,9 @@ cap("Unknown tracking / ledger", ["list_unknowns", "record_unknown"],
 cap("Managed PE/CLI artifact", ["inspect_managed_artifact"],
     "managed artifact", "covered")
 cap("Managed members (types/methods/CIL)", ["inspect_managed_members"],
-    "managed members", "partial",
-    "types, methods, fields and MethodAttributes decode; CIL instruction bodies "
-    "and exception regions are not disassembled")
+    "managed members", "covered",
+    "types, methods, fields, MethodAttributes, plus CIL method body headers: "
+    "tiny/fat format, code size, max stack, locals and exception-handler presence")
 cap("Managed native boundaries", ["inspect_managed_native_boundaries"],
     "managed boundaries", "covered")
 cap("Dart AOT", ["inspect_dart_aot"],
