@@ -126,7 +126,7 @@ cap("Kernel cache", ["inspect_kernel_module"],
 cap("Apple IPS crash reports", ["inspect_apple_ips"],
     None, "missing", "Apple IPS report parsing not built")
 cap("plist", ["inspect_plist"],
-    None, "missing", "binary/xml plist reader not built")
+    "formats plist", "covered")
 cap("Asset catalog", ["inspect_asset_catalog"],
     None, "missing", "Apple .car asset catalog not built")
 cap("devicetree", ["inspect_devicetree"],
@@ -141,16 +141,19 @@ cap("PE resources", ["inspect_pe_resources"],
 cap("PE load config", ["inspect_pe_load_config"],
     "pe load-config", "covered")
 cap("Windows shortcut (.lnk)", ["inspect_windows_shortcut"],
-    None, "missing", ".lnk parsing not built")
+    None, "missing",
+    "not built; the Linux equivalent (freedesktop .desktop) is covered")
 cap("Keyed archive / NSKeyedArchiver", ["inspect_keyed_archive"],
     None, "missing", "not built")
 cap("Go binary metadata", ["inspect_go_binary"],
-    None, "partial", "build info is read by the hub for some lanes, but no verb "
-                     "reports Go version/deps")
+    "formats go", "covered",
+    "version, module, dependencies and VCS revision, checked against `go version -m`")
 cap("Rust binary metadata", ["inspect_rust_binary"],
-    None, "missing", "rustc version / crate list not built")
+    "formats rust", "partial",
+    "reports marker paths and inferred crate names; Rust embeds no version record, "
+    "so no rustc version is claimed")
 cap("Python .pyc", ["inspect_python_pyc"],
-    None, "missing", "not built")
+    "formats pyc", "covered")
 cap("Erlang BEAM", ["inspect_erlang_beam"],
     None, "missing", "not built")
 cap("V8 code cache", ["inspect_v8_code_cache"],
@@ -226,7 +229,9 @@ cap("Maven/Gradle, NuGet metadata", ["inspect_maven_gradle_metadata",
 cap("Playwright trace", ["inspect_playwright_trace"],
     None, "missing", "not built")
 cap("Desktop application bundle", ["inspect_desktop_application"],
-    None, "missing", "not built")
+    "formats desktop", "partial",
+    "freedesktop .desktop entries are read (command, arguments, field codes); "
+    "macOS .app bundles and Windows shortcuts are not")
 cap("Byte search", ["search_native_bytes"],
     "search", "covered", probe=["re", "search", "{elf}", "--pattern", "7f 45", "--hex"])
 

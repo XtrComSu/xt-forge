@@ -485,6 +485,24 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb == "formats":
+            from ..core.re import formats as formats_mod
+            fmt_action = args.value if args.value in (
+                "plist", "pyc", "desktop", "go", "rust") else "inspect"
+            fmt_extra = [str(x) for x in (getattr(args, "extra", []) or [])]
+            fmt_target = path or (fmt_extra[0] if fmt_extra else None)
+            if not fmt_target:
+                return _out(args, {"ok": False, "error": "formats needs a path"},
+                            "error: formats needs a path", code=2)
+            fmt_readers = {
+                "inspect": formats_mod.inspect,
+                "plist": formats_mod.inspect_plist,
+                "pyc": formats_mod.inspect_pyc,
+                "desktop": formats_mod.inspect_desktop,
+                "go": formats_mod.inspect_go_binary,
+                "rust": formats_mod.inspect_rust_binary,
+            }
+            res = fmt_readers[fmt_action](fmt_target)
         elif verb == "managed":
             from ..core.re import managed as managed_mod
             # `re managed <action> <path>`: the action lands in `value`, so the
@@ -886,6 +904,52 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb == "formats":
+        _fmt_a = args.value if args.value in (
+            "plist", "pyc", "desktop", "go", "rust") else "inspect"
+        if not res.get("ok"):
+            human = (f"{_fmt_a}: " + str(res.get("error", "unknown"))
+                     + (f" (detected: {res.get('format_detected')})"
+                        if res.get("format_detected") else ""))
+        elif "shape" in res:
+            lines = [f"plist ({res.get('format_detected')}, {res.get('shape')}, "
+                     f"{res.get('key_count', 0)} key(s))"]
+            lines.extend(f"  {k}" for k in (res.get("keys") or [])[:40])
+            human = "\n".join(lines)
+        elif "magic" in res:
+            lines = [f"pyc {res.get('magic')} -> Python {res.get('python_version_guess')}"
+                     f" ({'hash-based' if res.get('hash_based') else 'timestamp'})"]
+            if res.get("source_hash"):
+                lines.append(f"  source hash   {res['source_hash']}")
+            if res.get("source_timestamp"):
+                lines.append(f"  source mtime  {res['source_timestamp']}")
+            lines.append(f"  code payload  {res.get('code_payload_bytes')} bytes")
+            human = "\n".join(lines)
+        elif "exec" in res:
+            lines = [f"desktop entry: {res.get('name')} ({res.get('type')})",
+                     f"  command     {res.get('command')}"]
+            if res.get("arguments"):
+                lines.append(f"  arguments   {' '.join(res['arguments'])}")
+            if res.get("field_codes"):
+                lines.append(f"  field codes {', '.join(res['field_codes'])}")
+            if res.get("categories"):
+                lines.append(f"  categories  {', '.join(res['categories'])}")
+            human = "\n".join(lines)
+        elif "build_settings" in res:
+            lines = [f"go binary: {res.get('version')}",
+                     f"  module      {res.get('module')}"]
+            if res.get("goos"):
+                lines.append(f"  target      {res.get('goos')}/{res.get('goarch')}")
+            if res.get("vcs_revision"):
+                lines.append(f"  vcs         {res['vcs_revision'][:12]}")
+            lines.append(f"  deps        {res.get('dependency_count', 0)}")
+            human = "\n".join(lines)
+        else:
+            lines = [f"rust markers ({len(res.get('markers') or [])})"]
+            if res.get("rustc_commit"):
+                lines.append(f"  rustc       {res['rustc_commit'][:12]}")
+            lines.append(f"  crates      {res.get('crate_candidate_count', 0)} candidate(s)")
+            human = "\n".join(lines)
     elif verb == "managed":
         # Same positional rules as the dispatcher: the action is in args.value.
         _managed_actions = ("artifact", "members", "boundaries")

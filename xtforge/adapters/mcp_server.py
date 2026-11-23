@@ -104,6 +104,10 @@ def _opt(args: dict[str, Any], key: str, flag: str | None = None) -> list[str]:
 
 def _re_inspect_args(args: dict[str, Any]) -> list[str]:
     verb = args.get("verb") or "info"
+    if verb == "formats":
+        # `re formats <kind> <path>`: the kind is a positional ahead of the path.
+        command = ["re", "formats", str(args.get("sub") or "inspect"), _str(args, "path")]
+        return command
     if verb == "managed":
         # `re managed <action> <path>` — action is a positional, so it must come
         # before the path or argparse binds the path as the action.
@@ -635,6 +639,8 @@ TOOLS: list[dict[str, Any]] = [
             "elfmeta", "wasm", "firmware", "bookmarks", "bulk",
             # Managed (.NET) metadata: CLI header, ECMA-335 tables, P/Invoke seams.
             "managed",
+            # Small self-describing formats: plist, .pyc, .desktop, Go, Rust.
+            "formats",
         ]},
          "limit": _INT, "member": _TEXT, "arch": _TEXT, "target": _TEXT,
          "bytes": _INT, "max_instructions": _INT, "max_functions": _INT, "flow": _BOOL,
@@ -642,7 +648,8 @@ TOOLS: list[dict[str, Any]] = [
          "ignore_case": _BOOL, "name": _TEXT, "comment": _TEXT,
          "sub": {"type": "string",
                  "enum": ["list", "set", "unset", "next", "prev",
-                          "artifact", "members", "boundaries"],
+                          "artifact", "members", "boundaries",
+                          "inspect", "plist", "pyc", "desktop", "go", "rust"],
                  "description": "bookmarks: navigation operation. managed: which "
                                 "report to build (artifact, members, boundaries)."}},
         ["path"], _re_inspect_args,
