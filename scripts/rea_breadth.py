@@ -476,10 +476,14 @@ cap("Analysis session and navigation state", ["binary_session", "close_binary",
     "address_to_file_offset", "inspect_address_context", "get_navigation_context",
     "inspect_analysis_settings", "update_analysis_settings", "inspect_analysis_view",
     "list_names", "list_documents", "current_document", "reset_investigation"],
-    "annotate", "partial",
-    "`re annotate` persists names and comments across sessions in the overlay DB, which is "
-    "the durable part. A resident r2-style navigation cursor (goto/next/prev/current) is a "
-    "stateful UI affordance this stateless CLI does not have")
+    "annotate", "covered",
+    "`re annotate` persists names and comments in the overlay DB; `re goto`, `re step`, "
+    "`re resume` and `re bookmark` add the navigation half — a cursor, a bounded back-trail "
+    "and named waypoints, keyed by content hash so a rebuilt binary starts fresh rather than "
+    "inheriting addresses that now mean something else. Navigation is advisory by design and "
+    "the report says so. Verified across separate process invocations, which is where a "
+    "session store is actually tested, since anything that only persists in memory proves "
+    "nothing")
 
 cap("Guided workflows and analysis guidance", ["guided_workflows", "inspect_guidance",
     "search_guidance", "read_guidance_section"],

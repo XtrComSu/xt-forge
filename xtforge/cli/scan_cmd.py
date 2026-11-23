@@ -233,7 +233,8 @@ def cmd_re(args):
                   "bundle-diff", "compare-bundles", "bundle-compare",
                   "api", "api-contract", "abi",
                   "coverage", "recon-coverage", "evaluate-coverage",
-                  "capture-diff", "capture-compare", "correlate"):
+                  "capture-diff", "capture-compare", "correlate",
+                  "goto", "nav", "resume", "bookmark", "step"):
         # These take two positionals: bin1 in `value`, bin2 in `path`. Resolve bin2 BEFORE
         # `path` is rewritten to bin1, otherwise both sides point at the same file and the
         # matcher reports a perfect self-match.
@@ -589,6 +590,26 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("goto", "nav", "resume", "bookmark", "step"):
+            from ..core.re import navsession as _nav
+            # Two positionals are `binary arg`: the binary arrives in `value` (already
+            # rewritten into `path`) and the argument — address, bookmark name, direction —
+            # in `second_binary`. Reading `args.value` here is reading the binary path again,
+            # which is how the first version fed a file path into int().
+            argument = second_binary
+            extra_args = getattr(args, "extra", None) or []
+            if verb == "goto":
+                res = _nav.goto(path, argument or 0)
+            elif verb == "bookmark":
+                # Three positionals: binary, name, address. `extra` carries the address.
+                address = extra_args[0] if extra_args else None
+                res = _nav.bookmark(path, argument or "", address)
+            elif verb == "step":
+                res = _nav.step(path, argument or "prev")
+            elif verb == "resume":
+                res = _nav.where_to(path)
+            else:
+                res = _nav.current(path)
         elif verb in ("capture-diff", "capture-compare", "correlate"):
             from ..core.re import capcmp as _capcmp
             if not second_binary:
@@ -1177,6 +1198,33 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("goto", "nav", "resume", "bookmark", "step"):
+        if not res.get("ok"):
+            human = "nav: " + str(res.get("error", "unknown"))
+        elif verb == "bookmark" and "bookmarks" in res:
+            marks = res.get("bookmarks") or []
+            human = (f"Bookmarks ({res.get('count')}):\n" if marks
+                     else "Bookmarks: none recorded\n") + chr(10).join(
+                f"    {m['name']:<24} {m['address']}" for m in marks)
+        elif verb == "resume":
+            lines = [f"Session resume  cursor {res.get('address') or '(none)'}"
+                     f"  ({res.get('annotation_count')} annotations)"]
+            if res.get("bookmarks"):
+                lines.append("  bookmarks   " + ", ".join(
+                    f"{m['name']}@{m['address']}" for m in res["bookmarks"][:8]))
+            if res.get("trail"):
+                lines.append("  trail       " + " <- ".join(res["trail"][:8]))
+            lines.append(f"  resumable   {res.get('resumable')}")
+            human = chr(10).join(lines)
+        else:
+            lines = [f"Cursor {res.get('address') or '(none)'}"]
+            if res.get("previous"):
+                lines.append(f"  previous    {res['previous']}")
+            if res.get("direction"):
+                lines.append(f"  direction   {res['direction']}")
+            if res.get("note"):
+                lines.append(f"  note        {res['note']}")
+            human = chr(10).join(lines)
     elif verb in ("capture-diff", "capture-compare"):
         if not res.get("ok"):
             human = "capture diff: " + str(res.get("error", "unknown"))
