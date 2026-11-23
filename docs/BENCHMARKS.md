@@ -1,6 +1,61 @@
-# XT-Forge 9-Tier Live Benchmark & Root-Cause Analysis (5 Reps Each, Median)
+# XT-Forge Benchmarks
+
+This document holds **two different instruments**, and they answer different
+questions. Read the right section before quoting a number.
+
+| Section | Measures | Model needed | Result |
+| --- | --- | --- | --- |
+| [Static tier benchmark](#static-tier-benchmark-047) | Can the tool produce a correct answer, checked by an oracle | No | **70/70, 0 fail, 0 skip** (0.4.7) |
+| [Agentic 9-tier eval](#xt-forge-9-tier-live-benchmark--root-cause-analysis-5-reps-each-median) | Can an *agent* solve a task with the tool in hand | Yes | 93.3% standalone (0.4.6, Nov-20) |
+
+The static numbers are reproducible on any machine with `clang` and the LLVM
+tools. The agentic numbers depend on a specific model, its sampling, and a live
+API, so they drift with the model rather than only with the code.
+
+---
+
+## Static tier benchmark (0.4.7)
+
+`scripts/bench_re_tiers.py --reps 5` — 15 difficulty tiers, ordered by what an
+analyst asks first (know the file, find code, read code, explain it), over ELF and
+PE inputs taken from the host. Every answer is checked against an oracle this repo
+did not write: `llvm-readelf`, `llvm-objdump`, `llvm-nm`, or arithmetic recomputed
+inside the script. A tier that cannot produce an answer is reported as failing,
+not as a skip.
+
+```
+version 0.4.7-Damascus      reps 5      tier 14 builds its own fixture
+
+  elf    pass= 28  fail= 0  skip= 0
+  pe     pass= 42  fail= 0  skip= 0
+  ------------------------------------
+  total  pass= 70  fail= 0  skip= 0
+```
+
+Recorded in full at [`benchmarks/re_tiers_0.4.7_5rep.json`](../benchmarks/re_tiers_0.4.7_5rep.json).
+
+**What this number is not.** It is not a claim that xt-forge solves every reverse
+engineering problem. The tiers are a fixed ladder, and a ladder you have climbed
+before stops telling you much — passing 70/70 means the cases on this ladder work,
+not that the cases off it do. The genuinely informative results are the ones that
+failed before they passed: PE sections reporting `.text` at address 0 (fixed in
+`e4901b7`), and tier 14 silently skipping itself in every clean checkout (fixed in
+`6be3e0a`).
+
+Known gaps this benchmark does not cover: Mach-O and PDB columns are empty (no
+Apple containers or PDB fixtures on the host that produced it), and the four
+env-gated Go lanes skip without real Mach-O, boot image, ELF and x86-64 fixtures.
+
+---
+
+## XT-Forge 9-Tier Live Benchmark & Root-Cause Analysis (5 Reps Each, Median)
 
 ![XT-Forge 9-Tier 5-Rep Median Benchmark](bench_9tier_charts.png)
+
+> **Provenance.** The numbers in this section were measured on **0.4.6** against
+> `rea-agents@6.7.0` on 2026-11-20. They have not been re-run on 0.4.7, so treat
+> 93.3% as a **floor**, not a current measurement. Re-running requires a live
+> model and API budget.
 
 ## Test Methodology
 
