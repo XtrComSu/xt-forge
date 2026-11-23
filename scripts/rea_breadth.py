@@ -116,7 +116,9 @@ cap("UEFI firmware extraction", ["extract_uefi_firmware"],
     None, "missing", "inventory only: section-level compression (LZMA/Tiano) not "
                      "decompressed, so files are located but not extracted")
 cap("UEFI NVRAM variables", ["inspect_uefi_nvram"],
-    None, "missing", "NVRAM store parsing not built")
+    "uefi", "covered",
+    "efivarfs inventory, EFI_LOAD_OPTION boot entries with decoded device paths, "
+    "boot order, and a Secure Boot assessment")
 cap("Mach-O", ["inspect_macho", "get_objc_classes", "get_objc_protocols"],
     "info", "partial", "Mach-O parses through the native hub; Objective-C class and "
                        "protocol enumeration is not exposed as a verb")

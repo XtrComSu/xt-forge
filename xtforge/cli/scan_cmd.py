@@ -494,6 +494,9 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("uefi", "nvram"):
+            from ..core.re import uefi
+            res = uefi.inspect_uefi_variables(path)
         elif verb == "sqlite":
             from ..core.re import artifacts
             res = artifacts.inspect_sqlite(path)
@@ -940,6 +943,42 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("uefi", "nvram"):
+        if not res.get("ok"):
+            human = "uefi variables: " + str(res.get("error", "unknown"))
+        elif "variable_count" in res:
+            lines = [f"uefi variables ({res.get('readable_count')} readable, "
+                     f"{res.get('unreadable_count')} unreadable)",
+                     f"  assessment  {res.get('assessment')}"]
+            if res.get("boot_order"):
+                lines.append(f"  boot order  {', '.join(res['boot_order'])}")
+            for entry in (res.get("boot_entries") or [])[:12]:
+                detail = entry.get("boot_entry") or {}
+                text = detail.get("description") or "?"
+                suffix = ""
+                if detail.get("device_path_nodes"):
+                    suffix = "  [" + " -> ".join(
+                        node["name"] for node in detail["device_path_nodes"]
+                        if node["name"] != "End") + "]"
+                lines.append(f"    {entry['name']}  {text}{suffix}")
+            security = res.get("security") or {}
+            if security:
+                lines.append(f"  security    {', '.join(sorted(security))}")
+            human = "\n".join(lines)
+        else:
+            lines = [f"uefi variable {res.get('name')}",
+                     f"  guid        {res.get('guid')}",
+                     f"  attributes  {res.get('attributes')} "
+                     f"{', '.join(res.get('attribute_names') or [])}"]
+            if res.get("significance"):
+                lines.append(f"  meaning     {res['significance']}")
+            if "secure_boot_enabled" in res:
+                lines.append(f"  enabled     {res['secure_boot_enabled']}")
+            if res.get("boot_entry"):
+                detail = res["boot_entry"]
+                lines.append(f"  entry       {detail.get('description')} "
+                             f"({detail.get('device_path_length')} byte path)")
+            human = "\n".join(lines)
     elif verb == "sqlite":
         if not res.get("ok"):
             human = "sqlite: " + str(res.get("error", "unknown"))

@@ -24,6 +24,11 @@ DEFAULT_ROOTS = [
     # exists to inspect. Reads stay subject to DENY_GLOBS below.
     "/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/lib", "/usr/lib64",
     "/usr/local", "/usr/share", "/lib", "/lib64", "/opt", "/var/lib/flatpak", "/app",
+    # Firmware state. UEFI variables live in efivarfs: Secure Boot keys, boot order
+    # and boot entries are here and nowhere else, so a reader that cannot look here
+    # cannot answer the firmware question at all. These paths are read-only kernel
+    # surfaces; the write path this tool never takes is the only way to alter them.
+    "/sys/firmware/efi/efivars", "/sys/firmware/efi",
     # Termux prefix; skipped entirely when PREFIX is unset.
     "${PREFIX}/bin", "${PREFIX}/sbin", "${PREFIX}/lib", "${PREFIX}/share",
 ]
