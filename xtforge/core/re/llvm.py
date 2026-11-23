@@ -123,7 +123,18 @@ def _parse_objdump_sections(text: str) -> list[dict[str, Any]]:
 
 
 def _parse_readobj_sections(text: str) -> list[dict[str, Any]]:
-    """Parse `Section { ... }` blocks from llvm-readobj."""
+    """Parse `Section { ... }` blocks from llvm-readobj.
+
+    The field names differ by object format, and reading only the ELF/Mach-O
+    spellings is what made a PE report `.text` at address 0 with size 0: COFF
+    calls them `VirtualAddress` and `VirtualSize`, so the parser found no
+    `Address:`/`Size:` line, defaulted both to 0, and returned a perfectly
+    well-formed row full of zeros. A section that exists but claims to be empty
+    and unmapped is worse than a missing one — it looks like an answer.
+
+    COFF also prints a byte listing after the name (`Name: .text (2E 74 65 ...)`),
+    which was being kept as part of the section name.
+    """
     rows: list[dict[str, Any]] = []
     current: dict[str, Any] = {}
     in_section = False
@@ -143,19 +154,33 @@ def _parse_readobj_sections(text: str) -> list[dict[str, Any]]:
             continue
         if field.startswith("Name:"):
             raw = field.split(":", 1)[1].strip()
-            current["name"] = re.sub(r"\s*\(\d+\)\s*$", "", raw).strip()
+            # Drop COFF's trailing byte listing: ".text (2E 74 65 78 74 ...)".
+            current["name"] = re.sub(r"\s*\([0-9A-Fa-f ]*\)\s*$", "", raw).strip()
+        elif field.startswith("VirtualAddress:"):
+            current["address"] = _number(field.split(":", 1)[1].strip())
         elif field.startswith("Address:"):
             current["address"] = _number(field.split(":", 1)[1].strip())
+        elif field.startswith("VirtualSize:"):
+            current["size"] = _number(field.split(":", 1)[1].strip())
         elif field.startswith("Size:"):
             current["size"] = _number(field.split(":", 1)[1].strip())
     return rows
 
 
 def sections(path: str) -> list[dict[str, Any]]:
-    """Section headers as name/address/size dicts; [] if unavailable."""
+    """Section headers as name/address/size dicts; [] if unavailable.
+
+    `--macho` is deliberately NOT passed. llvm-objdump auto-detects the format
+    from the file, and forcing the Mach-O reader makes it emit nothing at all for
+    a PE or an ELF — while still exiting 0. `run_tool` treats returncode 0 as
+    success, so the empty output fell through to the readobj fallback and the
+    objdump path was dead for every non-Mach-O input without any error to show
+    for it. Measured: plain `--section-headers` parses 3 PE rows and 29 ELF rows
+    where `--macho --section-headers` parses 0 and 0, and both exit 0.
+    """
     if not _is_file(path):
         return []
-    result = run_tool("objdump", ["--macho", "--section-headers", path])
+    result = run_tool("objdump", ["--section-headers", path])
     rows = _parse_objdump_sections(result["stdout"]) if result["ok"] else []
     if rows:
         return rows
