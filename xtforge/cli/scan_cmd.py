@@ -541,6 +541,9 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("v8cache", "codecache"):
+            from ..core.re import v8cache
+            res = v8cache.inspect_v8_code_cache(path)
         elif verb in ("ptrace", "playwright"):
             from ..core.re import playwright
             res = playwright.inspect_playwright_trace(path, limit=args.limit or 200)
@@ -1034,6 +1037,35 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("v8cache", "codecache"):
+        if not res.get("ok"):
+            human = "v8 code cache: " + str(res.get("error", "unknown"))
+        elif res.get("kind") == "v8-code-cache-directory":
+            lines = [f"{res.get('cache_count', 0)} code cache(s) across "
+                     f"{res.get('distinct_builds', 0)} V8 build(s)"]
+            for build, count in (res.get("builds") or {}).items():
+                lines.append(f"  build {build}   {count} cache(s)")
+            if res.get("flag_sets"):
+                for flags, count in res["flag_sets"].items():
+                    lines.append(f"  flags {flags}   {count} cache(s)")
+            lines.append(f"  sources matched  {res.get('sources_matched', 0)}")
+            human = "\n".join(lines)
+        else:
+            lines = [f"V8 code cache ({res.get('file_size')} bytes)",
+                     f"  build       {res.get('v8_build_fingerprint')}",
+                     f"  source size {res.get('source_size')}",
+                     f"  source hash {res.get('source_hash')}"
+                     + (" (not recomputed)" if not res.get("source_hash_verified")
+                        else ""),
+                     f"  flags       {res.get('flags')}"
+                     + (f" ({', '.join(res['flag_names'])})"
+                        if res.get("flag_names") else ""),
+                     f"  payload     {res.get('payload_length')} byte(s)"]
+            if res.get("source"):
+                lines.append(f"  source      {res['source']}")
+            if res.get("truncated"):
+                lines.append(f"  WARNING     {res.get('warning')}")
+            human = "\n".join(lines)
     elif verb in ("ptrace", "playwright"):
         if not res.get("ok"):
             human = "playwright trace: " + str(res.get("error", "unknown"))

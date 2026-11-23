@@ -168,7 +168,10 @@ cap("Erlang BEAM", ["inspect_erlang_beam"],
     "beam", "covered",
     "chunk inventory, module name, exports, compiler version and source paths")
 cap("V8 code cache", ["inspect_v8_code_cache"],
-    None, "missing", "not built")
+    "v8cache", "covered",
+    "header fields (V8 build fingerprint, source size and hash, flags, payload) read "
+    "from caches written by Node's createCachedData, plus directory surveys across "
+    "builds and flag sets; 32-byte header pinned against real file sizes")
 cap("SQLite database", ["inspect_sqlite_database"],
     "sqlite", "covered",
     "header parsed directly so truncated/hot-journalled files are described, "
