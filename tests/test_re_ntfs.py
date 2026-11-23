@@ -182,6 +182,70 @@ class RealImageTest(unittest.TestCase):
         self.assertTrue(logfile.get("formatted_only"),
                         "erased log was not reported as formatted-only")
 
+    def test_restart_page_fields_are_read_from_the_documented_offsets(self) -> None:
+        """A synthetic restart page with known values, read back field by field.
+
+        This exists because the parser originally read every restart-page field eight bytes
+        early — it took the low half of `chkdsk_lsn` as `system_page_size` — so a real journal
+        would have been reported with a nonsense page size and version while still looking
+        structurally plausible. Offsets come from ntfs-3g's `logfile.h`:
+
+            8 chkdsk_lsn (8 bytes) · 16 system_page_size · 20 log_page_size
+            24 restart_area_offset · 26 minor_ver · 28 major_ver
+
+        The signature is written with the values chosen so that a mis-read is obvious rather
+        than subtle: 4096 read from 8 would come back as half of a non-zero LSN.
+        """
+        import struct
+        raw = bytearray(self.image.read_bytes())
+        logfile = self.report["logfile"]
+        offset = logfile["log_offset"]
+        page = 4096
+        if offset + page > len(raw):
+            self.skipTest("log offset is past the end of this image")
+        area = bytearray(page)
+        area[0:4] = b"RSTR"
+        struct.pack_into("<H", area, 4, 0x30)          # usa_ofs
+        struct.pack_into("<H", area, 6, 0x0009)        # usa_count
+        struct.pack_into("<Q", area, 8, 0x1234)        # chkdsk_lsn (non-zero on purpose)
+        struct.pack_into("<I", area, 16, page)         # system_page_size
+        struct.pack_into("<I", area, 20, page)         # log_page_size
+        struct.pack_into("<H", area, 24, 0x30)         # restart_area_offset
+        struct.pack_into("<H", area, 26, 2)            # minor
+        struct.pack_into("<H", area, 28, 1)            # major
+        raw[offset:offset + page] = area
+        patched = Path(str(self.image) + ".restart")
+        patched.write_bytes(raw)
+        try:
+            report = ntfs.inspect_ntfs_journal(patched)
+        finally:
+            patched.unlink(missing_ok=True)
+        found = report["logfile"]
+        self.assertEqual(found["restart_signature"], "RSTR")
+        self.assertEqual(found["shutdown"], "clean")
+        self.assertEqual(found["system_page_size"], 4096,
+                         "system_page_size read from the wrong offset")
+        self.assertEqual(found["log_page_size"], 4096)
+        self.assertEqual(found["major_version"], 1)
+        self.assertEqual(found["minor_version"], 2)
+        self.assertEqual(found["chkdsk_lsn"], 0x1234)
+
+    def test_chkd_signature_reports_a_dirty_shutdown(self) -> None:
+        """`CHKD` means the volume was checked after a dirty shutdown, not that it is clean."""
+        raw = bytearray(self.image.read_bytes())
+        offset = self.report["logfile"]["log_offset"]
+        if offset + 8 > len(raw):
+            self.skipTest("log offset is past the end of this image")
+        raw[offset:offset + 4] = b"CHKD"
+        patched = Path(str(self.image) + ".chkd")
+        patched.write_bytes(raw)
+        try:
+            report = ntfs.inspect_ntfs_journal(patched)
+        finally:
+            patched.unlink(missing_ok=True)
+        self.assertEqual(report["logfile"]["restart_signature"], "CHKD")
+        self.assertEqual(report["logfile"]["shutdown"], "dirty")
+
     def test_fixups_are_applied_to_resident_values(self) -> None:
         """The update-sequence array must be undone before attributes are read.
 
@@ -418,17 +482,71 @@ class RestartAreaParsingTest(unittest.TestCase):
         record = {"record": 2, "_runs": [(cluster, len(log) // 4096 or 1)]}
         return bytes(raw), record
 
-    def test_clean_restart_area_is_parsed(self) -> None:
+    def _restart_page(self, signature: bytes = b"RSTR", *, chkdsk_lsn: int = 0,
+                      system_page_size: int = 4096, log_page_size: int = 4096,
+                      restart_offset: int = 0x30, minor: int = 1,
+                      major: int = 5) -> bytes:
+        """A restart page laid out per ntfs-3g's `logfile.h`.
+
+        The first version of `test_clean_restart_area_is_parsed` packed its fields with the
+        same wrong offsets the parser used (page sizes at 8), so test and code agreed on a
+        layout that does not exist and neither could catch the other. Offsets now come from
+        the header:
+
+            8 chkdsk_lsn (8) · 16 system_page_size · 20 log_page_size
+            24 restart_area_offset · 26 minor_ver · 28 major_ver
+        """
         log = bytearray(4096)
-        log[0:4] = b"RSTR"
-        struct.pack_into("<IIHHh", log, 8, 4096, 4096, 0x30, 1, 5)
-        raw, record = self._image_with_log(bytes(log))
+        log[0:4] = signature
+        struct.pack_into("<H", log, 4, 0x30)          # usa_ofs
+        struct.pack_into("<H", log, 6, 0x0009)        # usa_count
+        struct.pack_into("<Q", log, 8, chkdsk_lsn)
+        struct.pack_into("<I", log, 16, system_page_size)
+        struct.pack_into("<I", log, 20, log_page_size)
+        struct.pack_into("<H", log, 24, restart_offset)
+        struct.pack_into("<H", log, 26, minor)
+        struct.pack_into("<H", log, 28, major)
+        return bytes(log)
+
+    def test_clean_restart_area_is_parsed(self) -> None:
+        log = self._restart_page()
+        raw, record = self._image_with_log(log)
         area = ntfs._logfile_restart(raw, self._volume(), [record])
         self.assertEqual(area["restart_signature"], "RSTR")
         self.assertEqual(area["shutdown"], "clean")
         self.assertEqual(area["system_page_size"], 4096)
         self.assertEqual(area["log_page_size"], 4096)
         self.assertEqual(area["major_version"], 5)
+        self.assertEqual(area["minor_version"], 1)
+        self.assertEqual(area["restart_area_offset"], 0x30)
+
+    def test_a_non_zero_chkdsk_lsn_is_read_from_its_own_field(self) -> None:
+        """The bug was reading `system_page_size` from the LSN's low half.
+
+        A page whose LSN is deliberately large makes that mis-read unmistakable: reading at
+        8 yields 0x5678 instead of 4096, and reading `chkdsk_lsn` from the wrong place yields
+        a value built out of page-size bytes.
+        """
+        log = self._restart_page(chkdsk_lsn=0x1234_5678_9ABC)
+        raw, record = self._image_with_log(log)
+        area = ntfs._logfile_restart(raw, self._volume(), [record])
+        self.assertEqual(area["chkdsk_lsn"], 0x1234_5678_9ABC)
+        self.assertEqual(area["system_page_size"], 4096,
+                         "system_page_size was read from the chkdsk_lsn field")
+        self.assertEqual(area["log_page_size"], 4096)
+        self.assertEqual(area["major_version"], 5)
+
+    def test_page_sizes_and_version_are_independent(self) -> None:
+        """Distinct values in every field, so a shifted read cannot look correct."""
+        log = self._restart_page(system_page_size=4096, log_page_size=512,
+                                 minor=7, major=3, restart_offset=0x50)
+        raw, record = self._image_with_log(log)
+        area = ntfs._logfile_restart(raw, self._volume(), [record])
+        self.assertEqual(area["system_page_size"], 4096)
+        self.assertEqual(area["log_page_size"], 512)
+        self.assertEqual(area["minor_version"], 7)
+        self.assertEqual(area["major_version"], 3)
+        self.assertEqual(area["restart_area_offset"], 0x50)
 
     def test_dirty_restart_area_is_parsed(self) -> None:
         """CHKD means the volume was not shut down cleanly."""

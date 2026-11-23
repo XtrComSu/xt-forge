@@ -449,14 +449,29 @@ def _logfile_restart(raw: bytes, volume: _Volume,
             "log_clusters": first_count,
             "log_size": len(log),
         }
+        # Field offsets per ntfs-3g's logfile.h, which is the authority here:
+        #   0  magic          4  usa_ofs        6  usa_count
+        #   8  chkdsk_lsn (8 bytes)
+        #  16  system_page_size   20  log_page_size
+        #  24  restart_area_offset  26 minor_ver  28 major_ver
+        # The first version of this read every field 8 bytes early — it took the low half of
+        # chkdsk_lsn as system_page_size — so a real journal would have been reported with a
+        # nonsense page size and version. Caught by writing a restart page with known values
+        # and comparing against what ntfsrecover makes of it.
         if index + 32 <= len(log):
-            (system_page_size, log_page_size,
-             _restart_offset, minor, major) = struct.unpack_from(
-                "<IIHHh", log, index + 8)
+            system_page_size = struct.unpack_from("<I", log, index + 16)[0]
+            log_page_size = struct.unpack_from("<I", log, index + 20)[0]
+            restart_offset = struct.unpack_from("<H", log, index + 24)[0]
+            minor = struct.unpack_from("<H", log, index + 26)[0]
+            major = struct.unpack_from("<H", log, index + 28)[0]
             area["system_page_size"] = system_page_size
             area["log_page_size"] = log_page_size
+            area["restart_area_offset"] = restart_offset
             area["major_version"] = major
             area["minor_version"] = minor
+            # chkdsk_lsn is meaningful: non-zero means chkdsk modified the log, which is a
+            # stronger statement than the RSTR/CHKD signature alone.
+            area["chkdsk_lsn"] = struct.unpack_from("<Q", log, index + 8)[0]
         return area
 
     # No restart area. Report what the log ACTUALLY contains, because a caller needs to

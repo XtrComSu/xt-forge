@@ -190,10 +190,15 @@ cap("SQLite database", ["inspect_sqlite_database"],
 cap("NTFS journal", ["inspect_ntfs_journal"],
     "ntfs", "partial",
     "volume, MFT, resident values with update-sequence fixups verified against ntfsls; "
-    "$LogFile located via delta-coded data runs and its restart area parsed (RSTR=clean, "
-    "CHKD=dirty, plus page sizes and log version), with erased/zeroed logs reported as "
-    "no-journal rather than clean. Transaction RECORDS are not decoded: ntfs-3g formats "
-    "$LogFile and never writes one (ntfsrecover agrees: 'log file has been wiped out'), "
+    "$LogFile located via delta-coded data runs and its restart page parsed at the offsets "
+    "ntfs-3g's logfile.h documents (chkdsk_lsn at 8, system_page_size at 16, restart area "
+    "offset at 24, minor/major at 26/28), including chkdsk_lsn. An earlier version read every "
+    "field 8 bytes early and the test agreed with it, so both were wrong together. Erased logs "
+    "are reported as no-journal rather than clean. ntfsrecover validates synthetic restart "
+    "pages field by field, which is how the offsets were established. Transaction RECORDS are "
+    "still not decoded: mkntfs writes $LogFile with NO restart page at all ('No restart "
+    "page'), ntfscp does not create one, and mounting needs user_allow_other in /etc/fuse.conf "
+    "which is root-owned, "
     "so there is no real oracle on this host and the record layout stays unclaimed")
 cap("EVM interface", ["inspect_evm_interface"],
     "evm", "covered",
