@@ -600,6 +600,10 @@ def cmd_re(args):
                 res = {"ok": True, "path": str(path), **pe.tls()}
             elif pe_subverb == "resources":
                 res = {"ok": True, "path": str(path), **pe.resources()}
+            elif pe_subverb == "load-config":
+                res = {"ok": True, "path": str(path), **pe.load_config()}
+            elif pe_subverb == "certificates":
+                res = {"ok": True, "path": str(path), **pe.certificates()}
             else:
                 return _out(args, {"ok": False, "error": f"unknown PE subverb: {pe_subverb}"},
                             f"error: unknown PE subverb {pe_subverb}", code=2)
@@ -931,6 +935,36 @@ def cmd_re(args):
                 f"{exp['rva']:>10}  ord:{exp.get('ordinal', 0):<4}  {exp['name']}"
                 for exp in res.get("exports", [])
             )
+        elif pe_subverb == "load-config":
+            fields = res.get("fields") or {}
+            mit = res.get("mitigations") or {}
+            if not res.get("present"):
+                human = "no load config: " + "; ".join(res.get("warnings") or [])
+            else:
+                lines = [f"load config ({res.get('size', 0)} bytes, "
+                         f"guard_flags {res.get('guard_flags', 'n/a')})"]
+                for name, label in (("security_cookie", "GS cookie"),
+                                    ("se_handler_table", "SEH table"),
+                                    ("guard_cf_check_function", "CFG check"),
+                                    ("guard_cf_function_table", "CFG table"),
+                                    ("guard_cf_function_count", "CFG entries")):
+                    if name in fields:
+                        lines.append(f"  {label:<14} 0x{fields[name]:x}")
+                for name, value in mit.items():
+                    state = "not applicable" if value is None else ("yes" if value else "no")
+                    lines.append(f"  {name:<22} {state}")
+                lines.extend(f"  warning: {w}" for w in (res.get("warnings") or []))
+                human = "\n".join(lines)
+        elif pe_subverb == "certificates":
+            if not res.get("signed"):
+                human = "unsigned: " + "; ".join(res.get("warnings") or [])
+            else:
+                lines = [f"{len(res['certificates'])} certificate entr(y/ies)"]
+                for c in res["certificates"]:
+                    lines.append(f"  {c['type_name']:<18} rev {c['revision_name']:<5} "
+                                 f"{c['payload_size']:>6} bytes  {c['encoding']} "
+                                 f"@0x{c['offset']:x}")
+                human = "\n".join(lines)
         elif pe_subverb == "resources":
             rows = res.get("entries", [])
             lines = [f"{res.get('count', 0)} resource(s): "

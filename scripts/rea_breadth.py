@@ -134,11 +134,12 @@ cap("devicetree", ["inspect_devicetree"],
 cap("Kernel build config", ["inspect_kernel_build_config"],
     None, "missing", "IKCONFIG extraction not built")
 cap("PE certificates", ["inspect_pe_certificates"],
-    None, "missing", "Authenticode PKCS#7 parsing not built")
+    "pe certificates", "covered",
+    "the table is located and described; the signature is not chained to a trust root")
 cap("PE resources", ["inspect_pe_resources"],
     "pe resources", "covered")
 cap("PE load config", ["inspect_pe_load_config"],
-    None, "missing", "load-config directory not parsed")
+    "pe load-config", "covered")
 cap("Windows shortcut (.lnk)", ["inspect_windows_shortcut"],
     None, "missing", ".lnk parsing not built")
 cap("Keyed archive / NSKeyedArchiver", ["inspect_keyed_archive"],

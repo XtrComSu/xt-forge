@@ -617,7 +617,7 @@ TOOLS: list[dict[str, Any]] = [
             "overview", "functions", "xrefs-native", "dispatch-native",
             "disasm-native", "decompile-native", "info", "sections", "symbols",
             "pe_info", "pe_sections", "pe_imports", "pe_exports", "pe_tls",
-            "pe_resources", "ioc",
+            "pe_resources", "pe_load-config", "pe_certificates", "ioc",
             # Verbs added after this schema was first written. The dispatcher already
             # forwarded them, but a client reading the enum would never call them — the
             # schema, not the code, was the thing hiding the capability.

@@ -659,3 +659,180 @@ class PEFile:
             return self.data[start:end].decode("utf-16-le", "replace")
         except (UnicodeDecodeError, ValueError):
             return ""
+
+    # --------------------------------------------------------------- load config
+    def load_config(self) -> dict[str, Any]:
+        """Read the PE load-configuration directory.
+
+        WHY this matters for analysis: the load config is where a binary declares
+        its security-relevant behaviour — the SafeSEH handler table, CFG guard
+        flags and check function, the stack cookie, and (in newer links) the
+        pointer to the CFG bitmap. Exploit developers read it to find mitigations;
+        defenders read it to check them. REA exposes `inspect_pe_load_config`.
+
+        The structure grew across Windows versions, so the field layout is chosen
+        by *size*, not by magic: a 0x40-byte directory predates SEH fields, 0x5C
+        ends at SecurityCookie, 0x70 adds SEHandlerTable/Count. Reading a field
+        the directory does not contain would report a mitigation the binary was
+        never linked with, so each field is gated on the declared size.
+        """
+        result: dict[str, Any] = {"ok": True, "present": False, "size": 0,
+                                  "fields": {}, "warnings": []}
+        if len(self.data_directories) <= 10:
+            result["warnings"].append("no load-config data directory")
+            return result
+        entry = self.data_directories[10]
+        if not entry["rva"] or not entry["size"]:
+            result["warnings"].append("load config directory is empty")
+            return result
+        offset = self.rva_to_offset(entry["rva"])
+        if offset is None or offset + 4 > len(self.data):
+            result["warnings"].append("load config RVA is not mapped to a file offset")
+            return result
+
+        # The directory declares its own size as the first DWORD, which is the
+        # authority on how many fields follow. Trust the smaller of that and the
+        # data-directory size so a lie in either cannot walk past the file.
+        declared = min(self._unpack("<I", offset)[0], entry["size"])
+        result["present"] = True
+        result["size"] = declared
+        result["signature"] = f"0x{self._unpack('<I', offset)[0]:x}"
+
+        # (name, struct offset from directory start, struct format)
+        layout = [
+            ("timestamp", 0x04, "<I"),
+            ("major_version", 0x08, "<H"),
+            ("minor_version", 0x0A, "<H"),
+            ("global_flags_clear", 0x0C, "<I"),
+            ("global_flags_set", 0x10, "<I"),
+            ("critical_section_default_timeout", 0x14, "<I"),
+            ("decommit_free_block_threshold", 0x18, "<Q"),
+            ("decommit_total_free_threshold", 0x20, "<Q"),
+            ("lock_prefix_table", 0x28, "<Q"),
+            ("maximum_allocation_size", 0x30, "<Q"),
+            ("virtual_memory_threshold", 0x38, "<Q"),
+            ("process_affinity_mask", 0x40, "<Q"),
+            ("process_heap_flags", 0x48, "<I"),
+            ("csd_version", 0x4C, "<H"),
+            ("dependent_load_flags", 0x4E, "<H"),
+            ("edit_list", 0x50, "<Q"),
+            ("security_cookie", 0x58, "<Q"),
+            ("se_handler_table", 0x60, "<Q"),
+            ("se_handler_count", 0x68, "<Q"),
+            ("guard_cf_check_function", 0x70, "<Q"),
+            ("guard_cf_dispatch_function", 0x78, "<Q"),
+            ("guard_cf_function_table", 0x80, "<Q"),
+            ("guard_cf_function_count", 0x88, "<Q"),
+            ("guard_flags", 0x90, "<I"),
+            ("code_integrity_flags", 0x94, "<H"),
+        ]
+        fields: dict[str, Any] = {}
+        for name, rel, fmt in layout:
+            width = struct.calcsize(fmt)
+            if rel + width > declared:
+                continue
+            value = self._unpack(fmt, offset + rel)[0]
+            fields[name] = value
+        result["fields"] = fields
+
+        # Decode the mitigations an analyst actually asks about, and only when the
+        # field was present. A mitigation reported from an absent field is a false
+        # statement about the binary's defences.
+        mitigations: dict[str, Any] = {}
+        if "security_cookie" in fields:
+            mitigations["gs_cookie"] = fields["security_cookie"] != 0
+        if "se_handler_table" in fields:
+            mitigations["safe_seh"] = fields["se_handler_table"] != 0
+        guard = fields.get("guard_flags")
+        if guard is not None:
+            mitigations["control_flow_guard"] = bool(guard & 0x100)
+            mitigations["cfg_export_suppression"] = bool(guard & 0x800)
+            mitigations["xfg_enabled"] = bool(guard & 0x40000)
+            mitigations["cast_guard"] = bool(guard & 0x80000)
+            guard_flags = guard
+        else:
+            guard_flags = None
+        mitigations["high_entropy_va"] = bool(fields.get("global_flags_set", 0) & 0x20)
+
+        # SafeSEH only means anything on a 32-bit image; on x64 the table is unused
+        # and a zero there is not a missing mitigation, so do not claim one.
+        if self.opt_magic == 0x020B and "safe_seh" in mitigations:
+            mitigations["safe_seh"] = None
+            result["warnings"].append(
+                "safe_seh is not applicable to a 64-bit image (SEH is table-based)")
+        result["mitigations"] = mitigations
+        if guard_flags is not None:
+            result["guard_flags"] = f"0x{guard_flags:x}"
+        return result
+
+    # ------------------------------------------------------------- certificates
+    def certificates(self) -> dict[str, Any]:
+        """Inventory the Authenticode signature table.
+
+        The certificate directory is special: unlike every other data directory,
+        its "rva" is a *file offset*, not an RVA. Treating it as an RVA walks into
+        an unrelated part of the image and reports a signature that is not there,
+        so this reads it as an offset explicitly.
+
+        The payload is a WIN_CERTIFICATE aligned on an 8-byte boundary inside the
+        file. This reports the structure and the DER size; it does not verify the
+        signature (that needs the trust chain, which is a different question).
+        """
+        result: dict[str, Any] = {"ok": True, "signed": False, "certificates": [],
+                                  "warnings": []}
+        if len(self.data_directories) <= 4:
+            result["warnings"].append("no certificate data directory")
+            return result
+        entry = self.data_directories[4]
+        if not entry["rva"] or not entry["size"]:
+            result["warnings"].append("image is not signed (certificate directory empty)")
+            return result
+
+        # Deliberately NOT rva_to_offset: see docstring.
+        offset = entry["rva"]
+        end = offset + entry["size"]
+        if offset >= len(self.data):
+            result["warnings"].append(
+                f"certificate table offset 0x{offset:x} is past end of file "
+                f"(size {len(self.data)}); treated as a file offset per spec")
+            return result
+        end = min(end, len(self.data))
+
+        cursor = offset
+        while cursor + 8 <= end:
+            length, revision, cert_type = self._unpack("<IHH", cursor)
+            if length < 8:
+                result["warnings"].append(
+                    f"certificate entry at 0x{cursor:x} declares length {length}; stopping")
+                break
+            payload_start = cursor + 8
+            payload_end = min(cursor + length, len(self.data))
+            payload = self.data[payload_start:payload_end]
+            # Detect DER SEQUENCE so we can describe the encoding rather than guess.
+            encoding = "unknown"
+            if payload[:1] == b"\x30":
+                encoding = "DER PKCS#7 (SEQUENCE)"
+            elif payload[:4] == b"\x00\x02\x00\x00" or payload[:2] == b"\x1e\x00":
+                encoding = "legacy PKCS#1/SignedData"
+            result["certificates"].append({
+                "offset": cursor,
+                "length": length,
+                "revision": f"0x{revision:x}",
+                "revision_name": {0x100: "1.0", 0x200: "2.0"}.get(revision, "unknown"),
+                "type": f"0x{cert_type:x}",
+                "type_name": {0x0001: "X509", 0x0002: "PKCS_SIGNED_DATA",
+                              0x0003: "RESERVED_1", 0x0004: "TS_STACK_SIGNED"}.get(
+                                  cert_type, "unknown"),
+                "payload_size": len(payload),
+                "encoding": encoding,
+            })
+            # Entries are 8-byte aligned; step by the aligned length.
+            step = (length + 7) & ~7
+            if step == 0:
+                break
+            cursor += step
+
+        result["signed"] = bool(result["certificates"])
+        if not result["signed"] and not result["warnings"]:
+            result["warnings"].append("certificate directory present but no entry parsed")
+        return result
