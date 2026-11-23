@@ -541,6 +541,9 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("firmware", "fv", "uefi-firmware"):
+            from ..core.re import firmwarevolume
+            res = firmwarevolume.inspect_firmware_volume(path, limit=args.limit or 500)
         elif verb in ("assetcatalog", "car"):
             from ..core.re import assetcatalog
             res = assetcatalog.inspect_asset_catalog(path, limit=args.limit or 200)
@@ -1059,6 +1062,35 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("firmware", "fv", "uefi-firmware"):
+        if not res.get("ok"):
+            human = "firmware volume: " + str(res.get("error", "unknown"))
+            if res.get("hint"):
+                human += "\n  hint        " + res["hint"]
+        else:
+            vol = res.get("volume") or {}
+            lines = [f"UEFI firmware image ({res.get('volume_count')} volume(s), "
+                     f"{res.get('file_size')} bytes)",
+                     f"  filesystem  {vol.get('file_system')}",
+                     f"  revision    {vol.get('revision')}"]
+            lines.append(f"  files       {res.get('file_count')} "
+                         f"({res.get('top_level_count')} top-level, "
+                         f"{res.get('named_count')} named)")
+            if res.get("machines"):
+                lines.append("  machines    " + ", ".join(
+                    f"{k} x{v}" for k, v in res["machines"].items()))
+            if res.get("type_counts"):
+                counts = list(res["type_counts"].items())[:8]
+                lines.append("  types       " + ", ".join(
+                    f"{k} x{v}" for k, v in counts))
+            for entry in (res.get("named_files") or [])[:25]:
+                lines.append(f"    {entry['name']:<40} {entry['type']:<12} "
+                             f"{entry['size']}")
+            if len(res.get("named_files") or []) > 25:
+                lines.append(f"    ... {len(res['named_files']) - 25} more")
+            if res.get("warning"):
+                lines.append(f"  WARNING     {res['warning']}")
+            human = "\n".join(lines)
     elif verb in ("assetcatalog", "car"):
         if not res.get("ok"):
             human = "asset catalog: " + str(res.get("error", "unknown"))
