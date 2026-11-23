@@ -481,7 +481,16 @@ def cmd_re(args):
             res = elfmeta.report(path)
         elif verb == "wasm":
             from ..core.re import wasm
-            res = wasm.inspect(path)
+            if args.value == "compare":
+                _w_extra = [str(x) for x in (getattr(args, "extra", []) or [])]
+                other = _w_extra[0] if _w_extra else None
+                if not other:
+                    return _out(args, {"ok": False,
+                                       "error": "wasm compare needs two paths"},
+                                "error: wasm compare needs two paths", code=2)
+                res = wasm.compare(path, other)
+            else:
+                res = wasm.inspect(path)
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
@@ -910,6 +919,12 @@ def cmd_re(args):
                          f"  producer={unit.get('producer') or '-'}")
         lines.append(f"unwind          {unwind.get('fde_count', 0)} FDE / "
                      f"{unwind.get('cie_count', 0)} CIE")
+        debuglink = res.get("debuglink") or {}
+        if debuglink.get("present"):
+            lines.append(f"debuglink       {debuglink.get('file')} "
+                         f"crc32 {debuglink.get('crc32')}")
+        else:
+            lines.append("debuglink       (none)")
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
@@ -1052,6 +1067,24 @@ def cmd_re(args):
             for p_row in (res.get("pinvokes") or [])[:30]:
                 lines.append(f"  {p_row.get('dll')}!{p_row.get('import_name')}"
                              f"  -> {p_row.get('managed_method')}")
+            human = "\n".join(lines)
+    elif verb == "wasm" and isinstance(res.get("interface_identical"), bool):
+        if not res.get("ok"):
+            human = "wasm compare: " + str(res.get("error", "unknown"))
+        else:
+            left, right = res["left"], res["right"]
+            lines = [f"wasm interface: {res['summary']}",
+                     f"  left   {left['path']} ({left['exports']} exports, "
+                     f"{left['imports']} imports)",
+                     f"  right  {right['path']} ({right['exports']} exports, "
+                     f"{right['imports']} imports)"]
+            for name in res.get("exports_added") or []:
+                lines.append(f"  + {name}")
+            for name in res.get("exports_removed") or []:
+                lines.append(f"  - {name}")
+            for change in res.get("exports_kind_changed") or []:
+                lines.append(f"  ~ {change['name']}: {change['left_kind']} -> "
+                             f"{change['right_kind']}")
             human = "\n".join(lines)
     elif verb == "wasm":
         counts = res.get("counts") or {}

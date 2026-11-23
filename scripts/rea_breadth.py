@@ -102,13 +102,14 @@ cap("ELF unwind ranges", ["inspect_elf_unwind_ranges"],
 cap("ELF dependencies (DT_NEEDED)", ["inspect_elf_dependencies"],
     "needed", "covered", probe=["re", "needed", "{elf}"])
 cap("ELF debug link", ["inspect_elf_debug_link"],
-    None, "partial", "build-id and DWARF are read; the .gnu_debuglink CRC is not")
+    "elfmeta", "covered",
+    "section name and CRC-32 of the separate debug file, verified against zlib")
 
 # --------------------------------------------------------------- other formats
 cap("WebAssembly inventory", ["inspect_wasm_artifact"],
     "wasm", "covered", probe=["re", "wasm", "{wasm}"])
 cap("WASM interface compare", ["compare_wasm_interfaces"],
-    None, "missing", "one-module inventory only; cross-module interface diff not built")
+    "wasm compare", "covered")
 cap("UEFI firmware volume", ["inspect_uefi_firmware"],
     "firmware", "covered", probe=["re", "firmware", "{blob}"])
 cap("UEFI firmware extraction", ["extract_uefi_firmware"],

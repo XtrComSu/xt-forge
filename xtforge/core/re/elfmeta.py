@@ -519,6 +519,51 @@ def _unwind(data: bytes, sections: list[dict[str, Any]],
     return result
 
 
+
+def _debuglink(data: bytes, sections: list[dict[str, Any]], prefix: int) -> dict[str, Any]:
+    """Read .gnu_debuglink: the separate debug file's name and its CRC.
+
+    WHY this is a distinct question from build-id: build-id locates debug info in a
+    global cache (/usr/lib/debug/.build-id/xx/yyyy.debug), while .gnu_debuglink
+    names a file *beside* the binary and carries a CRC-32 to prove the two match.
+    Debuggers try build-id first and fall back to this, so a binary can have one and
+    not the other, and a stale debuglink is a real source of wrong symbolication.
+
+    The CRC is the standard zlib CRC-32 of the whole debug file, so it is reported
+    as a value to compare rather than recomputed here (the file is usually absent).
+    """
+    result: dict[str, Any] = {"present": False, "file": None, "crc32": None,
+                              "warnings": []}
+    target = next((s for s in sections if s["name"] == ".gnu_debuglink"), None)
+    if target is None:
+        result["warnings"].append("no .gnu_debuglink section")
+        return result
+    offset = target["offset"]
+    size = target["size"]
+    if offset + size > len(data) or size < 5:
+        result["warnings"].append("debuglink section is out of bounds")
+        return result
+    raw = data[offset:offset + size]
+    end = raw.find(b"\0")
+    if end < 0:
+        result["warnings"].append("debuglink filename is unterminated")
+        return result
+    name = raw[:end].decode("utf-8", "replace")
+    # The CRC follows the NUL, padded to 4-byte alignment.
+    crc_offset = end + 1
+    crc_offset += (-crc_offset) % 4
+    crc = None
+    if crc_offset + 4 <= len(raw):
+        crc = struct.unpack_from("<I", raw, crc_offset)[0]
+    result.update({
+        "present": True,
+        "file": name,
+        "crc32": f"0x{crc:08x}" if crc is not None else None,
+        "header_offset": offset,
+    })
+    return result
+
+
 def report(path: str | Path) -> dict[str, Any]:
     """Return notes, DWARF compile units and unwind ranges for an ELF file.
 
@@ -541,6 +586,11 @@ def report(path: str | Path) -> dict[str, Any]:
         unwind = _unwind(data, sections, prefix)
     except (struct.error, IndexError, ValueError):
         unwind = {"fde_count": 0, "cie_count": 0, "truncated": True}
+    try:
+        debuglink = _debuglink(data, sections, prefix)
+    except (struct.error, IndexError, ValueError):
+        debuglink = {"present": False, "file": None, "crc32": None,
+                     "warnings": ["debuglink section is malformed"]}
     reported = sum(1 for s in sections
                    if s["type"] == SHT_NOTE or s["name"] in _META_SECTIONS)
     return {
@@ -552,5 +602,6 @@ def report(path: str | Path) -> dict[str, Any]:
         "notes": notes,
         "dwarf": dwarf,
         "unwind": unwind,
+        "debuglink": debuglink,
         "sections_reported": reported,
     }

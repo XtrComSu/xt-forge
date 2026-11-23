@@ -218,3 +218,76 @@ def inspect(path: str | Path) -> dict[str, Any]:
         "exports": parser.exports,
         "truncated": parser.truncated,
     }
+
+
+def compare(left: str | Path, right: str | Path) -> dict[str, Any]:
+    """Compare two WebAssembly modules' public interfaces.
+
+    WHY this is separate from `inspect`: the question a caller asks about a WASM
+    artifact is usually "did the interface change", which is a set difference over
+    exports (and, for a host ABI, imports), not a second inventory. REA exposes
+    `compare_wasm_interfaces`; this answers it without diffing bytes, because a
+    recompiled module differs in every byte while its interface is identical.
+
+    Both sides are inventoried first, so a malformed module on either side is
+    reported as an error rather than compared as an empty interface — an empty
+    comparison would read as "nothing changed", which is the wrong conclusion.
+    """
+    def load(target: str | Path) -> tuple[dict[str, Any] | None, str | None]:
+        try:
+            return inspect(target), None
+        except (OSError, ValueError) as exc:
+            return None, str(exc)
+
+    left_report, left_error = load(left)
+    right_report, right_error = load(right)
+    if left_error or right_error:
+        return {
+            "ok": False,
+            "error": f"cannot compare: {left_error or right_error}",
+            "left_error": left_error,
+            "right_error": right_error,
+        }
+
+    def export_map(report: dict[str, Any]) -> dict[str, str]:
+        return {e["name"]: e.get("kind") for e in report["exports"]}
+
+    def import_map(report: dict[str, Any]) -> dict[tuple[str, str], str]:
+        return {(i["module"], i["name"]): i.get("kind") for i in report["imports"]}
+
+    left_exports, right_exports = export_map(left_report), export_map(right_report)
+    added = sorted(set(right_exports) - set(left_exports))
+    removed = sorted(set(left_exports) - set(right_exports))
+    common = sorted(set(left_exports) & set(right_exports))
+    changed = [
+        {"name": name, "left_kind": left_exports[name],
+         "right_kind": right_exports[name]}
+        for name in common if left_exports[name] != right_exports[name]
+    ]
+
+    left_imports, right_imports = import_map(left_report), import_map(right_report)
+    imports_added = sorted(
+        [f"{module}.{name}" for (module, name) in set(right_imports) - set(left_imports)])
+    imports_removed = sorted(
+        [f"{module}.{name}" for (module, name) in set(left_imports) - set(right_imports)])
+
+    identical = (not added and not removed and not changed
+                 and not imports_added and not imports_removed)
+    return {
+        "ok": True,
+        "left": {"path": str(left), "exports": len(left_exports),
+                 "imports": len(left_imports)},
+        "right": {"path": str(right), "exports": len(right_exports),
+                  "imports": len(right_imports)},
+        "interface_identical": identical,
+        "exports_added": added,
+        "exports_removed": removed,
+        "exports_common": len(common),
+        "exports_kind_changed": changed,
+        "imports_added": imports_added,
+        "imports_removed": imports_removed,
+        "summary": ("interfaces are identical" if identical else
+                    f"{len(added)} added, {len(removed)} removed, "
+                    f"{len(changed)} kind-changed, "
+                    f"{len(imports_added) + len(imports_removed)} import changes"),
+    }
