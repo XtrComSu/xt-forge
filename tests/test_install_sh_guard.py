@@ -156,5 +156,51 @@ class InstallShGuardTests(unittest.TestCase):
         self.assertIn(f"ROOT={self.checkout}", res.stdout)
 
 
+class InstallRegistersMcpTests(unittest.TestCase):
+    """A fresh install must leave agents able to see xt-forge tools.
+
+    `doctor` reported `mcp: not registered` after a clean install, because the
+    installer never ran `sync`. Everything else was green, so the install looked
+    finished while the entire MCP surface — the reason this tool exists for an
+    agent — was dead until the user ran a second command nobody told them about.
+
+    These are text assertions on install.sh and install.ps1 because the full
+    install is a multi-minute build; the executable end-to-end check of the same
+    guarantee lives in the release checklist. What they pin is that the sync call
+    stays present, stays after the launcher exists, and stays skippable.
+    """
+
+    def setUp(self) -> None:
+        self.sh = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
+        self.ps1 = (REPO_ROOT / "install.ps1").read_text(encoding="utf-8")
+
+    def test_sh_runs_sync_after_installing_the_launcher(self):
+        self.assertIn("xt-forge\" sync", self.sh,
+                      "install.sh no longer runs sync, so MCP stays unregistered")
+        sync_at = self.sh.find('"${LOCAL_BIN}/xt-forge" sync')
+        version_at = self.sh.find('"${LOCAL_BIN}/xt-forge" version --json')
+        self.assertGreater(sync_at, version_at,
+                           "sync must run after the launcher exists, not before")
+
+    def test_ps1_runs_sync_after_installing_the_launcher(self):
+        self.assertIn("xt-forge.cmd\" sync", self.ps1,
+                      "install.ps1 no longer runs sync, so MCP stays unregistered")
+        sync_at = self.ps1.find("xt-forge.cmd\" sync")
+        verify_at = self.ps1.find("version --json")
+        self.assertGreater(sync_at, verify_at,
+                           "sync must run after the launcher is verified")
+
+    def test_both_installers_keep_an_escape_hatch(self):
+        for name, text in (("install.sh", self.sh), ("install.ps1", self.ps1)):
+            self.assertIn("XT_SKIP_SYNC", text,
+                          f"{name} lost its XT_SKIP_SYNC override, so the sync step "
+                          f"cannot be bypassed in an offline or locked-down install")
+
+    def test_failure_to_sync_is_reported_not_swallowed(self):
+        """A soft failure here hides a dead MCP surface, so it must be said out loud."""
+        self.assertIn("sync did not complete", self.sh)
+        self.assertIn("sync did not complete", self.ps1)
+
+
 if __name__ == "__main__":
     unittest.main()

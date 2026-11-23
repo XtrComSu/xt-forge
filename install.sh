@@ -170,4 +170,20 @@ case ":${PATH}:" in
 esac
 
 "${LOCAL_BIN}/xt-forge" version --json
+
+# Register the MCP server and lay down the skill/command templates. Without this
+# a fresh install leaves `doctor` reporting `mcp: not registered`, so every agent
+# sees zero xt-forge tools until the user runs a second command they were never
+# told about — the install looks complete and is not. sync is idempotent and
+# never deletes entries it did not create, so re-running the installer is safe.
+if [ "${XT_SKIP_SYNC:-0}" != "1" ]; then
+  echo "[xt-forge] Registering MCP server and templates..."
+  if "${LOCAL_BIN}/xt-forge" sync >/dev/null 2>&1; then
+    echo "[xt-forge] MCP server registered."
+  else
+    echo "[xt-forge] WARNING: sync did not complete; run 'xt-forge sync' to finish." >&2
+    echo "[xt-forge] Until it does, agents will not see xt-forge tools." >&2
+  fi
+fi
+
 echo "[xt-forge] Done! Try: xt-forge doctor  |  xt-forge --meta"

@@ -40,6 +40,31 @@ def stated(text: str, pattern: str) -> str | None:
     return match.group(1) if match else None
 
 
+def head_distance(claimed: str) -> tuple[bool, int] | None:
+    """Is `claimed` an ancestor of HEAD, and how far behind is it?
+
+    A handoff cannot state the SHA of the commit that contains the handoff — that
+    commit does not exist until the document is written, so an equality check here
+    can never pass on a committed handoff. The first version of this script did
+    exactly that and went red the moment its own fix was committed.
+
+    What actually matters is that the claimed commit exists in this history and is
+    behind HEAD, i.e. the document describes a real, earlier state of this branch
+    rather than a fabricated SHA or another lineage. Returns None when git cannot
+    answer (unknown SHA, detached history).
+    """
+    ancestor = subprocess.run(["git", "merge-base", "--is-ancestor", claimed, "HEAD"],
+                              cwd=str(ROOT), capture_output=True, text=True)
+    if ancestor.returncode != 0:
+        return None
+    count = subprocess.run(["git", "rev-list", "--count", f"{claimed}..HEAD"],
+                           cwd=str(ROOT), capture_output=True, text=True)
+    try:
+        return True, int(count.stdout.strip())
+    except ValueError:
+        return True, 0
+
+
 def measurements(full: bool) -> dict[str, str]:
     files = sorted((GO_DIR / "internal" / "sysimage").glob("*.go"))
     lines = sum(len(path.read_text(encoding="utf-8", errors="replace").splitlines())
@@ -65,7 +90,6 @@ def measurements(full: bool) -> dict[str, str]:
 # moment anyone edits a file, so checking it would fail on every run and teach the reader to
 # ignore the script.
 CHECKS = [
-    ("head", r"\| HEAD \| `([0-9a-f]{7})"),
     ("go_pass", r"\| Go tests, `internal/sysimage` \| \*\*(\d+) pass\*\*"),
     ("go_skip", r"\| Go tests, `internal/sysimage` \| \*\*\d+ pass\*\*, (\d+) skip"),
     ("python_tests", r"\| Python suite \| \*\*(\d+) tests"),
@@ -88,6 +112,18 @@ def main() -> int:
               f"(not compared: this changes with every edit)")
     failures = 0
     checked = 0
+    # HEAD is checked as ancestry, not equality: see head_distance().
+    claimed_head = stated(text, r"\| HEAD \| `([0-9a-f]{7})")
+    if claimed_head is not None:
+        result = head_distance(claimed_head)
+        checked += 1
+        if result is None:
+            failures += 1
+            print(f"  WRONG head           handoff says {claimed_head}, which is not an "
+                  f"ancestor of HEAD ({facts['head']})")
+        else:
+            behind = result[1]
+            print(f"  ok    head           {claimed_head} (+{behind} commit(s) since)")
     for key, pattern in CHECKS:
         claimed = stated(text, pattern)
         if claimed is None:

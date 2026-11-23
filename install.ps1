@@ -187,4 +187,19 @@ if ($SessionParts -notcontains $LocalBin) {
     $env:Path = "$LocalBin;$env:Path"
 }
 
+# Register the MCP server and lay down the templates. Without this a fresh install
+# leaves `doctor` reporting `mcp: not registered`, so agents see zero xt-forge
+# tools until the user runs a second command they were never told about. sync is
+# idempotent and never deletes entries it did not create.
+if ($env:XT_SKIP_SYNC -ne "1") {
+    Write-Host "[xt-forge] Registering MCP server and templates..."
+    & "$LocalBin\xt-forge.cmd" sync | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[xt-forge] MCP server registered."
+    } else {
+        Write-Host "[xt-forge] WARNING: sync did not complete; run 'xt-forge sync' to finish." -ForegroundColor Yellow
+        Write-Host "[xt-forge] Until it does, agents will not see xt-forge tools."
+    }
+}
+
 Write-Host "[xt-forge] Done! Try: xt-forge doctor  |  xt-forge --meta"
