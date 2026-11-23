@@ -149,7 +149,9 @@ cap("PE load config", ["inspect_pe_load_config"],
 cap("Windows shortcut (.lnk)", ["inspect_windows_shortcut"],
     "lnk", "covered")
 cap("Keyed archive / NSKeyedArchiver", ["inspect_keyed_archive"],
-    None, "missing", "not built")
+    "keyed", "covered",
+    "object graph resolved through UIDs, class chains reported, cycles and shared "
+    "references distinguished")
 cap("Go binary metadata", ["inspect_go_binary"],
     "formats go", "covered",
     "version, module, dependencies and VCS revision, checked against `go version -m`")
@@ -234,14 +236,15 @@ cap("Model / GPU artifacts", ["inspect_model_artifact", "inspect_gpu_code_object
     None, "out-of-lane", "different product surface (ML artifacts)")
 cap("Maven/Gradle, NuGet metadata", ["inspect_maven_gradle_metadata",
                                     "inspect_nuget_nupkg"],
-    "archives", "partial", "archive listing works; ecosystem-specific metadata "
-                           "extraction is not implemented")
+    "maven", "covered",
+    "pom.xml, Gradle module JSON and nuspec: coordinates, dependencies with scopes, "
+    "plugins, and non-Central repositories surfaced; XML namespaces handled")
 cap("Playwright trace", ["inspect_playwright_trace"],
     None, "missing", "not built")
 cap("Desktop application bundle", ["inspect_desktop_application"],
-    "formats desktop", "partial",
-    "freedesktop .desktop entries are read (command, arguments, field codes); "
-    "macOS .app bundles and Windows shortcuts are not")
+    "bundle", "covered",
+    "freedesktop .desktop entries, macOS .app bundles (Info.plist, Contents/MacOS "
+    "executable, URL schemes, document types) and Windows .lnk shortcuts")
 cap("Byte search", ["search_native_bytes"],
     "search", "covered", probe=["re", "search", "{elf}", "--pattern", "7f 45", "--hex"])
 

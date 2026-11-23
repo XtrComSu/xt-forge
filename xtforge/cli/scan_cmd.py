@@ -135,6 +135,53 @@ def _human_findings(payload: dict) -> str:
     return "\n".join(lines + tail) if lines else "\n".join(tail + ["(no findings)"])
 
 
+def _flatten_graph(value, depth: int, limit: int = 40) -> list[str]:
+    """Render a resolved keyed-archive graph compactly, depth-first.
+
+    The graph is already resolved by the reader; this only decides how to print it.
+    Cycles and invalid UIDs are values in the graph, not exceptions, because a real
+    NSKeyedArchiver archive legitimately contains both.
+    """
+    lines: list[str] = []
+    indent = "  " * depth
+    if isinstance(value, dict):
+        if "_cycle" in value:
+            return [f"{indent}(cycle to uid {value['_cycle']})"]
+        if "_invalid_uid" in value:
+            return [f"{indent}(invalid uid {value['_invalid_uid']})"]
+        if "_truncated" in value:
+            return [f"{indent}({value['_truncated']})"]
+        class_name = value.get("_class")
+        if "dict" in value and isinstance(value["dict"], dict):
+            lines.append(f"{indent}dict" + (f" <{class_name}>" if class_name else ""))
+            for key, item in list(value["dict"].items())[:limit]:
+                joined = _flatten_graph(item, depth + 1, limit)
+                if joined:
+                    lines.append(f"{indent}  {key}: {joined[0].lstrip()}")
+                    lines.extend(joined[1:])
+            return lines
+        if "array" in value and isinstance(value["array"], list):
+            lines.append(f"{indent}array[{len(value['array'])}]"
+                         + (f" <{class_name}>" if class_name else ""))
+            for item in value["array"][:limit]:
+                lines.extend(_flatten_graph(item, depth + 1, limit))
+            return lines
+        for key, item in list(value.items())[:limit]:
+            if key == "_class":
+                continue
+            joined = _flatten_graph(item, depth + 1, limit)
+            if joined:
+                lines.append(f"{indent}{key}: {joined[0].lstrip()}")
+                lines.extend(joined[1:])
+        return lines
+    if isinstance(value, list):
+        lines.append(f"{indent}array[{len(value)}]")
+        for item in value[:limit]:
+            lines.extend(_flatten_graph(item, depth + 1, limit))
+        return lines
+    return [f"{indent}{value!r}"]
+
+
 def cmd_re(args):
     from pathlib import Path
     from ..core.re import elf
@@ -494,6 +541,15 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("keyed", "keyed-archive"):
+            from ..core.re import packaging
+            res = packaging.inspect_keyed_archive(path)
+        elif verb in ("jvm", "maven", "nuget"):
+            from ..core.re import packaging
+            res = packaging.inspect_jvm_metadata(path)
+        elif verb in ("appbundle", "bundle"):
+            from ..core.re import packaging
+            res = packaging.inspect_desktop_bundle(path)
         elif verb in ("uefi", "nvram"):
             from ..core.re import uefi
             res = uefi.inspect_uefi_variables(path)
@@ -972,6 +1028,71 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("keyed", "keyed-archive"):
+        if not res.get("ok"):
+            human = "keyed archive: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"NSKeyedArchiver {res.get('archiver')} "
+                     f"({res.get('format')}, {res.get('object_count')} objects, "
+                     f"{res.get('class_count')} classes)",
+                     f"  classes     {', '.join(res.get('classes') or []) or '-'}",
+                     f"  roots       {', '.join(res.get('root_names') or []) or '-'}"]
+            for name, value in (res.get("roots") or {}).items():
+                lines.append(f"  {name}:")
+                lines.extend(_flatten_graph(value, 1))
+            human = "\n".join(lines)
+    elif verb in ("jvm", "maven", "nuget"):
+        if not res.get("ok"):
+            human = "build metadata: " + str(res.get("error", "unknown"))
+        else:
+            coords = res.get("coordinates") or {}
+            label = coords.get("id") or ":".join(
+                str(x) for x in (coords.get("group"), coords.get("module")
+                                 or coords.get("artifact"), coords.get("version")) if x)
+            lines = [f"{res.get('kind')} metadata: {label or '(no coordinates)'}"]
+            if res.get("parent"):
+                parent = res["parent"]
+                lines.append(f"  parent      {parent.get('group')}:"
+                             f"{parent.get('artifact')}:{parent.get('version')}")
+            if coords.get("packaging"):
+                lines.append(f"  packaging   {coords['packaging']}")
+            lines.append(f"  deps        {res.get('dependency_count', 0)}")
+            for dep in (res.get("dependencies") or [])[:20]:
+                ident = dep.get("id") or ":".join(
+                    str(x) for x in (dep.get("group"), dep.get("module")
+                                     or dep.get("artifact")) if x)
+                version = dep.get("version") or "(managed)"
+                scope = dep.get("scope") or ""
+                lines.append(f"    {ident} {version} {scope}".rstrip())
+            if res.get("plugins"):
+                lines.append(f"  plugins     {len(res['plugins'])}")
+                for plugin in res["plugins"][:10]:
+                    lines.append(f"    {plugin.get('group')}:{plugin.get('artifact')} "
+                                 f"{plugin.get('version') or ''}".rstrip())
+            for repo in (res.get("custom_repositories") or []):
+                lines.append(f"  REPO        {repo.get('id')} {repo.get('url')}")
+            human = "\n".join(lines)
+    elif verb in ("appbundle", "bundle"):
+        if not res.get("ok"):
+            human = "app bundle: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"{res.get('display_name') or res.get('name') or '?'} "
+                     f"{res.get('version') or ''} ({res.get('build') or '?'})".rstrip(),
+                     f"  id          {res.get('identifier')}",
+                     f"  plist       {res.get('plist_format')}",
+                     f"  executable  {res.get('executable') or '(missing)'}"
+                     + (f"  {res.get('executable_size')} bytes"
+                        if res.get("executable_size") else "")]
+            if res.get("minimum_system"):
+                lines.append(f"  min os      {res['minimum_system']}")
+            for scheme in (res.get("url_schemes") or [])[:10]:
+                lines.append(f"  url scheme  {scheme['scheme']}")
+            for doc in (res.get("document_types") or [])[:6]:
+                lines.append(f"  doc type    {doc.get('name')} "
+                             f"({', '.join(doc.get('extensions') or []) or '-'})")
+            if res.get("nested_components"):
+                lines.append(f"  nested      {', '.join(res['nested_components'][:6])}")
+            human = "\n".join(lines)
     elif verb in ("uefi", "nvram"):
         if not res.get("ok"):
             human = "uefi variables: " + str(res.get("error", "unknown"))

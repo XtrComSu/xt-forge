@@ -306,6 +306,8 @@ def _add_re(sub) -> None:
                                        "sqlite", "beam", "evm", "ips",
                                        "uefi", "nvram",
                                        "dex",
+                                       "keyed", "keyed-archive", "jvm", "maven",
+                                       "nuget", "appbundle", "bundle",
                                        "bookmarks", "bulk"])
     r.add_argument("value", nargs="?", default=None,
                    help="binary path, new project directory, or subverb")
