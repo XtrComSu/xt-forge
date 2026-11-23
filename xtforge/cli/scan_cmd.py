@@ -182,6 +182,14 @@ def _flatten_graph(value, depth: int, limit: int = 40) -> list[str]:
     return [f"{indent}{value!r}"]
 
 
+# borer's own subcommands. Used to decide whether the first positional argument is a
+# subcommand or a target path, so `re borer ./a.out` and `re borer info ./a.out` both work.
+BORER_SUBCOMMANDS = frozenset({
+    "info", "functions", "function", "summary", "symbols", "hexdump", "strings",
+    "xrefs", "callgraph", "sections", "imports", "exports", "search", "disasm",
+})
+
+
 def _render_guidance(res):
     if not res.get("ok"):
         callable_hint = ""
@@ -216,6 +224,63 @@ def _render_guidance(res):
         for workflow in res.get("workflows") or []:
             lines.append(f"  {workflow['id']:<30} {workflow['steps']} steps  "
                          f"{workflow['title']}")
+        human = chr(10).join(lines)
+    return human
+
+
+def _render_cdp(res):
+    if not res.get("ok"):
+        lines = ["cdp: " + str(res.get("error", "unknown"))]
+        if res.get("hint"):
+            lines.append("  hint: " + str(res["hint"]))
+        return chr(10).join(lines)
+    lines = [f"{res.get('browser')}  protocol {res.get('protocol_version')}"
+             f"  V8 {res.get('v8_version')}",
+             f"  endpoint    {res.get('endpoint')}"
+             f"  ({res.get('page_count')} page(s) of {res.get('target_count')} targets)"]
+    if res.get("launched"):
+        lines.append(f"  launched    port {res['launched']['port']}")
+    for page in (res.get("pages") or [])[:2]:
+        lines.append(f"  page        {str(page.get('title'))[:40]!r}  {str(page.get('url'))[:50]}")
+        for expression, value in (page.get("values") or {}).items():
+            if value.get("ok"):
+                rendered = repr(value.get("value"))
+                lines.append(f"    {expression[:34]:<34} {rendered[:48]}")
+            else:
+                lines.append(f"    {expression[:34]:<34} ! {str(value.get('error'))[:44]}")
+    return chr(10).join(lines)
+
+
+def _render_ptrace(res):
+    if not res.get("ok"):
+        human = "ptrace: " + str(res.get("error", "unknown"))
+    elif "processes" in res:
+        lines = [f"Processes ({res.get('count')}"
+                 + (f", filter {res['filter']!r}" if res.get("filter") else "") + ")"]
+        for row in (res["processes"] or [])[:20]:
+            lines.append(f"  {row['pid']:>8}  {row['cmdline'][:70]}")
+        human = chr(10).join(lines)
+    else:
+        lines = [f"Process {res.get('pid')}  {res.get('exe')}",
+                 f"  state       {res.get('state')}  ppid {res.get('ppid')}"
+                 f"  threads {res.get('threads')}  rss {res.get('rss_kb')}",
+                 f"  modules     {res.get('module_count')} across "
+                 f"{res.get('region_count')} regions",
+                 f"  attach      {'yes' if res.get('attachable') else 'no'}"
+                 f"  ({res.get('attach_reason')})"]
+        for module in (res.get("modules") or [])[:8]:
+            lines.append(f"    {module['exec_bytes']:>9}  {module['path']}")
+        if res.get("suspicious_modules"):
+            lines.append("  from /tmp, /home or /dev/shm:")
+            for item in res["suspicious_modules"][:6]:
+                lines.append(f"    {item}")
+        if res.get("writable_executable"):
+            lines.append(f"  W+X regions {len(res['writable_executable'])}:")
+            for item in res["writable_executable"][:5]:
+                lines.append(f"    {item['start']}  {item['size']}  {item['path']}")
+        if res.get("anonymous_exec_bytes"):
+            lines.append(f"  anonymous executable bytes {res['anonymous_exec_bytes']}"
+                         "  (a common sign of injected code)")
         human = chr(10).join(lines)
     return human
 
@@ -346,6 +411,30 @@ def cmd_re(args):
         else:
             res = _guidance.list_workflows()
         return _out(args, res, _render_guidance(res), code=0 if res.get("ok") else 2)
+
+    if verb == "cdp":
+        from ..core.re import cdp as _cdp
+        target = (getattr(args, "value", None) or "").strip()
+        aspect = getattr(args, "symbol", None)
+        if aspect and aspect in _cdp._OBSERVATIONS:
+            # `re cdp <port> --symbol=runtime` narrows to one observation aspect.
+            if target.isdigit():
+                res = _cdp.observe(int(target), aspect=aspect)
+            else:
+                launched = _cdp.launch_and_inspect(
+                    target or "about:blank", expressions=_cdp._OBSERVATIONS[aspect])
+                launched["aspect"] = aspect
+                res = launched
+        else:
+            res = _cdp.inspect(target or None)
+        return _out(args, res, _render_cdp(res), code=0 if res.get("ok") else 2)
+
+    if verb == "ptrace" and not path:
+        # Listing processes needs no target. Everything else about `ptrace` does.
+        from ..core.re import proctrace as _proctrace
+        res = _proctrace.list_processes(limit=args.limit or 60,
+                                        name=getattr(args, "symbol", None))
+        return _out(args, res, _render_ptrace(res), code=0 if res.get("ok") else 2)
 
     if not path:
         return _out(args, {"ok": False, "error": "re needs a path"},
@@ -762,7 +851,10 @@ def cmd_re(args):
         elif verb in ("v8cache", "codecache"):
             from ..core.re import v8cache
             res = v8cache.inspect_v8_code_cache(path)
-        elif verb in ("ptrace", "playwright"):
+        elif verb == "ptrace":
+            from ..core.re import proctrace as _proctrace
+            res = _proctrace.inspect(path)
+        elif verb in ("playwright", "trace"):
             from ..core.re import playwright
             res = playwright.inspect_playwright_trace(path, limit=args.limit or 200)
         elif verb in ("objc", "objc-classes", "objc-protocols"):
@@ -1179,14 +1271,34 @@ def cmd_re(args):
                 res = {"ok": False, "err": f"unknown ida subcommand: {sub}"}
         elif verb == "borer":
             from ..adapters.ghidra_mcp import STATE as _GSTATE
-            sub = args.value or "info"
-            target_path = args.path or ""
+            # `re borer <binary> [sub]` — the binary is the argument people actually pass, and
+            # the subcommand is optional. The original read `args.value` as the subcommand
+            # unconditionally, so `re borer ./a.out` invoked `borer ./a.out ""` and failed with
+            # an empty result while looking like the tool was broken. Decide by shape: a first
+            # argument that is one of borer's own subcommands is a subcommand, anything else is
+            # the target.
             extra = [str(x) for x in (getattr(args, "extra", []) or [])]
+            first = (args.value or "").strip()
+            second = (args.path or "").strip()
+            if first in BORER_SUBCOMMANDS:
+                sub, target_path = first, second
+            else:
+                sub, target_path = (second or "info"), first
+                if second and second not in BORER_SUBCOMMANDS:
+                    # `re borer <sub> <binary>` is still honoured when the second positional
+                    # is clearly a path rather than a subcommand.
+                    sub, target_path = first, second
             if not _GSTATE.borer_bin:
-                res = {"ok": False, "err": "borer binary not found"}
+                res = {"ok": False, "err": "borer binary not found",
+                       "hint": "install borer or set XT_BORER_BIN"}
+            elif not target_path:
+                res = {"ok": False, "err": "borer needs a binary path",
+                       "usage": "xtforge re borer <binary> [subcommand]",
+                       "subcommands": sorted(BORER_SUBCOMMANDS)}
             else:
                 out = _GSTATE.run_borer_cli(sub, target_path, *extra)
-                res = {"ok": bool(out), "subcommand": sub, "path": target_path, "output": out or "", "engine": "borer"}
+                res = {"ok": bool(out), "subcommand": sub, "path": target_path,
+                       "output": out or "", "engine": "borer"}
         else:
             return _out(args, {"ok": False, "error": f"unknown verb: {verb}"},
                         f"error: unknown verb {verb}", code=2)
@@ -1706,7 +1818,9 @@ def cmd_re(args):
             if res.get("truncated"):
                 lines.append(f"  WARNING     {res.get('warning')}")
             human = "\n".join(lines)
-    elif verb in ("ptrace", "playwright"):
+    elif verb == "ptrace":
+        human = _render_ptrace(res)
+    elif verb in ("playwright", "trace"):
         if not res.get("ok"):
             human = "playwright trace: " + str(res.get("error", "unknown"))
         else:

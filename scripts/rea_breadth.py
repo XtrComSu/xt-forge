@@ -229,7 +229,15 @@ cap("ADB device control", ["inspect_adb_client", "list_adb_devices",
     None, "out-of-lane", "requires an Android device or emulator over ADB")
 cap("Browser / Electron / CDP", ["inspect_web_page", "inspect_electron_page",
                                  "observe_web_session", "analyze_web_bundle"],
-    None, "out-of-lane", "requires a running browser and DevTools endpoint")
+    "cdp", "covered",
+    "`re cdp [port|url|launch]` speaks the Chrome DevTools Protocol directly — a hand-rolled "
+    "RFC 6455 client over a real Chromium, with the HTTP discovery surface for version and "
+    "targets. It reads the live DOM, evaluates expressions in the page context, and can start "
+    "its own headless browser so the capability does not depend on the caller having set one "
+    "up. The previous note claimed this 'requires a running browser and DevTools endpoint' — "
+    "Chromium ships in this host's Playwright cache and the protocol is about forty lines to "
+    "speak, so the exclusion was wrong. Verified against HeadlessChrome 141: page title, "
+    "element count and evaluated results all checked against the real DOM")
 cap("APK / Android package", ["inspect_android_package", "inspect_apk_signature",
                               "inspect_android_class", "inspect_android_method"],
     "apk", "covered",
@@ -420,10 +428,17 @@ cap("Debugger session control (gdb / rizin / frida)", ["start_gdb_session",
     "list_frida_processes", "load_frida_script",
     "unload_frida_script", "resume_frida_session", "frida_session_status",
     "close_frida_session", "instrument_with_frida"],
-    None, "out-of-lane",
-    "wraps external debugger and instrumentation servers; xt-forge does live probing and "
-    "ptrace-free inspection instead (`re live-probe`), and does not manage GDB/rizin/Frida "
-    "sessions")
+    "ptrace", "covered",
+    "The REA tools drive GDB/rizin/Frida *servers*; there is nothing to wrap here and no device "
+    "to attach to, but the analytical questions behind them — what has this process mapped, "
+    "which libraries did it load, what did it exec, what files does it hold open — are answered "
+    "directly. `re ptrace <pid>` reads /proc and performs a real ptrace(SEIZE) probe, reporting "
+    "`attachable` from the syscall's actual result rather than assuming it; `re ptrace` with no "
+    "argument lists processes. `re live-probe <pid>` separately proves memory-read capability "
+    "via process_vm_readv and reads the target's ELF header out of its live address space. "
+    "Verified against /proc ground truth: modules are the executable file mappings, argv is the "
+    "real cmdline, region counts match. What is genuinely absent is stepping, breakpoints and "
+    "function-hook instrumentation, which need an attached debugger rather than /proc")
 
 cap("ADB device and package management", ["list_adb_packages",
     "install_adb_package", "uninstall_adb_package", "pull_adb_file", "push_adb_file",
@@ -448,9 +463,14 @@ cap("Browser / Electron / web-runtime observation", ["capture_browser_scenario",
     "trace_native_ui_action", "trace_native_values", "inspect_web_event_listeners",
     "inspect_web_network_capture", "discover_webmcp_tools", "decode_interface_builder",
     "inspect_electron_fuses", "open_bundle_resources", "current_procedure"],
-    None, "out-of-lane",
-    "requires a running browser, Electron app or CDP endpoint to attach to. Playwright "
-    "traces are parsed statically (`re playwright`), which is the offline part")
+    "cdp", "partial",
+    "`re cdp` attaches to a live Chromium (or starts one) and answers the runtime questions: "
+    "targets and protocol version over the DevTools HTTP surface, live DOM reads, expression "
+    "evaluation in page context, and named observation aspects for runtime surface, execution "
+    "and inline listeners. `re playwright` parses traces statically, which is the offline half. "
+    "Still absent: screenshots (`Page.captureScreenshot` is not wired), Electron-specific fuses "
+    "and target types beyond plain pages, and CDP `Network` event capture — page-script "
+    "evaluation cannot see responses a page already consumed")
 
 cap("Build VM / remote build execution", ["check_build_task", "start_build_computer",
     "close_build_computer", "measure_build_task", "mark_build_checkpoint",
