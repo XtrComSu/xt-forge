@@ -158,9 +158,10 @@ cap("Go binary metadata", ["inspect_go_binary"],
     "formats go", "covered",
     "version, module, dependencies and VCS revision, checked against `go version -m`")
 cap("Rust binary metadata", ["inspect_rust_binary"],
-    "formats rust", "partial",
-    "reports marker paths and inferred crate names; Rust embeds no version record, "
-    "so no rustc version is claimed")
+    "formats rust", "covered",
+    "rustc version, commit hash, commit date and distributor read from .comment, "
+    "verified against `rustc --version`; crate candidates inferred and labelled as "
+    "inferences rather than presented as identity")
 cap("Python .pyc", ["inspect_python_pyc"],
     "formats pyc", "covered")
 cap("Erlang BEAM", ["inspect_erlang_beam"],

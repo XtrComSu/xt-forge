@@ -257,3 +257,81 @@ class FormatEdgeCaseTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RustToolchainTest(unittest.TestCase):
+    """The rustc version line in .comment is a real record, not an inference.
+
+    An earlier version of this module claimed in its docstring that "Rust binaries do
+    not embed a structured version record the way Go does" and reported only marker
+    paths. That was simply unchecked: current rustc writes
+
+        rustc version 1.99.1 (58cf8f9c3 2026-10-13) (Arch Linux rust 1:1.99.1-1)
+
+    into .comment, the same kind of record `go version -m` provides. The oracle here is
+    `rustc --version` itself, so the test compares against the compiler that built the
+    fixture rather than against a hardcoded string.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.path = None
+        cls.version = None
+        rustc = shutil.which("rustc")
+        if rustc is None:
+            cls._tmp.cleanup()
+            return
+        source = Path(cls._tmp.name) / "fixture.rs"
+        source.write_text('fn main() { println!("xt-forge rust fixture"); }\n')
+        target = Path(cls._tmp.name) / "fixture"
+        built = subprocess.run([rustc, "-O", "-o", str(target), str(source)],
+                               capture_output=True, text=True)
+        if built.returncode != 0 or not target.is_file():
+            cls._tmp.cleanup()
+            return
+        reported = subprocess.run([rustc, "--version"], capture_output=True, text=True)
+        if reported.returncode == 0:
+            # "rustc 1.99.1 (58cf8f9c3 2026-10-13) (Arch Linux rust 1:1.99.1-1)"
+            parts = reported.stdout.strip().split()
+            if len(parts) >= 2:
+                cls.version = parts[1]
+        cls.path = target
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        if cls.path is not None:
+            cls._tmp.cleanup()
+
+    def setUp(self) -> None:
+        if self.path is None or self.version is None:
+            self.skipTest("rustc unavailable to build a Rust fixture")
+
+    def test_version_matches_the_compiler_that_built_it(self) -> None:
+        report = formats.inspect_rust_binary(self.path)
+        self.assertTrue(report["ok"], report.get("error"))
+        self.assertEqual(report.get("rustc_version"), self.version)
+
+    def test_commit_and_date_are_captured(self) -> None:
+        report = formats.inspect_rust_binary(self.path)
+        toolchain = report.get("toolchain") or {}
+        self.assertTrue(toolchain.get("commit"), "rustc commit hash missing")
+        self.assertRegex(toolchain["commit"], r"^[0-9a-f]{6,40}$")
+        self.assertRegex(toolchain.get("commit_date") or "", r"^\d{4}-\d{2}-\d{2}$")
+
+    def test_distributor_suffix_is_kept(self) -> None:
+        """The suffix identifies the packager, which matters for trusting a build."""
+        report = formats.inspect_rust_binary(self.path)
+        toolchain = report.get("toolchain") or {}
+        self.assertTrue(toolchain.get("distributor"),
+                        "distributor suffix was dropped")
+
+    def test_raw_line_is_preserved(self) -> None:
+        report = formats.inspect_rust_binary(self.path)
+        raw = (report.get("toolchain") or {}).get("raw") or ""
+        self.assertIn("rustc version", raw)
+        self.assertIn(self.version, raw)
+
+    def test_non_rust_binary_is_rejected(self) -> None:
+        report = formats.inspect_rust_binary("/bin/ls")
+        self.assertFalse(report["ok"])

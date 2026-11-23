@@ -413,14 +413,57 @@ _RUST_MARKERS = (
 )
 
 
-def inspect_rust_binary(path: str | Path) -> dict[str, Any]:
-    """Find Rust build fingerprints in a native binary.
+def _comment_strings(raw: bytes) -> list[str]:
+    """Read the strings out of an ELF .comment section.
 
-    Rust binaries do not embed a structured version record the way Go does, so this
-    reports evidence rather than an identity: which rustc source paths appear, any
-    crate names visible in symbols or panic strings, and whether the binary looks
-    like a Rust build at all. Saying "Rust, with these markers" is honest; deriving
-    a rustc version from a source path hash would not be.
+    A previous version of this module asserted that "Rust binaries do not embed a
+    structured version record the way Go does". That is wrong for any binary built by
+    current rustc: it writes a line like
+
+        rustc version 1.99.1 (58cf8f9c3 2026-10-13) (Arch Linux rust 1:1.99.1-1)
+
+    into .comment, which is the same kind of record `go version -m` gives. The claim
+    was never checked against a real rustc build; checking it took one command.
+    """
+    import re
+    return [m.decode("utf-8", "replace") for m in
+            re.findall(rb"[ -~]{8,}", raw)]
+
+
+_RUSTC_VERSION_RE = None
+
+
+def _rustc_version(strings: list[str]) -> dict[str, Any] | None:
+    """Parse the rustc identity out of .comment-style strings.
+
+    Two shapes are accepted, because the distributor suffix is optional:
+
+        rustc version 1.99.1 (58cf8f9c3 2026-10-13)
+        rustc version 1.99.1 (58cf8f9c3 2026-10-13) (Arch Linux rust 1:1.99.1-1)
+    """
+    import re
+    global _RUSTC_VERSION_RE
+    if _RUSTC_VERSION_RE is None:
+        _RUSTC_VERSION_RE = re.compile(
+            r"rustc version (\d+\.\d+\.\d+(?:[-+][\w.]+)?)"
+            r"(?:\s*\(([0-9a-f]{6,40})(?:\s+([0-9-]+))?\))?"
+            r"(?:\s*\(([^)]*)\))?")
+    for text in strings:
+        match = _RUSTC_VERSION_RE.search(text)
+        if not match:
+            continue
+        version, commit, date, distributor = match.groups()
+        return {"version": version, "commit": commit, "commit_date": date,
+                "distributor": distributor, "raw": text.strip()}
+    return None
+
+
+def inspect_rust_binary(path: str | Path) -> dict[str, Any]:
+    """Identify a Rust build: rustc version from .comment, plus supporting markers.
+
+    The rustc version line is a real record, not an inference, so it is reported as
+    the toolchain identity. Crate names remain inferences (symbol and panic strings),
+    and are labelled as such.
     """
     try:
         raw = _read(path, limit=512 * 1024 * 1024)
@@ -441,7 +484,8 @@ def inspect_rust_binary(path: str | Path) -> dict[str, Any]:
     crates = sorted({m.decode("utf-8", "replace") for m in
                      re.findall(rb"\b([a-z][a-z0-9_]{2,30})::[a-z][a-z0-9_:]{2,60}\b",
                                 raw)})[:100]
-    return {
+    toolchain = _rustc_version(_comment_strings(raw))
+    result = {
         "ok": True,
         "path": str(path),
         "markers": markers,
@@ -449,9 +493,17 @@ def inspect_rust_binary(path: str | Path) -> dict[str, Any]:
         "rustc_commits": commits,
         "crate_candidates": crates,
         "crate_candidate_count": len(crates),
-        "note": "Rust embeds source paths, not a version record; crate candidates "
-                "are inferred from symbol and panic strings",
     }
+    if toolchain:
+        result["toolchain"] = toolchain
+        result["rustc_version"] = toolchain["version"]
+        if toolchain["commit"]:
+            result["rustc_commit_short"] = toolchain["commit"]
+    else:
+        result["note"] = ("no rustc version line in .comment; this binary was likely "
+                          "stripped of it or built by an older toolchain. Crate "
+                          "candidates are inferred from symbol and panic strings")
+    return result
 
 
 # ------------------------------------------------------------------------ entry
