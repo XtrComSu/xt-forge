@@ -581,6 +581,9 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("firmware-carve", "carve", "extract-firmware"):
+            from ..core.re import firmwarecarve
+            res = firmwarecarve.carve_firmware(path)
         elif verb in ("app", "appgraph", "application-graph"):
             from ..core.re import appgraph
             res = appgraph.inspect_application(path, limit=args.limit or 200)
@@ -1117,6 +1120,37 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("firmware-carve", "carve", "extract-firmware"):
+        if not res.get("ok"):
+            human = "firmware carve: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"Firmware carve ({res.get('file_size')} bytes, "
+                     f"head entropy {res.get('entropy_head')})"]
+            if res.get("formats_found"):
+                lines.append("  formats     " + ", ".join(
+                    f"{k} x{v}" for k, v in res["formats_found"].items()))
+            for region in (res.get("regions") or [])[:25]:
+                detail = []
+                for key in ("version", "length", "size", "compression", "contains",
+                            "decompressed_size", "inodes", "block_size", "machine"):
+                    value = region.get(key)
+                    if value not in (None, "", 0, False):
+                        detail.append(f"{key}={value}")
+                if region.get("crc_verified"):
+                    detail.append("crc=ok")
+                lines.append(f"    {region['format']:<10} at {region['offset_hex']:<12} "
+                             + " ".join(detail))
+            if res.get("rejected"):
+                lines.append(f"  rejected    {res['rejected_count']} signature(s) "
+                             f"failed validation")
+                for entry in res["rejected"][:6]:
+                    lines.append(f"    {entry['format']:<10} at 0x{entry['offset']:x} "
+                                 f"{entry['reason']}")
+            if res.get("note"):
+                lines.append(f"  note        {res['note']}")
+            if res.get("hint"):
+                lines.append(f"  hint        {res['hint']}")
+            human = "\n".join(lines)
     elif verb in ("app", "appgraph", "application-graph"):
         if not res.get("ok"):
             human = "application graph: " + str(res.get("error", "unknown"))

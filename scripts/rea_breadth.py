@@ -386,10 +386,11 @@ cap("Flutter / Dart build identification", ["identify_flutter_build"],
 
 cap("Firmware extraction and region inspection", ["extract_firmware", "extract_artifact",
     "inspect_firmware_regions"],
-    "firmware", "partial",
-    "`re firmware` parses UEFI volumes, walks FFS files and decompresses LZMA sections in "
-    "place. Extracting a vendor firmware container (TP-Link/D-Link/.bin wrappers) into its "
-    "filesystem images is not implemented")
+    "firmware-carve", "covered",
+    "`re firmware` parses UEFI volumes/FFS/LZMA; `re firmware-carve` locates and validates "
+    "the payloads inside a vendor blob — squashfs 3/4, cramfs, UBI, TRX v1/v2 (CRC "
+    "verified), uImage (header+data CRC), ELF, FDT, gzip/xz/bzip2/lzma with what the stream "
+    "decompresses to. Verified against mksquashfs 4.7.5, mkfs.cramfs and OpenWrt trx.c")
 
 cap("Dylib resolution tracing", ["trace_dylib_resolution"],
     "needed", "covered",
