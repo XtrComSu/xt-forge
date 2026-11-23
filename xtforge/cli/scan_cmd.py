@@ -541,6 +541,9 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("il2cpp", "il2cpp-metadata", "global-metadata"):
+            from ..core.re import il2cpp
+            res = il2cpp.inspect_il2cpp_metadata(path)
         elif verb in ("dart", "dart-aot", "snapshot"):
             from ..core.re import dartsnapshot
             res = dartsnapshot.inspect_dart_snapshot(path)
@@ -1071,6 +1074,32 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("il2cpp", "il2cpp-metadata", "global-metadata"):
+        if not res.get("ok"):
+            human = "il2cpp metadata: " + str(res.get("error", "unknown"))
+            if res.get("hint"):
+                human += "\n  hint        " + res["hint"]
+        else:
+            lines = [f"il2cpp global-metadata (version {res.get('version')}, "
+                     f"{res.get('file_size')} bytes)",
+                     f"  header      {res.get('field_count')} fields, "
+                     f"{res.get('header_size')} bytes",
+                     f"  regions     {res.get('populated_region_count')} populated "
+                     f"of {res.get('region_count')}"]
+            for entry in res.get("regions") or []:
+                if entry.get("empty"):
+                    continue
+                note = entry.get("content_note") or entry.get("size_field") or ""
+                flag = ""
+                if entry.get("inconsistent"):
+                    flag = "  INCONSISTENT: " + entry["inconsistent"]
+                elif entry.get("truncated"):
+                    flag = f"  TRUNCATED by {entry['truncated']} bytes"
+                lines.append(f"    {entry['region']:<28} @{entry['offset']:<9} "
+                             f"{entry['size']:<9} {note}{flag}")
+            if res.get("warning"):
+                lines.append(f"  WARNING     {res['warning']}")
+            human = "\n".join(lines)
     elif verb in ("dart", "dart-aot", "snapshot"):
         if not res.get("ok"):
             human = "dart snapshot: " + str(res.get("error", "unknown"))

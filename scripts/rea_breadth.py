@@ -194,7 +194,11 @@ cap("EVM interface", ["inspect_evm_interface"],
     "evm", "covered",
     "selectors from the PUSH4/EQ dispatcher; raw bytecode or hex text")
 cap("il2cpp metadata", ["inspect_il2cpp_metadata"],
-    None, "missing", "not built")
+    "il2cpp", "partial",
+    "74-field/296-byte global-metadata header (sanity 0xFAB11BAF, version) and a validated "
+    "region table with truncation and offset checks. Type/method record decoding NOT done: "
+    "layouts vary per Unity version and no real global-metadata.dat was reachable from this "
+    "host to verify against")
 cap("Rizin command execution", ["execute_rizin_command", "rizin_command"],
     "id…", None, "out-of-lane: this engine does not drive third-party RE shells")
 C.pop()  # placeholder removed; rizin is stated below properly

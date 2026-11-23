@@ -306,7 +306,7 @@ def _add_re(sub) -> None:
                                        "sqlite", "beam", "evm", "ips",
                                        "uefi", "nvram",
                                        "dex",
-                                       "dart", "dart-aot", "snapshot", "swift", "swift-types", "ntfs", "ntfs-journal", "firmware", "fv", "uefi-firmware", "assetcatalog", "car", "unknowns", "obligations", "v8cache", "codecache", "ptrace", "playwright",
+                                       "il2cpp", "il2cpp-metadata", "global-metadata", "dart", "dart-aot", "snapshot", "swift", "swift-types", "ntfs", "ntfs-journal", "firmware", "fv", "uefi-firmware", "assetcatalog", "car", "unknowns", "obligations", "v8cache", "codecache", "ptrace", "playwright",
                                        "objc", "objc-classes", "objc-protocols",
                                        "keyed", "keyed-archive", "jvm", "maven",
                                        "nuget", "appbundle", "bundle",
