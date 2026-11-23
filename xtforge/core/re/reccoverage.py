@@ -180,9 +180,14 @@ def evaluate_coverage(binary: str | Path, source_root: str | Path,
 
     source_functions, skipped = _source_functions(root)
     if not source_functions:
-        return {"ok": False,
-                "error": f"no function definitions found under {root}",
-                "skipped": skipped[:20]}
+        # "No function definitions" is the wrong story when the real reason is that every
+        # candidate file was skipped for size. Say which, because a caller who reads "no
+        # functions" goes looking for functions instead of raising the limit.
+        reason = f"no function definitions found under {root}"
+        if skipped:
+            reason += f"; {len(skipped)} file(s) skipped, first: {skipped[0]}"
+        return {"ok": False, "error": reason, "skipped": skipped[:20],
+                "limits": {"max_files": MAX_FILES, "max_file_bytes": MAX_FILE_BYTES}}
 
     binary_functions = _binary_functions(bin_path)
     topics = _ledger_topics(bin_path, db_path)

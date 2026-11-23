@@ -275,6 +275,23 @@ class HonestyTest(CoverageCase):
         report = reccoverage.evaluate_coverage(self.binary, "/nonexistent/src")
         self.assertFalse(report["ok"])
 
+    def test_oversized_source_is_skipped_with_a_reason(self) -> None:
+        """A skipped file must say so; "no functions" sends the caller hunting the wrong thing.
+
+        Found by resource probing: a 50 MB source file is skipped by `MAX_FILE_BYTES`, and the
+        original error said only "no function definitions found", which reads like an empty
+        tree rather than a limit being hit.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "src"
+            source.mkdir()
+            (source / "huge.c").write_text("int f(void){return 0;}\n" * 200000)
+            report = reccoverage.evaluate_coverage(self.binary, source)
+        self.assertFalse(report["ok"])
+        self.assertIn("skipped", report["error"])
+        self.assertIn("larger than", report["error"])
+        self.assertIn("max_file_bytes", report.get("limits") or {})
+
     def test_no_functions_found_is_an_error(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             empty = Path(tmp) / "empty"

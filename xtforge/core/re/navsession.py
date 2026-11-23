@@ -56,6 +56,9 @@ CREATE TABLE IF NOT EXISTS nav_bookmarks (
 
 MAX_HISTORY = 200
 
+# Signed 64-bit, the widest value SQLite INTEGER holds.
+_MAX_ADDRESS = (1 << 63) - 1
+
 
 def _connect_nav(db_path: Path | None = None):
     conn = _connect(db_path)
@@ -74,6 +77,14 @@ def goto(binary: str | Path, address: str | int,
     address_int = parse_rva(address) if isinstance(address, str) else int(address)
     if address_int < 0:
         return {"ok": False, "error": f"address must be non-negative, got {address_int}"}
+    # SQLite integers are signed 64-bit. Without this, an address past that range reaches the
+    # driver and raises OverflowError, which is a crash from a call that should simply be
+    # refused — and refusal matters more here than usual, because a cursor is stored, so a
+    # silently truncated value would persist as a wrong address.
+    if address_int > _MAX_ADDRESS:
+        return {"ok": False,
+                "error": f"address {hex(address_int)} exceeds the 64-bit range a cursor can "
+                         f"store (max {hex(_MAX_ADDRESS)})"}
     sha, path, size = _key(binary)
     now = int(time.time())
     conn = _connect_nav(db_path)
@@ -174,6 +185,10 @@ def bookmark(binary: str | Path, name: str, address: str | int | None = None,
         if len(clean) > 128:
             return {"ok": False, "error": "bookmark name must be 128 characters or fewer"}
         value = parse_rva(address) if isinstance(address, str) else int(address)
+        if value < 0 or value > _MAX_ADDRESS:
+            return {"ok": False,
+                    "error": f"bookmark address {value} must be between 0 and "
+                             f"{hex(_MAX_ADDRESS)}"}
         conn.execute(
             "INSERT INTO nav_bookmarks(sha256,name,rva,updated) VALUES(?,?,?,?) "
             "ON CONFLICT(sha256,name) DO UPDATE SET rva=excluded.rva, "

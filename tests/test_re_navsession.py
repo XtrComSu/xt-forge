@@ -93,6 +93,30 @@ class CursorTest(SessionCase):
         report = navsession.goto(self.binary, -1, db_path=self.db)
         self.assertFalse(report["ok"])
 
+    def test_address_past_the_64_bit_range_is_refused_not_raised(self) -> None:
+        """Found by adversarial probing: an address past 2**63 raised OverflowError.
+
+        SQLite integers are signed 64-bit, so the value reached the driver. A stored cursor
+        makes this worse than a normal bad argument: refusing is required, because a silently
+        truncated address would persist and point somewhere unintended.
+        """
+        report = navsession.goto(self.binary, 2 ** 63, db_path=self.db)
+        self.assertFalse(report["ok"])
+        self.assertIn("64-bit", report["error"])
+        self.assertIsNone(navsession.current(self.binary, db_path=self.db)["address"])
+
+    def test_the_largest_storable_address_works(self) -> None:
+        """The boundary itself must be usable, or the guard is off by one."""
+        report = navsession.goto(self.binary, 2 ** 63 - 1, db_path=self.db)
+        self.assertTrue(report["ok"])
+        self.assertEqual(navsession.current(self.binary, db_path=self.db)["address"],
+                         hex(2 ** 63 - 1))
+
+    def test_bookmark_address_is_bounded_too(self) -> None:
+        for value in (-1, 2 ** 63):
+            report = navsession.bookmark(self.binary, "bad", value, db_path=self.db)
+            self.assertFalse(report["ok"], f"{value} was accepted as a bookmark address")
+
 
 class HistoryTest(SessionCase):
     def test_step_back_walks_the_trail(self) -> None:
