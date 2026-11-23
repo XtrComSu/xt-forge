@@ -166,7 +166,8 @@ def cmd_re(args):
             bm_subverb = "list"
             bm_address = getattr(args, "target", None)
     if verb == "pe":
-        if args.value in ("info", "sections", "imports", "exports", "tls"):
+        if args.value in ("info", "sections", "imports", "exports", "tls",
+                          "resources", "load-config", "certificates"):
             pe_subverb = args.value
             extra = getattr(args, "extra", [])
             path = args.path or (extra[0] if extra else None)
@@ -597,6 +598,8 @@ def cmd_re(args):
                 res = {"ok": True, "path": str(path), "exports": pe.exports()}
             elif pe_subverb == "tls":
                 res = {"ok": True, "path": str(path), **pe.tls()}
+            elif pe_subverb == "resources":
+                res = {"ok": True, "path": str(path), **pe.resources()}
             else:
                 return _out(args, {"ok": False, "error": f"unknown PE subverb: {pe_subverb}"},
                             f"error: unknown PE subverb {pe_subverb}", code=2)
@@ -928,6 +931,18 @@ def cmd_re(args):
                 f"{exp['rva']:>10}  ord:{exp.get('ordinal', 0):<4}  {exp['name']}"
                 for exp in res.get("exports", [])
             )
+        elif pe_subverb == "resources":
+            rows = res.get("entries", [])
+            lines = [f"{res.get('count', 0)} resource(s): "
+                     + (", ".join(res.get("types") or []) or "none")]
+            for e in rows:
+                size = e.get("size") or 0
+                offset = e.get("offset")
+                where = f"0x{offset:x}" if isinstance(offset, int) else "not in file"
+                lines.append(f"  {e.get('path',''):<32} {size:>7} bytes  @{where}")
+            for warning in res.get("warnings") or []:
+                lines.append(f"  warning: {warning}")
+            human = "\n".join(lines)
         else:
             cbs = [hex(cb) if isinstance(cb, int) else str(cb) for cb in res.get("callbacks", [])]
             human = f"TLS Callbacks ({len(cbs)}): " + (", ".join(cbs) if cbs else "none")

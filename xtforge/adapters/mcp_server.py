@@ -616,7 +616,8 @@ TOOLS: list[dict[str, Any]] = [
         {"path": _TEXT, "verb": {"type": "string", "enum": [
             "overview", "functions", "xrefs-native", "dispatch-native",
             "disasm-native", "decompile-native", "info", "sections", "symbols",
-            "pe_info", "pe_sections", "pe_imports", "pe_exports", "pe_tls", "ioc",
+            "pe_info", "pe_sections", "pe_imports", "pe_exports", "pe_tls",
+            "pe_resources", "ioc",
             # Verbs added after this schema was first written. The dispatcher already
             # forwarded them, but a client reading the enum would never call them — the
             # schema, not the code, was the thing hiding the capability.

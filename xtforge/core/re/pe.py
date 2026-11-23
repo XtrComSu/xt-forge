@@ -520,3 +520,142 @@ class PEFile:
                 break
 
         return results
+
+    # ------------------------------------------------------------------ resources
+    # Resource types are defined by the PE spec; the ids below are the standard
+    # ones. An id above these is a user-defined type and is reported by number
+    # rather than invented as a name.
+    _RESOURCE_TYPES = {
+        1: "CURSOR", 2: "BITMAP", 3: "ICON", 4: "MENU", 5: "DIALOG", 6: "STRING",
+        7: "FONTDIR", 8: "FONT", 9: "ACCELERATOR", 10: "RCDATA", 11: "MESSAGETABLE",
+        12: "GROUP_CURSOR", 14: "GROUP_ICON", 16: "VERSION", 17: "DLGINCLUDE",
+        19: "PLUGPLAY", 20: "VXD", 21: "ANICURSOR", 22: "ANIICON", 23: "HTML",
+        24: "MANIFEST",
+    }
+    _RESOURCE_MAX_ENTRIES = 4096
+
+    def resources(self) -> dict[str, Any]:
+        """Walk the resource directory tree and inventory every leaf.
+
+        WHY this exists: a PE's resources are where its icon, version block and
+        manifest live, and they are the first thing that distinguishes a real
+        application from a stub. REA exposes `inspect_pe_resources`; without this
+        the engine could list imports and exports and still say nothing about what
+        the binary presents to the OS.
+
+        The tree is three levels deep by convention (type -> name -> language) but
+        the format allows arbitrary depth, so this walks recursively with a hard
+        entry cap. A malformed tree yields a warning and stops that branch: a
+        broken resource section must not make the rest of the binary unreadable.
+        """
+        result: dict[str, Any] = {"ok": True, "entries": [], "types": [],
+                                  "count": 0, "warnings": []}
+        if len(self.data_directories) <= 2:
+            result["warnings"].append("no resource data directory")
+            return result
+        res_dir = self.data_directories[2]
+        if not res_dir["rva"] or not res_dir["size"]:
+            result["warnings"].append("resource directory is empty")
+            return result
+
+        base = self.rva_to_offset(res_dir["rva"])
+        if base is None:
+            result["warnings"].append("resource directory RVA is not mapped to a file offset")
+            return result
+
+        entries: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        truncated = False
+
+        def walk(offset: int, depth: int, path: list[str]) -> None:
+            nonlocal truncated
+            if depth > 4 or len(entries) >= self._RESOURCE_MAX_ENTRIES:
+                truncated = True
+                return
+            start = base + offset
+            if start + 16 > len(self.data) or start < 0:
+                result["warnings"].append(f"resource directory at 0x{offset:x} is out of bounds")
+                return
+            if offset in seen:
+                result["warnings"].append(f"resource directory at 0x{offset:x} forms a cycle")
+                return
+            seen.add(offset)
+
+            (_chars, _ts, _maj, _min, named, ids) = self._unpack("<IIHHHH", start)
+            total = named + ids
+            if total > self._RESOURCE_MAX_ENTRIES:
+                result["warnings"].append(
+                    f"resource directory at 0x{offset:x} claims {total} entries; capped")
+                total = self._RESOURCE_MAX_ENTRIES
+                truncated = True
+            for i in range(total):
+                entry_off = start + 16 + i * 8
+                if entry_off + 8 > len(self.data):
+                    result["warnings"].append("resource entry runs past end of file")
+                    break
+                name_field, data_field = self._unpack("<II", entry_off)
+                # High bit set means "this is a subdirectory", not a leaf.
+                is_dir = bool(data_field & 0x80000000)
+                child = data_field & 0x7FFFFFFF
+                if name_field & 0x80000000:
+                    # Name is an offset into the resource string table (UTF-16).
+                    str_off = base + (name_field & 0x7FFFFFFF)
+                    label = self._resource_string(str_off)
+                elif depth == 0:
+                    # The type map applies only at the top level. At deeper levels an
+                    # integer id is a resource *name* or a language, and reusing the
+                    # type table there turns name id 2 into "CURSOR" — which reads as
+                    # a fact and is wrong.
+                    label = str(self._RESOURCE_TYPES.get(name_field, name_field))
+                else:
+                    label = str(name_field)
+                if is_dir:
+                    walk(child, depth + 1, path + [label])
+                    continue
+                # Leaf: IMAGE_RESOURCE_DATA_ENTRY, 16 bytes.
+                leaf = base + child
+                if leaf + 16 > len(self.data):
+                    result["warnings"].append("resource data entry runs past end of file")
+                    continue
+                data_rva, data_size, _cp, _res = self._unpack("<IIII", leaf)
+                file_off = self.rva_to_offset(data_rva)
+                # The leaf's own label is the innermost component, so it is the
+                # *language* in the conventional type/name/language tree — not the
+                # name. Reading it the other way round produced name=1033,
+                # language=1 for a VERSIONINFO that is actually type 16, name 1,
+                # language 1033; llvm-readobj is the check that caught it.
+                full = path + [label]
+                entries.append({
+                    "type": full[0] if full else label,
+                    "name": full[1] if len(full) > 1 else None,
+                    "path": "/".join(full),
+                    "language": full[2] if len(full) > 2 else None,
+                    "rva": f"0x{data_rva:x}",
+                    "offset": file_off,
+                    "size": data_size,
+                    "in_file": file_off is not None,
+                })
+                if len(entries) >= self._RESOURCE_MAX_ENTRIES:
+                    truncated = True
+                    return
+
+        walk(0, 0, [])
+        result["entries"] = entries
+        result["count"] = len(entries)
+        result["types"] = sorted({e["type"] for e in entries})
+        result["truncated"] = truncated
+        return result
+
+    def _resource_string(self, offset: int) -> str:
+        """Read a length-prefixed UTF-16 resource name."""
+        if offset < 0 or offset + 2 > len(self.data):
+            return ""
+        (length,) = self._unpack("<H", offset)
+        # Each unit is 2 bytes; cap so a corrupt length cannot read the whole file.
+        length = min(length, 512)
+        start = offset + 2
+        end = min(start + length * 2, len(self.data))
+        try:
+            return self.data[start:end].decode("utf-16-le", "replace")
+        except (UnicodeDecodeError, ValueError):
+            return ""
