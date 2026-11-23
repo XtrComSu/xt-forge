@@ -208,11 +208,13 @@ cap("Comments and annotation", ["comment", "inline_comment", "annotate_native_fu
 cap("Unknown tracking / ledger", ["list_unknowns", "record_unknown"],
     None, "missing", "no obligation/unknown ledger yet")
 cap("Managed PE/CLI artifact", ["inspect_managed_artifact"],
-    None, "missing", "CLI header detection not built")
+    "managed artifact", "covered")
 cap("Managed members (types/methods/CIL)", ["inspect_managed_members"],
-    None, "missing", "ECMA-335 metadata tables not parsed")
+    "managed members", "partial",
+    "types, methods, fields and MethodAttributes decode; CIL instruction bodies "
+    "and exception regions are not disassembled")
 cap("Managed native boundaries", ["inspect_managed_native_boundaries"],
-    None, "missing", "P/Invoke ImplMap parsing not built")
+    "managed boundaries", "covered")
 cap("Dart AOT", ["inspect_dart_aot"],
     None, "missing", "not built")
 cap("Model / GPU artifacts", ["inspect_model_artifact", "inspect_gpu_code_objects"],

@@ -104,6 +104,12 @@ def _opt(args: dict[str, Any], key: str, flag: str | None = None) -> list[str]:
 
 def _re_inspect_args(args: dict[str, Any]) -> list[str]:
     verb = args.get("verb") or "info"
+    if verb == "managed":
+        # `re managed <action> <path>` — action is a positional, so it must come
+        # before the path or argparse binds the path as the action.
+        command = ["re", "managed", str(args.get("sub") or "artifact"), _str(args, "path")]
+        command.extend(_opt(args, "limit"))
+        return command
     if verb == "bookmarks":
         # `re bookmarks <sub> <path> [address]` — the subverb is a positional, so it
         # has to be spliced in ahead of the path rather than appended as a flag.
@@ -627,14 +633,18 @@ TOOLS: list[dict[str, Any]] = [
             # wiring is only half a route — an MCP client that cannot see the verb
             # in this enum will never call it.
             "elfmeta", "wasm", "firmware", "bookmarks", "bulk",
+            # Managed (.NET) metadata: CLI header, ECMA-335 tables, P/Invoke seams.
+            "managed",
         ]},
          "limit": _INT, "member": _TEXT, "arch": _TEXT, "target": _TEXT,
          "bytes": _INT, "max_instructions": _INT, "max_functions": _INT, "flow": _BOOL,
          "pattern": _TEXT, "hex": _BOOL, "regex": _BOOL, "context": _INT,
          "ignore_case": _BOOL, "name": _TEXT, "comment": _TEXT,
          "sub": {"type": "string",
-                 "enum": ["list", "set", "unset", "next", "prev"],
-                 "description": "bookmarks only: which navigation operation to run."}},
+                 "enum": ["list", "set", "unset", "next", "prev",
+                          "artifact", "members", "boundaries"],
+                 "description": "bookmarks: navigation operation. managed: which "
+                                "report to build (artifact, members, boundaries)."}},
         ["path"], _re_inspect_args,
     ),
     _tool(

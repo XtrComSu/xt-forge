@@ -301,7 +301,7 @@ def _add_re(sub) -> None:
                                        "decompile", "trace",
                                        "deep-elf", "anchors", "slice", "live-probe", "rbxm",
                                        "ida", "borer", "triage", "init-project", "llvm", "archives", "kernelcache", "pdb", "pdb-types", "demangle", "callgraph", "evidence", "search",
-                                       "elfmeta", "wasm", "firmware",
+                                       "elfmeta", "wasm", "firmware", "managed",
                                        "bookmarks", "bulk"])
     r.add_argument("value", nargs="?", default=None,
                    help="binary path, new project directory, or subverb")

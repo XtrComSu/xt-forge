@@ -485,6 +485,33 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb == "managed":
+            from ..core.re import managed as managed_mod
+            # `re managed <action> <path>`: the action lands in `value`, so the
+            # path has to be read from args.path or, when the caller omits a path,
+            # from the first extra positional.
+            managed_actions = ("artifact", "members", "boundaries")
+            managed_extra = [str(x) for x in (getattr(args, "extra", []) or [])]
+            if args.value in managed_actions:
+                action = args.value
+            else:
+                action = "artifact"
+                if args.value and managed_extra and managed_extra[0] != args.value:
+                    managed_extra.insert(0, args.value)
+            path = path or (managed_extra[0] if managed_extra else None)
+            if not path:
+                return _out(args, {"ok": False, "error": "managed needs a path"},
+                            "error: managed needs a path", code=2)
+            if action == "artifact":
+                res = managed_mod.inspect_artifact(path)
+            elif action == "members":
+                res = managed_mod.inspect_members(path, limit=args.limit or 500)
+            elif action == "boundaries":
+                res = managed_mod.inspect_boundaries(path)
+            else:
+                return _out(args, {"ok": False,
+                                   "error": f"unknown managed action: {action}"},
+                            f"error: unknown managed action {action}", code=2)
         elif verb == "bookmarks":
             from ..core.re import bookmarks as _bm
             label = getattr(args, "name", None) or ""
@@ -859,6 +886,48 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb == "managed":
+        # Same positional rules as the dispatcher: the action is in args.value.
+        _managed_actions = ("artifact", "members", "boundaries")
+        action = args.value if args.value in _managed_actions else "artifact"
+        if not res.get("ok"):
+            human = "not a managed assembly: " + str(res.get("error", "unknown"))
+        elif action == "artifact":
+            asm = res.get("assembly") or {}
+            lines = [f"managed assembly ({res.get('pe_magic')}, "
+                     f"runtime {res.get('runtime_version')})"]
+            if asm:
+                lines.append(f"  name      {asm.get('name')}")
+                lines.append(f"  version   {asm.get('version')}")
+                lines.append(f"  culture   {asm.get('culture') or '(none)'}")
+            else:
+                lines.append(f"  {res.get('warning', 'no assembly table')}")
+            lines.append(f"  module    {res.get('module')}")
+            lines.append(f"  flags     {', '.join(res.get('flags_decoded') or []) or 'none'}")
+            entry = res.get("entry_point") or {}
+            if entry:
+                lines.append(f"  entry     {entry.get('token')} "
+                             f"({entry.get('table')} rid {entry.get('rid')})")
+            counts = res.get("table_counts") or {}
+            lines.append(f"  types     {counts.get('TypeDef', 0)}")
+            lines.append(f"  methods   {counts.get('MethodDef', 0)}")
+            lines.append(f"  refs      {len(res.get('references') or [])}")
+            human = "\n".join(lines)
+        elif action == "members":
+            lines = [f"{res.get('type_count', 0)} types, "
+                     f"{res.get('method_count', 0)} methods"]
+            for type_row in (res.get("types") or [])[:40]:
+                lines.append(f"  {type_row.get('full_name')}")
+                for m in (type_row.get("methods") or [])[:20]:
+                    lines.append(f"     {str(m.get('name')):<28} {m.get('access')}")
+            human = "\n".join(lines)
+        else:
+            lines = [f"{res.get('pinvoke_count', 0)} P/Invoke(s) across "
+                     f"{len(res.get('dlls') or [])} DLL(s)"]
+            for p_row in (res.get("pinvokes") or [])[:30]:
+                lines.append(f"  {p_row.get('dll')}!{p_row.get('import_name')}"
+                             f"  -> {p_row.get('managed_method')}")
+            human = "\n".join(lines)
     elif verb == "wasm":
         counts = res.get("counts") or {}
         lines = [f"format          {res.get('format')} version {res.get('version')}"
