@@ -266,6 +266,36 @@ class NonSwiftBinaryTest(unittest.TestCase):
         report = swiftmeta.inspect_swift_metadata("/nonexistent/lib.so")
         self.assertFalse(report["ok"])
 
+    def test_random_data_is_not_claimed_as_swift(self) -> None:
+        """A byte pair that starts like a symbol is not evidence of Swift.
+
+        In 20 MB of random data a "$s<digit>" sequence occurs by chance. An earlier
+        version of this reader accepted any such match and reported `ok: true` with zero
+        demangled symbols — a false positive that would tell an analyst the wrong thing
+        about a file. The gate now requires either a real swift5 section or a symbol that
+        actually decomposes.
+        """
+        import random
+        random.seed(7)
+        blob = bytes(random.randrange(256) for _ in range(4 * 1024 * 1024))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "random.bin"
+            path.write_bytes(blob)
+            report = swiftmeta.inspect_swift_metadata(path)
+        self.assertFalse(report["ok"], "random data was claimed to be a Swift binary")
+
+    def test_candidate_count_is_reported_when_rejected(self) -> None:
+        """Rejecting a file should still say how many candidates were seen."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "noise.bin"
+            # "$s99ab" is a candidate the scanner accepts (prefix + digit) but the
+            # demangler rejects: length 99 overruns the symbol. A *valid* symbol such as
+            # "$s9noisehere" would legitimately parse as module "noisehere".
+            path.write_bytes(b"$s99ab" + bytes(64))
+            report = swiftmeta.inspect_swift_metadata(path)
+        self.assertFalse(report["ok"])
+        self.assertIn("candidate_symbol_count", report)
+
     def test_random_bytes_never_raise(self) -> None:
         import random
         random.seed(515)

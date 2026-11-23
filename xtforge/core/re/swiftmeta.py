@@ -342,13 +342,19 @@ def inspect_swift_metadata(path: str | Path, *,
     swift_sections = {name: {"offset": offset, "size": size}
                       for name, (offset, size) in sections.items()
                       if "swift5" in name.lower() or name.startswith("__swift5")}
-    if not swift_sections and not _mangled_symbols(raw)[:1]:
-        return {"ok": False, "path": str(path),
-                "error": "no Swift metadata found (no swift5 sections and no mangled "
-                         "symbols); this may not be a Swift binary",
-                "sections_seen": len(sections)}
 
     symbols = _mangled_symbols(raw)
+    # A byte sequence that merely starts like a Swift symbol proves nothing on its own.
+    # In 20 MB of random data a "$s<digit>" pair occurs by chance, so requiring a match is
+    # not enough — the symbol has to actually decompose. Demanding a decomposed symbol (or
+    # a real swift5 section) is what keeps "ok" meaning "this is Swift", not "this contains
+    # four bytes that look like Swift".
+    if not swift_sections and not any(demangle_symbol(s) for s in symbols[:5000]):
+        return {"ok": False, "path": str(path),
+                "error": "no Swift metadata found (no swift5 sections and no demanglable "
+                         "symbols); this may not be a Swift binary",
+                "sections_seen": len(sections),
+                "candidate_symbol_count": len(symbols)}
     demangled = [entry for entry in (demangle_symbol(s) for s in symbols)
                  if entry is not None]
 

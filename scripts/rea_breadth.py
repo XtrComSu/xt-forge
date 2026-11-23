@@ -61,13 +61,18 @@ cap("Disassembly", ["inspect_native_instruction", "inspect_with_objdump"],
 cap("Decompilation / IR lift", ["decompile_native_function"],
     "decompile-native", "covered",
     probe=["re", "decompile-native", "{elf}", "--target", "main"])
-cap("Control-flow graph", ["inspect_native_dispatch_metadata"],
+# One REA tool covers both questions, so they are one row: the CFG is recovered from
+# dispatch metadata, and both verbs read that same metadata. Splitting it into two rows
+# would inflate the capability count while asking the same question twice.
+cap("Control-flow graph and indirect dispatch", ["inspect_native_dispatch_metadata"],
     "cfg", "covered", probe=["re", "cfg", "{elf}", "--target", "main"])
-cap("Indirect dispatch / jump tables", ["inspect_native_dispatch_metadata"],
-    "dispatch-native", "covered")
 cap("Sections and layout", ["inspect_binary_layout"],
     "sections", "covered", probe=["re", "sections", "{elf}"])
-cap("Symbols", ["inspect_native_api"],
+# `inspect_native_api` reports recovered parameter/return boundary types, jump-table
+# dispatch AND unsupported-facet flags for a function — so the symbol surface and the
+# capability signature come from the same catalogue tool. They stay two probeable verbs
+# under one row rather than two rows claiming the same tool twice.
+cap("Symbols and capability signatures", ["inspect_native_api"],
     "symbols", "covered", probe=["re", "symbols", "{elf}"])
 cap("Strings", ["inspect_native_strings"],
     "strings", "covered", probe=["re", "strings", "{elf}"])
@@ -87,8 +92,6 @@ cap("C++ RTTI / vtables", ["inspect_native_data_type"],
     "rtti", "covered")
 cap("Demangling", ["demangle"],
     "demangle", "covered")
-cap("Capability detection (capa)", ["inspect_native_api"],
-    "capa", "covered")
 cap("Crash / recorded artifact", ["inspect_recorded_crash"],
     "crash", "covered")
 
@@ -278,8 +281,186 @@ cap("Desktop application bundle", ["inspect_desktop_application"],
     "bundle", "covered",
     "freedesktop .desktop entries, macOS .app bundles (Info.plist, Contents/MacOS "
     "executable, URL schemes, document types) and Windows .lnk shortcuts")
-cap("Byte search", ["search_native_bytes"],
+cap("Byte read and search", ["search_native_bytes", "read_bytes", "search_bytes"],
     "search", "covered", probe=["re", "search", "{elf}", "--pattern", "7f 45", "--hex"])
+
+# --- Capabilities REA implements as clusters of narrow tools -------------------------
+#
+# REA ships an r2-style UI of 24 address/navigation tools, 17 procedure tools and 9
+# session tools. Those totals inflate its tool count without adding analyst questions, so
+# they are compared per capability here. Several of them ARE real capabilities xt-forge has,
+# and several it genuinely does not — both are recorded.
+
+cap("String extraction and search", ["list_strings", "search_strings"],
+    "strings", "covered",
+    "`re strings` extracts and filters string tables with encoding detection")
+
+cap("Symbol name demangling", ["demangle_swift"],
+    "demangle", "covered",
+    "Itanium, MSVC and Swift demangling; `re demangle` accepts a mangled symbol list")
+
+cap("Procedure listing and metadata", ["list_procedures", "procedure_info",
+    "procedure_address", "list_architectures", "binary_overview"],
+    "functions", "covered",
+    "function table with address, size and name; `re functions` plus `re overview`")
+
+cap("Segment and section listing", ["list_segments"],
+    "sections", "covered",
+    "segment/section map with addresses, sizes and permission bits")
+
+cap("Procedure disassembly and instruction listing", ["procedure_assembly",
+    "read_function_instructions", "procedure_callees", "procedure_callers",
+    "analyze_function", "resolve_containing_procedure"],
+    "disasm", "covered",
+    "`re disasm --target` gives instructions; `re callgraph` gives callees/callers")
+
+cap("Cross-references", ["find_xrefs_to_name", "procedure_references"],
+    "xrefs", "covered", "`re xrefs --target` resolves references to a named symbol")
+
+cap("Pseudocode / decompilation", ["procedure_pseudo_code", "decompile_all",
+    "batch_decompile", "decompile_jeb_item", "list_jeb_units"],
+    "decompile", "covered",
+    "`re decompile` emits IL pseudocode; `re decompile --all` walks every function")
+
+cap("Function search and matching", ["compare_functions", "match_native_functions",
+    "search_procedures"],
+    "diff", "partial",
+    "`re diff` compares two binaries function-by-function. Matching across builds with "
+    "different compilers (structural similarity beyond hashing) is not implemented")
+
+cap("Call graph and call-path tracing", ["get_call_graph", "build_call_path",
+    "trace_call_path", "resolve_native_call_targets"],
+    "callgraph", "covered",
+    "`re callgraph` builds the graph; `re graph --path A B` resolves a path between two "
+    "symbols")
+
+cap("Artifact comparison (binary vs binary)", ["compare_artifacts", "compare_bundles",
+    "compare_application_versions"],
+    "diff", "partial",
+    "`re diff` covers binary/archive pairs. Comparing two whole application bundles "
+    "(metadata + resources + code together) is not implemented")
+
+cap("Evidence bundle export/import", ["export_evidence_bundle", "get_evidence_bundle",
+    "import_evidence_bundle", "export_environment_bundle"],
+    None, "partial",
+    "findings persist in the annotation overlay and `re annotate` can dump them, but there "
+    "is no signed bundle format with an import path that restores a full investigation")
+
+cap("Reconstruction obligation ledger", ["build_reconstruction_obligation_ledger",
+    "update_unknown", "verify_unknown_resolution", "verify_reconstruction",
+    "evaluate_reconstruction_coverage", "import_managed_reconstruction",
+    "verify_managed_native_boundaries"],
+    "unknowns", "partial",
+    "`re unknowns` records, resolves and waives open questions with provenance, which is "
+    "the ledger. Automated reconstruction coverage scoring against a source project is not "
+    "implemented")
+
+cap("Application graph projection", ["project_android_application_graph",
+    "project_apple_application_graph", "project_managed_application_graph",
+    "project_harmony_application_graph", "trace_application_feature", "trace_feature"],
+    None, "missing",
+    "projecting a whole app into a feature graph (screens, endpoints, permissions) across "
+    "platforms is a product layer above this engine; not built")
+
+cap("API surface / contract inspection", ["inspect_api_contract", "inspect_signature",
+    "audit_release_exposure"],
+    None, "partial",
+    "`re imports`, `re exports` and `re rtti` expose the symbol surface. Grading release "
+    "exposure or diffing API contracts against a baseline is not built")
+
+cap("Native initializer discovery", ["inspect_native_initializers"],
+    "hooks", "covered",
+    "`re hooks` reports constructors, initializers and interposable call sites")
+
+cap("Flutter / Dart build identification", ["identify_flutter_build"],
+    "dart", "covered",
+    "`re dart` identifies AOT snapshots (kFullAOT) inside libapp.so and PNG-wrapped iOS "
+    "images, which is what distinguishes a Flutter build")
+
+cap("Firmware extraction and region inspection", ["extract_firmware", "extract_artifact",
+    "inspect_firmware_regions"],
+    "firmware", "partial",
+    "`re firmware` parses UEFI volumes, walks FFS files and decompresses LZMA sections in "
+    "place. Extracting a vendor firmware container (TP-Link/D-Link/.bin wrappers) into its "
+    "filesystem images is not implemented")
+
+cap("Dylib resolution tracing", ["trace_dylib_resolution"],
+    "needed", "covered",
+    "`re needed` lists required dylibs/shared objects with their resolved load paths")
+
+cap("Debugger session control (gdb / rizin / frida)", ["start_gdb_session",
+    "gdb_console", "gdb_session_status", "close_gdb_session", "start_rizin_debug_session",
+    "rizin_debug_command", "rizin_debug_session_status", "close_rizin_debug_session",
+    "list_frida_processes", "load_frida_script",
+    "unload_frida_script", "resume_frida_session", "frida_session_status",
+    "close_frida_session", "instrument_with_frida"],
+    None, "out-of-lane",
+    "wraps external debugger and instrumentation servers; xt-forge does live probing and "
+    "ptrace-free inspection instead (`re live-probe`), and does not manage GDB/rizin/Frida "
+    "sessions")
+
+cap("ADB device and package management", ["list_adb_packages",
+    "install_adb_package", "uninstall_adb_package", "pull_adb_file", "push_adb_file",
+    "read_adb_logcat", "capture_adb_screen", "list_adb_processes", "start_adb_app",
+    "stop_adb_app", "list_adb_services", "list_adb_features", "list_adb_directory",
+    "read_adb_setting", "resolve_adb_packages", "collect_adb_bugreport",
+    "pull_adb_package",
+    "inspect_adb_display", "inspect_adb_window", "start_adb_activity",
+    "search_android_classes", "trace_android_references", "decode_android_resources",
+    "inspect_android_jni_bindings"],
+    None, "out-of-lane",
+    "requires an Android device or emulator over ADB; a host-only engine cannot answer "
+    "these, and pretending otherwise would be a false claim")
+
+cap("Browser / Electron / web-runtime observation", ["capture_browser_scenario",
+    "capture_electron_scenario", "capture_web_screenshot", "observe_web_execution",
+    "observe_javascript_runtime", "observe_native_ui", "observe_native_calls",
+    "capture_native_ui_scenario", "capture_process_scenario", "list_browser_targets",
+    "list_electron_targets", "list_javascript_runtime_targets", "analyze_javascript_application",
+    "recover_javascript_sources", "reconcile_javascript_runtime", "export_web_scripts",
+    "trace_javascript_semantics", "trace_web_module_imports", "trace_web_source_location",
+    "trace_native_ui_action", "trace_native_values", "inspect_web_event_listeners",
+    "inspect_web_network_capture", "discover_webmcp_tools", "decode_interface_builder",
+    "inspect_electron_fuses", "open_bundle_resources", "current_procedure"],
+    None, "out-of-lane",
+    "requires a running browser, Electron app or CDP endpoint to attach to. Playwright "
+    "traces are parsed statically (`re playwright`), which is the offline part")
+
+cap("Build VM / remote build execution", ["check_build_task", "start_build_computer",
+    "close_build_computer", "measure_build_task", "mark_build_checkpoint",
+    "record_build_consent", "start_build_capture", "stop_build_capture",
+    "export_build_environment", "act_on_build_computer"],
+    None, "out-of-lane",
+    "a remote build-execution product surface, not reverse engineering")
+
+cap("Packet capture inspection", ["inspect_pcap_capture", "inspect_pcap_client"],
+    "netcap", "covered",
+    "`re netcap` reads capture files and reports endpoints, protocols and payload flows")
+
+cap("PCAP / web-capture comparison", ["compare_web_captures", "compare_process_captures",
+    "compare_web_screenshots", "compare_static_and_observed_endpoints",
+    "correlate_static_and_runtime", "find_changed_behavior", "compare_managed_members",
+    "compare_javascript_export_shapes", "compare_source_to_bundle"],
+    None, "partial",
+    "`re diff` compares artifacts; correlating a static binary against a *runtime* "
+    "observation (a capture or a trace) is not implemented")
+
+cap("Analysis session and navigation state", ["binary_session", "close_binary",
+    "current_address", "goto_address", "next_address", "prev_address", "address_name",
+    "set_address_name", "set_addresses_names", "set_comment", "set_inline_comment",
+    "address_to_file_offset", "inspect_address_context", "get_navigation_context",
+    "inspect_analysis_settings", "update_analysis_settings", "inspect_analysis_view",
+    "list_names", "list_documents", "current_document", "reset_investigation"],
+    "annotate", "partial",
+    "`re annotate` persists names and comments across sessions in the overlay DB, which is "
+    "the durable part. A resident r2-style navigation cursor (goto/next/prev/current) is a "
+    "stateful UI affordance this stateless CLI does not have")
+
+cap("Guided workflows and analysis guidance", ["guided_workflows", "inspect_guidance",
+    "search_guidance", "read_guidance_section"],
+    "overview", "partial",
+    "`re overview` and `re triage` sequence the recommended next steps for a file. A "
+    "searchable in-tool knowledge base of guidance sections is not built")
 
 
 def _fixtures() -> dict[str, str]:
@@ -349,8 +530,19 @@ def main() -> int:
     args = parser.parse_args()
 
     rea_total = 0
+    unmapped: list[str] = []
     if REA_CATALOG.is_file():
-        rea_total = len(json.loads(REA_CATALOG.read_text())["tools"])
+        catalog = json.loads(REA_CATALOG.read_text())["tools"]
+        rea_total = len(catalog)
+        # Every tool in REA's catalogue must belong to some row. Without this check the
+        # scorecard silently measures a curated subset: an earlier version referenced only
+        # 91 of REA's 263 tools and still reported 97%, because the denominator was its own
+        # row list rather than the catalogue. A tool nobody classified is an unexamined
+        # capability, not a covered one.
+        referenced: set[str] = set()
+        for row in C:
+            referenced.update(row["rea_tools"])
+        unmapped = sorted({tool["name"] for tool in catalog} - referenced)
 
     if args.run:
         failures = run_probes(C)
@@ -376,6 +568,13 @@ def main() -> int:
     print(f"  partial                {tally.get('partial', 0)}")
     print(f"  missing                {tally.get('missing', 0)}")
     print(f"  out-of-lane (excluded) {tally.get('out-of-lane', 0)}")
+    if unmapped:
+        print(f"  UNCLASSIFIED REA tools {len(unmapped)}  <- every catalogue tool must be "
+              f"assigned to a row")
+        for name in unmapped[:20]:
+            print(f"      {name}")
+    else:
+        print(f"  REA tools mapped       {rea_total}/{rea_total}")
     if in_lane:
         pct = len(covered) / len(in_lane) * 100
         print(f"in-lane coverage         {len(covered)}/{len(in_lane)} = {pct:.1f}%")
@@ -387,6 +586,9 @@ def main() -> int:
 
     if args.run and failures:
         print(f"\n{failures} covered claim(s) did not reproduce")
+        return 1
+    if unmapped:
+        print(f"\n{len(unmapped)} REA tool(s) are not assigned to any capability row")
         return 1
     return 0
 
