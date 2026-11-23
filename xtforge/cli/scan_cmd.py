@@ -229,7 +229,8 @@ def cmd_re(args):
         else:
             ann_subverb = "list"
             path = args.path or args.value
-    elif verb in ("diff", "fn-match", "fnmatch", "match-functions"):
+    elif verb in ("diff", "fn-match", "fnmatch", "match-functions",
+                  "bundle-diff", "compare-bundles", "bundle-compare"):
         # These take two positionals: bin1 in `value`, bin2 in `path`. Resolve bin2 BEFORE
         # `path` is rewritten to bin1, otherwise both sides point at the same file and the
         # matcher reports a perfect self-match.
@@ -585,6 +586,15 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("bundle-diff", "compare-bundles", "bundle-compare"):
+            from ..core.re import bundlecmp as _bundlecmp
+            second = second_binary
+            if not second:
+                return _out(args,
+                            {"ok": False, "error": "bundle-diff needs two paths: "
+                                                   "xtforge re bundle-diff <A> <B>"},
+                            "error: bundle-diff needs two paths", code=2)
+            res = _bundlecmp.compare_bundles(path, second)
         elif verb in ("fn-match", "fnmatch", "match-functions"):
             from ..core.re import fnmatch as _fnmatch
             # Like `diff`, the second binary arrives as args.path: `re fn-match A B` puts A
@@ -1140,6 +1150,31 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("bundle-diff", "compare-bundles", "bundle-compare"):
+        if not res.get("ok"):
+            human = "bundle diff: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"Bundle diff ({res.get('kind_a')} vs {res.get('kind_b')})",
+                     f"  entries     {res.get('entries_a')} vs {res.get('entries_b')}"
+                     f"   unchanged {res.get('unchanged_count')}"]
+            for label in ("added", "removed"):
+                items = res.get(label) or []
+                if items:
+                    lines.append(f"  {label:<11} {len(items)}: " + ", ".join(items[:6]))
+            if res.get("modified"):
+                lines.append(f"  modified    {res['modified_count']}:")
+                for entry in res["modified"][:10]:
+                    extra_note = ""
+                    if entry.get("first_diff_offsets_hex"):
+                        extra_note = " at " + ", ".join(entry["first_diff_offsets_hex"][:4])
+                    lines.append(f"    {entry['path']} ({entry['category']})"
+                                 f"{extra_note}")
+            if res.get("metadata_changes"):
+                lines.append("  metadata    " + ", ".join(
+                    f"{e['path']} {e['reason']}" for e in res["metadata_changes"][:5]))
+            if res.get("identical"):
+                lines.append("  verdict     identical")
+            human = chr(10).join(lines)
     elif verb in ("fn-match", "fnmatch", "match-functions"):
         if not res.get("ok"):
             human = "fn-match: " + str(res.get("error", "unknown"))

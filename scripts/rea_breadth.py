@@ -341,9 +341,12 @@ cap("Call graph and call-path tracing", ["get_call_graph", "build_call_path",
 
 cap("Artifact comparison (binary vs binary)", ["compare_artifacts", "compare_bundles",
     "compare_application_versions"],
-    "diff", "partial",
-    "`re diff` covers binary/archive pairs. Comparing two whole application bundles "
-    "(metadata + resources + code together) is not implemented")
+    "bundle-diff", "covered",
+    "`re diff` compares binaries; `re bundle-diff` compares whole application bundles layer "
+    "by layer — metadata, resources, native code and bytecode together — with added/removed/"
+    "modified grouped by category and byte offsets for modified files. Accepts directory, "
+    "zip, and directory-vs-zip. Agrees with `diff -rq` on every fixture, verified against a "
+    "real APK")
 
 cap("Evidence bundle export/import", ["export_evidence_bundle", "get_evidence_bundle",
     "import_evidence_bundle", "export_environment_bundle"],
