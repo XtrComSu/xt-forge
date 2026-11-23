@@ -541,6 +541,9 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("dart", "dart-aot", "snapshot"):
+            from ..core.re import dartsnapshot
+            res = dartsnapshot.inspect_dart_snapshot(path)
         elif verb in ("swift", "swift-types"):
             from ..core.re import swiftmeta
             res = swiftmeta.inspect_swift_metadata(path, limit=args.limit or 500)
@@ -1068,6 +1071,36 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("dart", "dart-aot", "snapshot"):
+        if not res.get("ok"):
+            human = "dart snapshot: " + str(res.get("error", "unknown"))
+            if res.get("hint"):
+                human += "\n  hint        " + res["hint"]
+        else:
+            lines = [f"Dart AOT image ({res.get('container')}, "
+                     f"{res.get('file_size')} bytes)"]
+            snap = res.get("snapshot") or {}
+            if snap:
+                lines.append(f"  snapshot    {snap.get('kind')} at offset "
+                             f"{snap.get('offset')}")
+                lines.append(f"  length      {snap.get('declared_length')} bytes "
+                             f"(total {snap.get('snapshot_size')})")
+                if snap.get("truncated"):
+                    lines.append(f"  WARNING     truncated: {snap.get('shortfall')} "
+                                 f"bytes short")
+                if snap.get("data_image_offset") is not None:
+                    lines.append(f"  data image  offset {snap.get('data_image_offset')}"
+                                 f", {snap.get('data_image_size')} bytes")
+            if res.get("elf"):
+                lines.append(f"  ELF         recovered from "
+                             f"{res['elf'].get('recovered_from')}, "
+                             f"{res['elf'].get('elf_size')} bytes")
+            if res.get("png_chunks"):
+                lines.append("  PNG chunks  " + ", ".join(
+                    f"{c['type']}({c['size']})" for c in res["png_chunks"][:6]))
+            if res.get("note"):
+                lines.append(f"  note        {res['note']}")
+            human = "\n".join(lines)
     elif verb in ("swift", "swift-types"):
         if not res.get("ok"):
             human = "swift metadata: " + str(res.get("error", "unknown"))

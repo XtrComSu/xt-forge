@@ -254,7 +254,10 @@ cap("Managed members (types/methods/CIL)", ["inspect_managed_members"],
 cap("Managed native boundaries", ["inspect_managed_native_boundaries"],
     "managed boundaries", "covered")
 cap("Dart AOT", ["inspect_dart_aot"],
-    None, "missing", "not built")
+    "dart", "covered",
+    "snapshot header (magic, length, kind), aligned data image, and ELF recovery from "
+    "PNG IDAT for iOS App.framework. Verified against dart 3.14.1 AOT output; header "
+    "fields recomputed independently from the raw bytes")
 cap("Model / GPU artifacts", ["inspect_model_artifact", "inspect_gpu_code_objects"],
     None, "out-of-lane", "different product surface (ML artifacts)")
 cap("Maven/Gradle, NuGet metadata", ["inspect_maven_gradle_metadata",
