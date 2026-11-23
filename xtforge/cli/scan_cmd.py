@@ -541,6 +541,9 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("swift", "swift-types"):
+            from ..core.re import swiftmeta
+            res = swiftmeta.inspect_swift_metadata(path, limit=args.limit or 500)
         elif verb in ("ntfs", "ntfs-journal"):
             from ..core.re import ntfs
             res = ntfs.inspect_ntfs_journal(path, limit=args.limit or 500)
@@ -1065,6 +1068,29 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("swift", "swift-types"):
+        if not res.get("ok"):
+            human = "swift metadata: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"Swift metadata ({res.get('format')}, "
+                     f"{res.get('swift_section_count')} swift5 sections)",
+                     f"  symbols     {res.get('symbol_count')} "
+                     f"({res.get('demangled_count')} demangled, "
+                     f"{res.get('undemangled_count')} unresolved)",
+                     f"  modules     " + ", ".join(
+                         f"{k} ({v})" for k, v in (res.get("modules") or {}).items()),
+                     f"  types       {res.get('type_count')}"]
+            for entry in (res.get("types") or [])[:30]:
+                members = ", ".join(entry.get("members") or []) or "-"
+                lines.append(f"    {entry['decl_kind'] or '?':<9} "
+                             f"{entry['type']:<24} {members}")
+            if res.get("reflection_strings"):
+                lines.append("  reflect     " + ", ".join(
+                    res["reflection_strings"][:14]))
+            if res.get("symbol_roles"):
+                lines.append("  roles       " + ", ".join(
+                    f"{k} x{v}" for k, v in list(res["symbol_roles"].items())[:8]))
+            human = "\n".join(lines)
     elif verb in ("ntfs", "ntfs-journal"):
         if not res.get("ok"):
             human = "ntfs volume: " + str(res.get("error", "unknown"))

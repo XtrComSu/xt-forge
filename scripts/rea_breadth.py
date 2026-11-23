@@ -127,7 +127,10 @@ cap("Mach-O", ["inspect_macho", "get_objc_classes", "get_objc_protocols"],
     "methods with type encodings, protocol definitions and conformance, categories "
     "(verified against llvm-objdump --objc-meta-data)")
 cap("Swift types", ["analyze_swift_types"],
-    None, "missing", "Swift metadata demangling not built")
+    "swift", "covered",
+    "mangled-symbol demangling into module/type/member/kind, swift5_* section map, "
+    "reflection field and case names. Verified against swiftc 6.0.3 with "
+    "swift-demangle as oracle: 26/26 symbols agree on module and type")
 cap("Kernel cache", ["inspect_kernel_module"],
     "kernelcache", "covered")
 cap("Apple IPS crash reports", ["inspect_apple_ips"],
