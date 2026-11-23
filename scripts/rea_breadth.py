@@ -182,7 +182,11 @@ cap("SQLite database", ["inspect_sqlite_database"],
     "header parsed directly so truncated/hot-journalled files are described, "
     "not refused; schema names cross-checked against the sqlite3 module")
 cap("NTFS journal", ["inspect_ntfs_journal"],
-    None, "missing", "not built")
+    "ntfs", "partial",
+    "volume, MFT and resident-value reading with update-sequence fixups verified "
+    "against ntfsls, and $LogFile located via delta-coded data runs. Transaction "
+    "records are NOT decoded: mkntfs writes no restart area, and no tool on this host "
+    "writes NTFS journal records to test against")
 cap("EVM interface", ["inspect_evm_interface"],
     "evm", "covered",
     "selectors from the PUSH4/EQ dispatcher; raw bytecode or hex text")

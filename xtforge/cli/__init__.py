@@ -306,7 +306,7 @@ def _add_re(sub) -> None:
                                        "sqlite", "beam", "evm", "ips",
                                        "uefi", "nvram",
                                        "dex",
-                                       "firmware", "fv", "uefi-firmware", "assetcatalog", "car", "unknowns", "obligations", "v8cache", "codecache", "ptrace", "playwright",
+                                       "ntfs", "ntfs-journal", "firmware", "fv", "uefi-firmware", "assetcatalog", "car", "unknowns", "obligations", "v8cache", "codecache", "ptrace", "playwright",
                                        "objc", "objc-classes", "objc-protocols",
                                        "keyed", "keyed-archive", "jvm", "maven",
                                        "nuget", "appbundle", "bundle",

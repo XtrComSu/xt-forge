@@ -541,6 +541,9 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("ntfs", "ntfs-journal"):
+            from ..core.re import ntfs
+            res = ntfs.inspect_ntfs_journal(path, limit=args.limit or 500)
         elif verb in ("firmware", "fv", "uefi-firmware"):
             from ..core.re import firmwarevolume
             res = firmwarevolume.inspect_firmware_volume(path, limit=args.limit or 500)
@@ -1062,6 +1065,41 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("ntfs", "ntfs-journal"):
+        if not res.get("ok"):
+            human = "ntfs volume: " + str(res.get("error", "unknown"))
+        else:
+            vol = res.get("volume") or {}
+            lines = [f"NTFS volume (serial {vol.get('serial')}, "
+                     f"{vol.get('volume_size')} bytes)",
+                     f"  cluster     {vol.get('cluster_size')} bytes "
+                     f"({vol.get('bytes_per_sector')} x "
+                     f"{vol.get('sectors_per_cluster')})",
+                     f"  MFT         cluster {vol.get('mft_cluster')} "
+                     f"(offset {vol.get('mft_offset')})",
+                     f"  records     {res.get('mft_record_count')} "
+                     f"({res.get('in_use_count')} in use, "
+                     f"{res.get('deleted_count')} deleted, "
+                     f"{res.get('named_count')} named)"]
+            log = res.get("logfile") or {}
+            if log.get("present"):
+                lines.append(f"  $LogFile    {log.get('log_size')} bytes at "
+                             f"offset {log.get('log_offset')} "
+                             f"({log.get('log_clusters')} clusters)")
+                if log.get("restart_signature"):
+                    lines.append(f"    restart   {log['restart_signature']} "
+                                 f"({log.get('shutdown')}), "
+                                 f"page {log.get('log_page_size')}")
+                elif log.get("formatted_only"):
+                    lines.append("    restart   none — the log holds no transactions "
+                                 "(formatted, never written)")
+                else:
+                    lines.append("    restart   not decoded")
+            for entry in (res.get("entries") or [])[:30]:
+                kind = "dir " if entry.get("directory") else "file"
+                lines.append(f"    rec {entry['record']:>3} {kind} "
+                             f"{entry.get('name', '')}")
+            human = "\n".join(lines)
     elif verb in ("firmware", "fv", "uefi-firmware"):
         if not res.get("ok"):
             human = "firmware volume: " + str(res.get("error", "unknown"))
