@@ -541,6 +541,9 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("assetcatalog", "car"):
+            from ..core.re import assetcatalog
+            res = assetcatalog.inspect_asset_catalog(path, limit=args.limit or 200)
         elif verb in ("unknowns", "obligations"):
             from ..core.re import obligations
             action = args.value if args.value in ("list", "record", "resolve",
@@ -1056,6 +1059,33 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("assetcatalog", "car"):
+        if not res.get("ok"):
+            human = "asset catalog: " + str(res.get("error", "unknown"))
+        else:
+            header = res.get("car_header") or {}
+            lines = [f"Apple asset catalog ({res.get('container')} v{res.get('version')})",
+                     f"  blocks      {res.get('occupied_blocks')} occupied, "
+                     f"{res.get('empty_blocks')} empty "
+                     f"(of {res.get('block_count')})"]
+            if header.get("renderer"):
+                lines.append(f"  renderer    {header['renderer']}")
+            if header:
+                lines.append(f"  coreui      {header.get('coreui_version')} "
+                             f"(catalog format {header.get('version')}, "
+                             f"{header.get('key_count')} keys)")
+            for name, block in (res.get("named_blocks") or {}).items():
+                tag = f" [{block.get('tag')}]" if block.get("tag") else ""
+                size = block.get("size", 0)
+                lines.append(f"    {name:<20} {size:>7} bytes"
+                             + (" (empty)" if block.get("empty") else "") + tag)
+            if res.get("rendition_count"):
+                lines.append(f"  renditions  {res['rendition_count']}")
+                for name in (res.get("renditions") or [])[:20]:
+                    lines.append(f"    {name}")
+            if res.get("rendition_note"):
+                lines.append(f"  note        {res['rendition_note']}")
+            human = "\n".join(lines)
     elif verb in ("unknowns", "obligations"):
         if not res.get("ok"):
             human = "obligation ledger: " + str(res.get("error", "unknown"))

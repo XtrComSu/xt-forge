@@ -134,7 +134,10 @@ cap("Apple IPS crash reports", ["inspect_apple_ips"],
 cap("plist", ["inspect_plist"],
     "formats plist", "covered")
 cap("Asset catalog", ["inspect_asset_catalog"],
-    None, "missing", "Apple .car asset catalog not built")
+    "car", "covered",
+    "BOMStore container: block table as (addr,size) pairs, per-block type tags, "
+    "CARHEADER decoded (CoreUI version, catalog format, renderer string); rendition "
+    "keys reported as not decoded rather than guessed. Verified on a real Assets.car")
 cap("devicetree", ["inspect_devicetree"],
     "devicetree", "covered",
     "nodes, properties, memory reservations; finds an FDT embedded in a container")
