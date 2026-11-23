@@ -125,7 +125,8 @@ cap("Swift types", ["analyze_swift_types"],
 cap("Kernel cache", ["inspect_kernel_module"],
     "kernelcache", "covered")
 cap("Apple IPS crash reports", ["inspect_apple_ips"],
-    None, "missing", "Apple IPS report parsing not built")
+    "ips", "covered",
+    "two-object and single-document forms, faulting thread frames resolved to images")
 cap("plist", ["inspect_plist"],
     "formats plist", "covered")
 cap("Asset catalog", ["inspect_asset_catalog"],
@@ -157,15 +158,19 @@ cap("Rust binary metadata", ["inspect_rust_binary"],
 cap("Python .pyc", ["inspect_python_pyc"],
     "formats pyc", "covered")
 cap("Erlang BEAM", ["inspect_erlang_beam"],
-    None, "missing", "not built")
+    "beam", "covered",
+    "chunk inventory, module name, exports, compiler version and source paths")
 cap("V8 code cache", ["inspect_v8_code_cache"],
     None, "missing", "not built")
 cap("SQLite database", ["inspect_sqlite_database"],
-    None, "missing", "not built")
+    "sqlite", "covered",
+    "header parsed directly so truncated/hot-journalled files are described, "
+    "not refused; schema names cross-checked against the sqlite3 module")
 cap("NTFS journal", ["inspect_ntfs_journal"],
     None, "missing", "not built")
 cap("EVM interface", ["inspect_evm_interface"],
-    None, "missing", "not built")
+    "evm", "covered",
+    "selectors from the PUSH4/EQ dispatcher; raw bytecode or hex text")
 cap("il2cpp metadata", ["inspect_il2cpp_metadata"],
     None, "missing", "not built")
 cap("Rizin command execution", ["execute_rizin_command", "rizin_command"],

@@ -494,6 +494,18 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb == "sqlite":
+            from ..core.re import artifacts
+            res = artifacts.inspect_sqlite(path)
+        elif verb == "beam":
+            from ..core.re import artifacts
+            res = artifacts.inspect_beam(path)
+        elif verb == "evm":
+            from ..core.re import artifacts
+            res = artifacts.inspect_evm(path)
+        elif verb == "ips":
+            from ..core.re import artifacts
+            res = artifacts.inspect_apple_ips(path)
         elif verb == "devicetree":
             from ..core.re import devices
             res = devices.inspect_devicetree(path)
@@ -928,6 +940,75 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb == "sqlite":
+        if not res.get("ok"):
+            human = "sqlite: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"sqlite database ({res.get('page_size')} byte pages, "
+                     f"{res.get('text_encoding')})",
+                     f"  pages       {res.get('declared_pages')} declared, "
+                     f"{res.get('actual_size')} bytes on disk"]
+            if res.get("truncated"):
+                lines.append(f"  TRUNCATED   {res.get('truncated_by')} bytes short")
+            lines.append(f"  schema      format {res.get('schema_format')}, "
+                         f"cookie {res.get('schema_cookie')}")
+            if res.get("journals"):
+                for journal in res["journals"]:
+                    lines.append(f"  journal     {journal['name']} "
+                                 f"({journal['size']} bytes) — write was in flight")
+            lines.append(f"  objects     {res.get('object_count')}")
+            for obj in (res.get("objects") or [])[:25]:
+                lines.append(f"    {obj['type']:<7} {obj['name']}")
+            human = "\n".join(lines)
+    elif verb == "beam":
+        if not res.get("ok"):
+            human = "beam: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"beam module {res.get('module') or '(unnamed)'}",
+                     f"  compiler    {res.get('compiler_version') or '-'}",
+                     f"  chunks      {res.get('chunk_count')}"]
+            for source in (res.get("source_paths") or [])[:5]:
+                lines.append(f"  source      {source}")
+            lines.append(f"  exports     {res.get('export_count', 0)}")
+            for export in (res.get("exports") or [])[:25]:
+                lines.append(f"    {export['function']}/{export['arity']}")
+            human = "\n".join(lines)
+    elif verb == "evm":
+        if not res.get("ok"):
+            human = "evm: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"evm bytecode ({res.get('input_form')}, "
+                     f"{res.get('bytecode_size')} bytes, "
+                     f"{res.get('instruction_count')} instructions)",
+                     f"  selectors   {res.get('selector_count')}"]
+            for selector in (res.get("selectors") or [])[:25]:
+                lines.append(f"    {selector}")
+            top = list((res.get("opcodes") or {}).items())[:8]
+            if top:
+                lines.append("  opcodes     "
+                             + ", ".join(f"{name}x{count}" for name, count in top))
+            human = "\n".join(lines)
+    elif verb == "ips":
+        if not res.get("ok"):
+            human = "apple ips: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"apple {res.get('report_kind')} report (bug_type "
+                     f"{res.get('bug_type')})",
+                     f"  app         {res.get('app_name')} {res.get('app_version') or ''}".rstrip(),
+                     f"  os          {res.get('os_version')}",
+                     f"  captured    {res.get('timestamp')}"]
+            exception = res.get("exception") or {}
+            if exception:
+                lines.append(f"  exception   {exception.get('type')} "
+                             f"{exception.get('signal') or ''} "
+                             f"{exception.get('subtype') or ''}".rstrip())
+            if res.get("faulting_thread") is not None:
+                lines.append(f"  faulting    thread {res['faulting_thread']}, "
+                             f"{res.get('faulting_frames')} frames")
+            for frame in (res.get("top_frames") or [])[:12]:
+                lines.append(f"    {frame.get('image') or '-'}  "
+                             f"{frame.get('symbol') or '?'} + {frame.get('offset')}")
+            human = "\n".join(lines)
     elif verb == "devicetree":
         if not res.get("ok"):
             human = "devicetree: " + str(res.get("error", "unknown"))

@@ -643,6 +643,8 @@ TOOLS: list[dict[str, Any]] = [
             "formats",
             # Device and workstation artifacts: devicetree, kernel config, .lnk.
             "devicetree", "kconfig", "lnk",
+            # Container artifacts: SQLite, BEAM, EVM bytecode, Apple IPS.
+            "sqlite", "beam", "evm", "ips",
         ]},
          "limit": _INT, "member": _TEXT, "arch": _TEXT, "target": _TEXT,
          "bytes": _INT, "max_instructions": _INT, "max_functions": _INT, "flow": _BOOL,

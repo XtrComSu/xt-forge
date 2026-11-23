@@ -303,6 +303,7 @@ def _add_re(sub) -> None:
                                        "ida", "borer", "triage", "init-project", "llvm", "archives", "kernelcache", "pdb", "pdb-types", "demangle", "callgraph", "evidence", "search",
                                        "elfmeta", "wasm", "firmware", "managed",
                                        "formats", "devicetree", "kconfig", "lnk",
+                                       "sqlite", "beam", "evm", "ips",
                                        "bookmarks", "bulk"])
     r.add_argument("value", nargs="?", default=None,
                    help="binary path, new project directory, or subverb")
