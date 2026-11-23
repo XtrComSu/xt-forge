@@ -130,9 +130,11 @@ cap("plist", ["inspect_plist"],
 cap("Asset catalog", ["inspect_asset_catalog"],
     None, "missing", "Apple .car asset catalog not built")
 cap("devicetree", ["inspect_devicetree"],
-    None, "missing", "DTB parsing not built")
+    "devicetree", "covered",
+    "nodes, properties, memory reservations; finds an FDT embedded in a container")
 cap("Kernel build config", ["inspect_kernel_build_config"],
-    None, "missing", "IKCONFIG extraction not built")
+    "kconfig", "covered",
+    "IKCONFIG gzip blob, /proc/config.gz and plaintext .config")
 cap("PE certificates", ["inspect_pe_certificates"],
     "pe certificates", "covered",
     "the table is located and described; the signature is not chained to a trust root")
@@ -141,8 +143,7 @@ cap("PE resources", ["inspect_pe_resources"],
 cap("PE load config", ["inspect_pe_load_config"],
     "pe load-config", "covered")
 cap("Windows shortcut (.lnk)", ["inspect_windows_shortcut"],
-    None, "missing",
-    "not built; the Linux equivalent (freedesktop .desktop) is covered")
+    "lnk", "covered")
 cap("Keyed archive / NSKeyedArchiver", ["inspect_keyed_archive"],
     None, "missing", "not built")
 cap("Go binary metadata", ["inspect_go_binary"],

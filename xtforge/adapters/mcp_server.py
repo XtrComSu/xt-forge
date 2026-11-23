@@ -641,6 +641,8 @@ TOOLS: list[dict[str, Any]] = [
             "managed",
             # Small self-describing formats: plist, .pyc, .desktop, Go, Rust.
             "formats",
+            # Device and workstation artifacts: devicetree, kernel config, .lnk.
+            "devicetree", "kconfig", "lnk",
         ]},
          "limit": _INT, "member": _TEXT, "arch": _TEXT, "target": _TEXT,
          "bytes": _INT, "max_instructions": _INT, "max_functions": _INT, "flow": _BOOL,

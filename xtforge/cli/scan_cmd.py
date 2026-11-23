@@ -485,6 +485,15 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb == "devicetree":
+            from ..core.re import devices
+            res = devices.inspect_devicetree(path)
+        elif verb == "kconfig":
+            from ..core.re import devices
+            res = devices.inspect_kernel_config(path)
+        elif verb == "lnk":
+            from ..core.re import devices
+            res = devices.inspect_shortcut(path)
         elif verb == "formats":
             from ..core.re import formats as formats_mod
             fmt_action = args.value if args.value in (
@@ -904,6 +913,58 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb == "devicetree":
+        if not res.get("ok"):
+            human = "devicetree: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"devicetree v{res.get('version')} "
+                     f"({res.get('node_count')} nodes, {res.get('property_count')} properties, "
+                     f"depth {res.get('max_depth')})"]
+            if res.get("embedded"):
+                lines.append(f"  embedded at offset 0x{res['header_offset']:x}")
+            if res.get("model"):
+                model = res["model"]
+                lines.append(f"  model       {model if isinstance(model, str) else model[0]}")
+            compat = res.get("compatible")
+            if compat:
+                text = compat if isinstance(compat, str) else ", ".join(compat)
+                lines.append(f"  compatible  {text}")
+            lines.append(f"  size        {res.get('total_size')} bytes")
+            for node in (res.get("nodes") or [])[:25]:
+                indent = "  " * (node["depth"] + 1)
+                lines.append(f"{indent}{node['name']}"
+                             + (f"@{node['unit_address']}" if node.get("unit_address") else ""))
+            human = "\n".join(lines)
+    elif verb == "kconfig":
+        if not res.get("ok"):
+            human = "kernel config: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"kernel config ({res.get('source')})"]
+            if res.get("version"):
+                lines.append(f"  localversion  {res['version']}")
+            lines.append(f"  enabled       {res.get('enabled_count')}")
+            lines.append(f"  modules       {res.get('module_count')}")
+            lines.append(f"  disabled      {res.get('disabled_count')}")
+            for key, value in (res.get("settings") or {}).items():
+                lines.append(f"  {key:<36} {value}")
+            human = "\n".join(lines)
+    elif verb == "lnk":
+        if not res.get("ok"):
+            human = "shortcut: " + str(res.get("error", "unknown"))
+        else:
+            lines = ["windows shortcut",
+                     f"  command     {res.get('command')}"]
+            if res.get("working_directory"):
+                lines.append(f"  workdir     {res['working_directory']}")
+            if res.get("relative_path"):
+                lines.append(f"  relative    {res['relative_path']}")
+            vol = res.get("volume") or {}
+            if vol:
+                lines.append(f"  volume      {vol.get('drive_type')} "
+                             f"serial {vol.get('serial')}")
+            lines.append(f"  show        {res.get('show_command')}")
+            lines.append(f"  flags       {', '.join(res.get('flag_names') or [])}")
+            human = "\n".join(lines)
     elif verb == "formats":
         _fmt_a = args.value if args.value in (
             "plist", "pyc", "desktop", "go", "rust") else "inspect"
