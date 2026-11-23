@@ -1,13 +1,122 @@
 """`xtforge re` and `xtforge scan`: binary inspection and static safety scan.
 
-Both are read-only. `scan` masks matched values by default — a scanner that
-echoes a live key into a transcript leaks the thing it found.
+`scan` is read-only and masks matched values by default.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from .common import _out
+
+
+_UNKNOWN_NOTE = "unrecognised format; no disassembly or symbol recovery attempted"
+
+
+def _human_evidence(record: dict) -> str:
+    """Short human form of an evidence record: identity, not the full report."""
+    return "\n".join((
+        f"evidence (schema {record.get('schema', '?')})",
+        f"{'path':<9} {record.get('path', '')}",
+        f"{'size':<9} {record.get('size', 0)} bytes",
+        f"{'sha256':<9} {str(record.get('sha256', ''))[:16]}",
+        f"{'backend':<9} {record.get('backend', '')}",
+    ))
+
+
+def _human_overview(payload: dict) -> str:
+    """Render an unclaimed file's bounded description instead of the whole report.
+
+    Every other format keeps the full overview dump. For "unknown", only the
+    description is meaningful: the image's arch and bits are empty placeholders
+    (no loader claimed the file), so neither is included here.
+    """
+    if payload.get("format") != "unknown":
+        return json.dumps(payload, indent=2)
+
+    images = payload.get("images") or []
+    unknown = {}
+    if images and isinstance(images[0], dict):
+        candidate = images[0].get("unknown")
+        if isinstance(candidate, dict):
+            unknown = candidate
+    runs = unknown.get("strings") or []
+    if not isinstance(runs, list):
+        runs = []
+    fields = (
+        ("format", "unknown"),
+        ("size", f"{unknown.get('size', 0)} bytes"),
+        ("sha256", str(unknown.get("sha256", ""))),
+        ("entropy", f"{float(unknown.get('entropy', 0.0)):.2f} "
+                    f"({unknown.get('entropy_class', '')})"),
+        ("magic", str(unknown.get("magic", ""))),
+        ("strings", ", ".join(str(run) for run in runs[:5])),
+        ("note", _UNKNOWN_NOTE),
+    )
+    return "\n".join(f"{name:<16} {value}" for name, value in fields)
+
+
+def _human_pdb_types(payload: dict) -> str:
+    """Summarise a PDB type census and show at most twenty procedure signatures."""
+    census = payload.get("census") or {}
+    kinds = census.get("kinds") or {}
+    summary = ", ".join(f"{name}:{count}" for name, count in kinds.items())
+    lines = [f"{census.get('record_count', 0)} type records ({summary})"]
+    signatures = payload.get("signatures") or []
+    lines.extend(str(sig.get("rendered", "")) for sig in signatures[:20])
+    hidden = len(signatures) - 20
+    if hidden > 0:
+        lines.append(f"... ({hidden} more signatures not shown)")
+    aggregates = payload.get("aggregates") or []
+    if aggregates:
+        lines.append("")
+        lines.append(f"{len(aggregates)} aggregate layouts")
+        lines.extend(str(item.get("rendered", "")) for item in aggregates[:10])
+        if len(aggregates) > 10:
+            lines.append(f"... ({len(aggregates) - 10} more aggregates not shown)")
+    return "\n".join(lines)
+
+
+def _human_functions(payload: dict) -> str:
+    """Render the function index as address/name columns, with PDB signatures.
+
+    The signature is a trailing column, so long names simply push it further
+    right instead of being truncated. Functions without a signature keep the
+    plain two-column form.
+    """
+    if not payload.get("ok", True):
+        return f"error: {payload.get('error') or 'cannot list functions'}"
+
+    lines = []
+    for image in payload.get("images") or []:
+        if not isinstance(image, dict):
+            continue
+        for fn in image.get("functions") or []:
+            if not isinstance(fn, dict):
+                continue
+            address = fn.get("address")
+            if isinstance(address, int):
+                address_text = hex(address)
+            elif address is None:
+                address_text = ""
+            else:
+                address_text = str(address)
+            name = str(fn.get("name") or fn.get("symbol_name") or "")
+            # An unnamed function still needs to read as a row, not as a bare
+            # address: a stripped binary would otherwise print a column of hex.
+            label = name if name else "(unnamed)"
+            line = f"{address_text:<12}  {label:<26}"
+            size = fn.get("size")
+            if isinstance(size, int) and size > 0:
+                line += f" {size:>5}B"
+            source = fn.get("name_source") or fn.get("source")
+            if source:
+                line += f"  {source}"
+            signature = fn.get("signature")
+            if signature:
+                line += f"  {signature}"
+            lines.append(line.rstrip())
+    return "\n".join(lines) or "(no functions)"
 
 
 def _human_findings(payload: dict) -> str:
@@ -36,6 +145,26 @@ def cmd_re(args):
     # Handle 'pe' and 'annotate' subverb routing: e.g. xtforge re annotate rename <path>
     pe_subverb = "info"
     ann_subverb = "list"
+    bm_subverb = "list"
+    if verb == "bookmarks":
+        # `re bookmarks <sub> <path> [address]` follows the same shape as `annotate`
+        # so that an address is a positional, not a flag: at the prompt, the address
+        # is the thing you are looking at, and typing --rva for it is friction.
+        # Positional binding is subtle here: argparse fills `value` with the subverb,
+        # `path` with the next token, and everything after that lands in `extra`. So
+        # the address is extra[0] when a path was supplied, and extra[1] only when
+        # the caller omitted the path and passed it as extra[0].
+        if args.value in ("set", "list", "next", "prev", "unset"):
+            bm_subverb = args.value
+            extra = getattr(args, "extra", []) or []
+            if args.path:
+                bm_address = extra[0] if extra else getattr(args, "target", None)
+            else:
+                path = extra[0] if extra else None
+                bm_address = extra[1] if len(extra) > 1 else getattr(args, "target", None)
+        else:
+            bm_subverb = "list"
+            bm_address = getattr(args, "target", None)
     if verb == "pe":
         if args.value in ("info", "sections", "imports", "exports", "tls"):
             pe_subverb = args.value
@@ -55,18 +184,350 @@ def cmd_re(args):
     elif verb == "diff":
         path = args.value or args.path
 
+    # 'llvm' routes like 'pe': the subverb is the second positional argument.
+    # available/tools need no path, so handle this before the path check.
+    if verb == "llvm":
+        from ..core.re import llvm
+        subverb = args.value or "available"
+        llvm_path = args.path or (getattr(args, "extra", None) or [None])[0]
+        tools = llvm.available()
+        if subverb in ("available", "tools"):
+            res = {"ok": True, "tools": tools}
+            human = "\n".join(f"{name:<12} {'yes' if tools[name] else 'no'}"
+                              for name in llvm.LLVM_TOOLS)
+            return _out(args, res, human)
+        if subverb in ("sections", "symbols"):
+            needed = ("objdump", "readobj") if subverb == "sections" else ("nm",)
+            missing = [llvm.LLVM_TOOLS.get(n, n) for n in needed if not tools.get(n)]
+            if missing:
+                res = {"ok": False, "error": f"tool not found: {', '.join(missing)}",
+                       "tools": tools}
+                return _out(args, res, f"error: {res['error']}", code=1)
+            if not llvm_path:
+                res = {"ok": False, "error": "re llvm needs a path"}
+                return _out(args, res, f"error: {res['error']}", code=2)
+            try:
+                rows = (llvm.sections(str(llvm_path)) if subverb == "sections"
+                        else llvm.symbols(str(llvm_path)))
+            except (OSError, ValueError, TypeError) as exc:
+                res = {"ok": False, "error": str(exc)}
+                return _out(args, res, f"error: {exc}", code=1)
+            res = {"ok": True, "path": str(llvm_path), subverb: rows}
+            return _out(args, res, json.dumps(res, indent=2))
+        res = {"ok": False, "error": f"unknown llvm subverb: {subverb}"}
+        return _out(args, res, f"error: {res['error']}", code=2)
+
+    # 'demangle' takes symbols, not a path, so it also precedes the path guard.
+    if verb == "demangle":
+        from ..core.re import sysimage as _sysimage
+        symbols = [args.value] if args.value else []
+        if args.path:
+            symbols.append(args.path)
+        symbols.extend(getattr(args, "extra", None) or [])
+        symbols = [item for item in symbols if item]
+        if not symbols:
+            res = {"ok": False, "error": "re demangle needs at least one symbol"}
+            return _out(args, res, f"error: {res['error']}", code=2)
+        res = _sysimage.demangle(symbols)
+        human = "\n".join(f"{row['symbol']} -> {row['demangled'] or '(not swift)'}"
+                          for row in res.get("results", []))
+        return _out(args, res, human, code=0 if res.get("ok") else 1)
+
     if not path:
         return _out(args, {"ok": False, "error": "re needs a path"},
                     "error: re needs a path", code=2)
+
+    if verb == "evidence":
+        # The record describes the whole file, so it is useful even when the
+        # native image model cannot claim the format (a text file, for one).
+        # Probe the hub only to enrich slice/address-space/limits; a missing or
+        # failing hub degrades to None/{}, it never fails the evidence verb.
+        from ..core.re import evidence as _evidence
+        from ..core.re import sysimage as _sysimage
+
+        requested_arch = getattr(args, "arch", None)
+        slice_name = requested_arch
+        address_space = None
+        limits: dict = {}
+        try:
+            ov = _sysimage.overview(path, member=getattr(args, "member", None),
+                                    arch=requested_arch)
+        except Exception:
+            ov = {}
+        if isinstance(ov, dict) and ov.get("ok"):
+            images = ov.get("images") or []
+            first = images[0] if images and isinstance(images[0], dict) else {}
+            if not slice_name:
+                # A fat Mach-O image carries the selected architecture and a
+                # non-zero slice offset; that is the slice, not the whole file.
+                slice_name = first.get("slice") or (
+                    first.get("arch") if first.get("slice_offset") else None
+                )
+            base = first.get("base", first.get("image_base"))
+            if base is None:
+                # A raw-image request states its own load address; the hub
+                # echoes it through section addresses but has no `base` key.
+                base = getattr(args, "base", None)
+            bits = first.get("bits")
+            if base is not None and not isinstance(base, bool) and bits:
+                try:
+                    address_space = {"base": int(base), "bits": int(bits)}
+                except (TypeError, ValueError):
+                    address_space = None
+            unknown = first.get("unknown")
+            if isinstance(unknown, dict) and "truncated" in unknown:
+                limits["truncated"] = bool(unknown["truncated"])
+        try:
+            record = _evidence.build(
+                path,
+                member=getattr(args, "member", None),
+                arch=slice_name,
+                verb="evidence",
+                address_space=address_space,
+                limits=limits,
+            )
+        except (OSError, ValueError) as exc:
+            return _out(args, {"ok": False, "error": str(exc)},
+                        f"error: {exc}", code=1)
+        return _out(args, record, _human_evidence(record))
+
+    if verb == "init-project":
+        from ..core.re.project import init_project
+        if args.path or args.extra:
+            raise ValueError("init-project accepts one destination directory")
+        res = init_project(path, name=args.name)
+        return _out(args, res, f"Created RE project at {res['path']}. Start with README.md.")
     try:
+        if verb == "callgraph":
+            from ..core.re import sysimage as _sysimage
+            res = _sysimage.callgraph(path, member=args.member, arch=args.arch,
+                                      limit=getattr(args, "limit", 0) or 0)
+            human = (f"{res.get('nodes', 0)} nodes, {res.get('edges', 0)} edges, "
+                     f"{len(res.get('roots') or [])} roots")
+            return _out(args, res, human, code=0 if res.get("ok") else 1)
+
+        if verb == "pdb-types":
+            from ..core.re import sysimage as _sysimage
+            res = _sysimage.pdb_types(path, limit=getattr(args, "limit", 0) or 0)
+            human = (_human_pdb_types(res) if res.get("ok")
+                     else f"error: {res.get('error') or path}")
+            return _out(args, res, human, code=0 if res.get("ok") else 1)
+
+        if verb in ("archives", "kernelcache"):
+            # Both container views come from the same Go hub overview the other
+            # re verbs use; narrow its result to the container caller asked for.
+            from ..core.re import sysimage
+            try:
+                ov = sysimage.overview(path)
+                if not ov.get("ok"):
+                    res = {"ok": False, "error": ov.get("error") or f"not a {verb} container"}
+                elif verb == "archives":
+                    if ov.get("format") != "archive":
+                        res = {"ok": False, "error": f"not an archive: {path}"}
+                    else:
+                        members = ov.get("archive") or []
+                        res = {"ok": True, "archive": members, "count": len(members)}
+                else:
+                    images = ov.get("images") or []
+                    first = images[0] if isinstance(images, list) and images else {}
+                    if ov.get("format") != "kernelcache" or not isinstance(first, dict):
+                        res = {"ok": False, "error": f"not a kernelcache: {path}"}
+                    else:
+                        res = {"ok": True, "format": "kernelcache",
+                               "member": ov.get("member", ""),
+                               "arch": first.get("arch"),
+                               "entry_point": first.get("entry_point")}
+            except Exception as exc:
+                res = {"ok": False, "error": str(exc)}
+            return _out(args, res, json.dumps(res, indent=2),
+                        code=0 if res.get("ok") else 1)
+        if verb == "pdb":
+            # A PDB only ever applies to a PE. A file whose format is unknown has no
+            # binary to match a symbol file against, so asking for its PDB is a usage
+            # error; a known non-PE binary (ELF, Mach-O) legitimately has none.
+            from ..core.re import sysimage
+            try:
+                probe = sysimage.overview(path)
+                if isinstance(probe, dict) and probe.get("format") == "unknown":
+                    # A PDB handed to `re pdb` is the likely mistake: this verb takes the
+                    # PE binary and finds its symbol file. `pdb-types` reads a .pdb
+                    # directly, so say which is which instead of "not a binary format".
+                    try:
+                        with open(path, "rb") as handle:
+                            magic = handle.read(32)
+                    except OSError:
+                        magic = b""
+                    if magic.startswith(b"Microsoft C/C++ MSF 7.00"):
+                        res = {"ok": False,
+                               "error": ("this is a PDB symbol file, not a binary. "
+                                         "`re pdb-types " + str(path) + "` reads its types; "
+                                         "`re pdb <pe-binary>` finds the PDB for a PE"),
+                               "suggestion": "pdb-types"}
+                    else:
+                        res = {"ok": False,
+                               "error": f"not a binary format: {path}"}
+                    return _out(args, res, f"error: {res['error']}", code=1)
+                scanned = sysimage.functions(path, limit=1)
+                pdb = None
+                warnings = []
+                if scanned.get("ok"):
+                    for image in scanned.get("images") or []:
+                        if not isinstance(image, dict):
+                            continue
+                        warnings.extend(w for w in (image.get("warnings") or []) if w)
+                        if pdb is None and isinstance(image.get("pdb"), dict):
+                            pdb = image["pdb"]
+                    res = {"ok": True, "pdb": pdb,
+                           "matched": bool(pdb and pdb.get("matched")),
+                           "warnings": warnings}
+                else:
+                    res = {"ok": False,
+                           "error": scanned.get("error") or f"cannot analyse: {path}"}
+            except Exception as exc:
+                res = {"ok": False, "error": str(exc)}
+            return _out(args, res, json.dumps(res, indent=2),
+                        code=0 if res.get("ok") else 1)
         if verb == "info":
             res = renative.get_info(path)
+        elif verb in {"overview", "functions", "xrefs-native", "dispatch-native",
+                      "disasm-native", "decompile-native"}:
+            from ..core.re import sysimage
+            if verb == "overview":
+                res = sysimage.overview(path, member=args.member, arch=args.arch,
+                                        base=getattr(args, "base", None))
+            elif verb == "functions":
+                res = sysimage.functions(path, member=args.member, arch=args.arch, limit=args.limit)
+            elif verb == "dispatch-native":
+                res = sysimage.dispatch(path, member=args.member, arch=args.arch,
+                                        target=args.target)
+            elif verb == "xrefs-native":
+                res = sysimage.references(path, member=args.member, arch=args.arch, target=args.target,
+                                          max_functions=args.max_functions, limit=args.limit)
+            else:
+                res = sysimage.disassemble(path, member=args.member, arch=args.arch,
+                                          target=args.target, byte_count=args.bytes,
+                                          count=args.max_instructions, flow=args.flow,
+                                          lift=verb == "decompile-native")
+            human = (_human_overview(res) if verb == "overview"
+                     else _human_functions(res) if verb == "functions"
+                     else json.dumps(res, indent=2))
+            return _out(args, res, human, code=0 if res.get("ok") else 1)
         elif verb == "needed":
-            res = elf.needed(path)
+            try:
+                res = elf.needed(path)
+            except Exception as exc:
+                # `needed` was ELF-only, so a Mach-O reported "not an ELF file" while
+                # `re overview` listed 13 dylibs from the same file. The engine answers
+                # for every format it reads; an empty list is a real answer (a
+                # freestanding binary needs nothing), not a failure.
+                from ..core.re import sources as _sources
+                overview = _sources.hub_overview(path)
+                deps = _sources.needed_from_hub(path, overview)
+                if deps is not None:
+                    res = {"ok": True, "path": str(path), "needed": deps,
+                           "engine": "xtforge-hub",
+                           "format": (overview or {}).get("format")}
+                else:
+                    res = _sources.unsupported("needed", path)
         elif verb == "sections":
             res = renative.get_sections(path)
         elif verb == "symbols":
             res = renative.get_symbols(path, limit=args.limit)
+            if not res.get("ok"):
+                # The Python symbol readers cover ELF and PE. For anything else, report
+                # the names the engine did recover instead of a generic format error —
+                # and say plainly what this list is, so it is not mistaken for a symbol
+                # table dump.
+                from ..core.re import sources as _sources
+                named = _sources.named_functions_from_hub(path, limit=args.limit)
+                if named:
+                    res = {"ok": True, "path": str(path), "symbols": named,
+                           "count": len(named), "engine": "xtforge-hub",
+                           "note": "named functions recovered by the engine, not a "
+                                   "symbol-table listing"}
+                else:
+                    res = _sources.unsupported("symbols", path)
+        elif verb == "search":
+            from ..core.re import search as research
+            from ..core.re import sources as _sources
+            if not (getattr(args, "pattern", None) or "").strip():
+                return _out(
+                    args,
+                    {"ok": False, "error": "search needs --pattern"},
+                    "error: search needs --pattern <text> "
+                    "(--hex for bytes such as '48 8b ?? c3', --regex for a bytes pattern)",
+                    code=2)
+            mode = ("hex" if getattr(args, "hex_pattern", False)
+                    else "regex" if getattr(args, "regex", False) else "text")
+            # A section table is an optimisation, not a requirement: a raw image
+            # or an unknown container still gets searched, with file offsets and
+            # `va: null`. Losing the mapping must never lose the match.
+            try:
+                sections = _sources.sections_from_hub(path)
+            except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+                sections = None
+            res = research.search_file(
+                path,
+                getattr(args, "pattern", None) or "",
+                mode=mode,
+                limit=args.limit,
+                context=getattr(args, "context", 16),
+                ignore_case=bool(getattr(args, "ignore_case", False)),
+                sections=sections,
+            )
+        elif verb == "elfmeta":
+            from ..core.re import elfmeta
+            res = elfmeta.report(path)
+        elif verb == "wasm":
+            from ..core.re import wasm
+            res = wasm.inspect(path)
+        elif verb == "firmware":
+            from ..core.re import firmware
+            res = firmware.inspect(path)
+        elif verb == "bookmarks":
+            from ..core.re import bookmarks as _bm
+            label = getattr(args, "name", None) or ""
+            note = getattr(args, "comment", None) or ""
+            if bm_subverb == "set":
+                if not bm_address:
+                    return _out(args, {"ok": False, "error": "bookmarks set needs an address"},
+                                "error: bookmarks set <path> <address> [--name label]",
+                                code=2)
+                res = _bm.set_bookmark(path, bm_address, label=label, note=note)
+            elif bm_subverb == "unset":
+                if not bm_address:
+                    return _out(args, {"ok": False, "error": "bookmarks unset needs an address"},
+                                "error: bookmarks unset <path> <address>", code=2)
+                res = _bm.unset_bookmark(path, bm_address)
+            elif bm_subverb == "next":
+                res = _bm.next_bookmark(path, bm_address or "0x0")
+            elif bm_subverb == "prev":
+                res = _bm.prev_bookmark(path, bm_address or "0xffffffffffffffff")
+            else:
+                res = _bm.list_bookmarks(path, after=bm_address or None,
+                                         limit=getattr(args, "limit", 200))
+        elif verb == "bulk":
+            from pathlib import Path as _Path
+            from ..core.re import bulk as _bulk
+            # The input is a CSV of `0x1130,name` lines. `-` reads stdin so a
+            # rename list can be piped in from another tool without touching disk.
+            csv_source = getattr(args, "pattern", None) or ""
+            if not csv_source:
+                return _out(args, {"ok": False, "error": "bulk needs --pattern <csv>"},
+                            "error: bulk <path> --pattern renames.csv   "
+                            "(0x1130,name per line, - for stdin)", code=2)
+            if csv_source == "-":
+                import sys as _sys
+                csv_text = _sys.stdin.read()
+            else:
+                csv_file = _Path(csv_source)
+                if not csv_file.is_file():
+                    return _out(args, {"ok": False,
+                                       "error": f"no such rename list: {csv_source}"},
+                                f"error: no such rename list: {csv_source} "
+                                f"(expected 0x1130,name per line, or - for stdin)", code=2)
+                csv_text = csv_file.read_text(encoding="utf-8", errors="replace")
+            res = _bulk.rename_from_csv(path, csv_text)
         elif verb == "strings":
             if getattr(args, "stack", False):
                 dis_res = renative.disasm(path, count=10000)
@@ -81,6 +542,33 @@ def cmd_re(args):
             else:
                 res = elf.strings(path, min_len=getattr(args, "min_len", 4),
                                   limit=args.limit)
+            # --grep was accepted by the parser and ignored by every strings branch, so a
+            # filtered request returned the whole list. Apply it here, once, for all three
+            # modes (plain, --stack, --xor).
+            # The extractor returns distinct strings: a file with 83 printable runs and 79
+            # distinct ones reports 79. Without a stated count, a user comparing against
+            # `strings(1)` — which lists every occurrence — sees a disagreeing number and
+            # no explanation. Say which it is.
+            for key in ("strings", "stack_strings", "xor_strings"):
+                items = res.get(key)
+                if isinstance(items, list):
+                    res["count"] = len(items)
+            res["unique"] = True
+            grep = (getattr(args, "grep", None) or "").strip().lower()
+            if grep:
+                for key in ("strings", "stack_strings", "xor_strings"):
+                    items = res.get(key)
+                    if not isinstance(items, list):
+                        continue
+                    kept = []
+                    for item in items:
+                        text = item.get("string", "") if isinstance(item, dict) else str(item)
+                        if grep in str(text).lower():
+                            kept.append(item)
+                    res[key] = kept
+                if isinstance(res.get("strings"), list):
+                    res["count"] = len(res["strings"])
+                res["grep"] = grep
         elif verb == "entropy":
             res = elf.entropy(path, block=getattr(args, "block", 0),
                               limit=getattr(args, "count", 32))
@@ -161,6 +649,16 @@ def cmd_re(args):
             res = analysis.find_xrefs(path, target_ref)
         elif verb == "checksec":
             res = renative.checksec(path)
+            if not res.get("ok"):
+                # `checksec` answered for ELF and PE only, so an iOS or macOS binary —
+                # where these questions matter most — got a format complaint. Mach-O
+                # hardening is answered from the header and the undefined symbols.
+                from ..core.re import macho as _macho
+                try:
+                    res = _macho.checksec(path, arch=getattr(args, "arch", None) or "")
+                except Exception:
+                    from ..core.re import sources as _sources
+                    res = _sources.unsupported("checksec", path, ("elf", "pe", "macho"))
         elif verb == "hooks":
             tool = shutil.which("objdump")
             out_txt, _ = renative._run([tool, "-d", str(path)], timeout=45) if tool else ("", False)
@@ -176,6 +674,14 @@ def cmd_re(args):
                 return _out(args, {"ok": False, "error": "patch requires --patch-bytes (hex string)"}, "error: patch requires --patch-bytes", code=2)
             pbytes = bytes.fromhex(p_hex.replace(" ", ""))
             obytes = bytes.fromhex(args.orig_bytes.replace(" ", "")) if getattr(args, "orig_bytes", None) else None
+            # --confirm is accepted by the shared parser but patch is copy-only by
+            # design: it never writes in place, so the flag could never mean anything.
+            # Silently ignoring it invites "I confirmed and nothing changed", so say so.
+            if getattr(args, "confirm", None):
+                res = {"ok": False,
+                       "error": "patch never modifies the input; it writes a copy. "
+                                "Use --out to choose the destination instead of --confirm"}
+                return _out(args, res, f"error: {res['error']}", code=2)
             res = apply_patch(path, offset=off, patch_bytes=pbytes, original_bytes=obytes, out_path=getattr(args, "out", None))
         elif verb == "rtti":
             from ..core.re.rtti import extract_rtti
@@ -195,10 +701,26 @@ def cmd_re(args):
             res = parse_crash(path)
         elif verb == "annotate":
             from ..core.re.annotate import annotate
+            # --target is the flag every other re verb uses for an address, while
+            # annotate historically read --rva. Ignoring --target silently stored the
+            # annotation at 0x0, so accept either and prefer an explicit --rva.
+            target_rva = getattr(args, "rva", None)
+            if not target_rva:
+                target_rva = getattr(args, "target", None) or 0
+            # Supplying --name/--comment/--type-decl without a subverb used to fall
+            # through to "list" and write nothing at all. Infer the intent instead.
+            inferred = ann_subverb
+            if inferred == "list":
+                if getattr(args, "name", None):
+                    inferred = "rename"
+                elif getattr(args, "comment", None):
+                    inferred = "comment"
+                elif getattr(args, "type_decl", None):
+                    inferred = "type"
             res = annotate(
-                action=ann_subverb,
+                action=inferred,
                 binary=path,
-                rva=getattr(args, "rva", None) or 0,
+                rva=target_rva or 0,
                 name=getattr(args, "name", None) or "",
                 orig=getattr(args, "orig", None) or "",
                 comment=getattr(args, "comment", None) or "",
@@ -300,6 +822,93 @@ def cmd_re(args):
         )
     elif verb == "strings":
         human = "\n".join(res.get("strings", []))
+    elif verb == "search":
+        rows = res.get("matches", [])
+        human = "\n".join(
+            f"{m['offset_hex']:>10}  {('va ' + m['va']) if m.get('va') else 'va -':<20} "
+            f"{(m.get('section') or '-'):<14} {m['ascii']}"
+            for m in rows
+        ) or "(no matches)"
+        if res.get("truncated"):
+            human += f"\n(truncated: showing the first {res.get('count')})"
+    elif verb == "elfmeta":
+        notes = res.get("notes") or {}
+        dwarf = res.get("dwarf") or {}
+        unwind = res.get("unwind") or {}
+        lines = [
+            f"format          {res.get('format')} {res.get('bits')}-bit {res.get('endian')}",
+            f"build-id        {notes.get('build_id') or '(none)'}",
+            f"abi-tag         {notes.get('abi_tag') or '(none)'}",
+            f"gnu-property    {bool(notes.get('gnu_property'))}",
+            f"sections        {res.get('sections_reported', 0)}",
+            f"compile units   {dwarf.get('count', 0)}",
+        ]
+        for unit in (dwarf.get("units") or [])[:20]:
+            lines.append(f"  {unit.get('name') or '(unnamed)'}"
+                         f"  low={unit.get('low_pc')}  high={unit.get('high_pc')}"
+                         f"  producer={unit.get('producer') or '-'}")
+        lines.append(f"unwind          {unwind.get('fde_count', 0)} FDE / "
+                     f"{unwind.get('cie_count', 0)} CIE")
+        for warning in (dwarf.get("warnings") or [])[:10]:
+            lines.append(f"warning         {warning}")
+        human = "\n".join(lines)
+    elif verb == "wasm":
+        counts = res.get("counts") or {}
+        lines = [f"format          {res.get('format')} version {res.get('version')}"
+                 f"  size {res.get('size')}",
+                 "counts          " + "  ".join(f"{k}={v}" for k, v in counts.items())]
+        for sec in (res.get("sections") or [])[:20]:
+            lines.append(f"  section {sec.get('id'):>2} {sec.get('name'):<12}"
+                         f" off={sec.get('offset')} size={sec.get('size')}")
+        for imp in (res.get("imports") or [])[:20]:
+            lines.append(f"  import  {imp.get('module')}.{imp.get('name')} ({imp.get('kind')})")
+        for exp in (res.get("exports") or [])[:20]:
+            lines.append(f"  export  {exp.get('name')} ({exp.get('kind')}, index {exp.get('index')})")
+        if res.get("truncated"):
+            lines.append("(truncated)")
+        human = "\n".join(lines)
+    elif verb == "firmware":
+        volume = res.get("volume") or {}
+        lines = [f"format          {res.get('format')}  size {res.get('size')}"]
+        if volume:
+            lines += [
+                f"fs-guid         {volume.get('fs_guid')}",
+                f"length          {volume.get('length')}"
+                f" (matches file: {volume.get('reported_length_matches_file')})",
+                f"header-length   {volume.get('header_length')}",
+                f"revision        {volume.get('revision')}",
+                f"checksum        {'ok' if volume.get('checksum_ok') else 'MISMATCH'}",
+            ]
+        for entry in (res.get("files") or [])[:40]:
+            lines.append(f"  [{entry.get('index'):>3}] {entry.get('guid')}  "
+                         f"{entry.get('type_name'):<18} {entry.get('size'):>8} bytes")
+        for note in (res.get("notes") or [])[:10]:
+            lines.append(f"note            {note}")
+        if res.get("truncated"):
+            lines.append("(truncated)")
+        human = "\n".join(lines)
+    elif verb == "bookmarks":
+        rows = res.get("bookmarks") or []
+        if bm_subverb in ("next", "prev"):
+            one = res.get("bookmark")
+            human = (f"{one['rva']}  {one.get('label') or '(no label)'}  {one.get('note') or ''}"
+                     if one else "(no bookmark in that direction)")
+        elif bm_subverb in ("set", "unset"):
+            if bm_subverb == "unset":
+                human = f"{res.get('rva')}  removed={bool(res.get('removed'))}"
+            else:
+                human = f"{res.get('rva')}  saved  {res.get('label') or '(no label)'}"
+        else:
+            human = "\n".join(
+                f"{b['rva']:>12}  {(b.get('label') or '(no label)'):<28} {b.get('note') or ''}"
+                for b in rows) or "(no bookmarks)"
+            if res.get("truncated"):
+                human += f"\n(truncated: showing the first {res.get('count')}; use --target to page)"
+    elif verb == "bulk":
+        applied = res.get("applied") or []
+        human = (f"{res.get('count', 0)} renames applied\n"
+                 + "\n".join(f"  {a['rva']:>12}  {a['name']}" for a in applied[:50])) \
+            if applied else "0 renames applied"
     elif verb == "pe":
         if pe_subverb == "info":
             human = "\n".join(f"{k:<16} {v}" for k, v in res.items() if not isinstance(v, (list, dict)))

@@ -6,7 +6,7 @@
   <p><strong>Supreme local agent workbench for call-graph context, AST correctness auditing, normalized binary diffing, keyless CVE intel, and sub-1KB MCP routing.</strong></p>
   <p>Engineered in <strong>Rust</strong>, <strong>Go</strong>, and zero-dependency <strong>Python 3.11+</strong> under <strong>XT-OSS</strong> by <a href="https://xtrcom.xyz">XtrComSu</a>.</p>
   <p>
-    <a href="https://github.com/XtrComSu/xt-forge/releases/tag/v0.4.6-Damascus"><img src="https://img.shields.io/badge/XT--OSS-v0.4.6--Damascus-FF2E2E?style=flat-square&logo=github" alt="Release v0.4.6-Damascus" /></a>
+    <a href="https://github.com/XtrComSu/xt-forge/releases/tag/v0.4.7-Damascus"><img src="https://img.shields.io/badge/XT--OSS-v0.4.7--Damascus-FF2E2E?style=flat-square&logo=github" alt="Release v0.4.7-Damascus" /></a>
     <img src="https://img.shields.io/badge/vs%20Raw%20REA%20(5%20reps%20median)-93.3%25%20Standalone%20Win%20(42%2F45)-34D399?style=flat-square" alt="93.3% Standalone Pass Rate vs 22.2% Raw REA" />
     <img src="https://img.shields.io/badge/engines-Rust%20%2B%20Go%20%2B%20Python%203.11%2B-0C0D12?style=flat-square" alt="Rust + Go + Python" />
     <img src="https://img.shields.io/badge/MCP%20schema-1.35%20KB%20(--meta)-60A5FA?style=flat-square" alt="1.35 KB MCP Schema" />
@@ -24,12 +24,12 @@
 
 <p align="center">
   <a href="https://xtrcom.xyz">
-    <img src="docs/assets/xt-oss-banner.png" alt="XT-Forge v0.4.5-Damascus" width="100%" />
+    <img src="docs/assets/xt-oss-banner.png" alt="XT-Forge v0.4.7-Damascus" width="100%" />
   </a>
 </p>
 
 <p align="center">
-  <img src="docs/assets/overview-showcase.gif" alt="XT-Forge v0.4.5-Damascus XT-OSS Overview Showcase" width="100%" />
+  <img src="docs/assets/overview-showcase.gif" alt="XT-Forge v0.4.7-Damascus XT-OSS Overview Showcase" width="100%" />
 </p>
 
 ---
@@ -119,16 +119,16 @@ git clone https://github.com/XtrComSu/xt-forge.git; cd xt-forge; .\install.ps1
 npx --yes github:XtrComSu/xt-forge init
 
 # Or install the npm tarball from GitHub Releases:
-npm install -g https://github.com/XtrComSu/xt-forge/releases/download/v0.4.5-Damascus/xt-forge-0.4.5.tgz
+npm install -g https://github.com/XtrComSu/xt-forge/releases/download/v0.4.7-Damascus/xt-forge-0.4.5.tgz
 
 # Python (3.11+) wheel from GitHub Releases or git:
-uv tool install https://github.com/XtrComSu/xt-forge/releases/download/v0.4.5-Damascus/xt_forge-0.4.5-py3-none-any.whl
+uv tool install https://github.com/XtrComSu/xt-forge/releases/download/v0.4.7-Damascus/xt_forge-0.4.5-py3-none-any.whl
 # or: pip install git+https://github.com/XtrComSu/xt-forge.git
 ```
 
-### Option 3: Prebuilt Release Archives (`v0.4.5-Damascus`)
+### Option 3: Prebuilt Release Archives (`v0.4.7-Damascus`)
 
-Prebuilt platform archives, Python wheels, and `SHA256SUMS.txt` are attached to [GitHub Releases (`v0.4.5-Damascus`)](https://github.com/XtrComSu/xt-forge/releases/tag/v0.4.5-Damascus):
+Prebuilt platform archives, Python wheels, and `SHA256SUMS.txt` are attached to [GitHub Releases (`v0.4.7-Damascus`)](https://github.com/XtrComSu/xt-forge/releases/tag/v0.4.7-Damascus):
 - `xt-forge-0.4.5-linux-x86_64.tar.gz` (includes prebuilt `xtforge-native` Rust + `xtforge-hub` Go binaries)
 - `xt-forge-0.4.5-darwin-arm64.tar.gz` (includes prebuilt `xtforge-hub` macOS arm64 binary)
 - `xt-forge-0.4.5-windows-x86_64.zip` (includes prebuilt `xtforge-hub.exe` Windows x86_64 binary)
@@ -290,6 +290,10 @@ Hot CLI paths run directly in Rust (`xtforge-native`) and Go (`xtforge-hub`), de
 
 ![XT-Forge Hybrid Architecture](docs/assets/architecture-rust-go.png)
 
+**XT-Forge-SYS** is the binary and systems analysis component. The native overview reads Mach-O, IPA executables, Windows PE, and Linux ELF. See the [SYS architecture and capability boundaries](docs/ARCHITECTURE-RUST-GO.md#xt-forge-sys).
+
+For the exact formats, CPUs, naming sources and refusals the engine supports, see the [format and capability matrix](docs/RE-WORKBENCH.md#5-format-and-capability-matrix). Unrecognised regular files are reported, not rejected: `re overview` returns `format: "unknown"` with a bounded size, whole-file SHA-256, entropy and preview, and no disassembly or symbol recovery. dyld shared cache and IMG4 kernelcache support is verified on synthetic fixtures only — synthetic caches and a synthetic IMG4 wrapper, not real-world samples. LZMA-compressed DMG chunks are explicitly refused, and other refused or partial paths are called out in the matrix.
+
 ---
 
 ## Benchmarks & Reproducibility
@@ -313,6 +317,7 @@ Raw multi-run benchmark logs and evaluation outputs are committed under [`benchm
 - [MCP Meta-Gateway and Steering](docs/MCP-GATEWAY-AND-STEERING.md)
 - [Rust + Go Hybrid Runtime Details](docs/ARCHITECTURE-RUST-GO.md)
 - [RE Workbench Details](docs/RE-WORKBENCH.md)
+- [Start a reverse-engineering repository](docs/RE-WORKBENCH.md#start-an-re-repository)
 - [Changelog (`v0.4.3-Damascus`)](CHANGELOG.md) · [Architecture Release Notes](docs/RELEASE-0.4.0.md)
 
 ## Tests

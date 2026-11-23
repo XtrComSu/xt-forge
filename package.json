@@ -1,6 +1,6 @@
 {
   "name": "xt-forge",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "description": "Local agent workbench for call-graph navigation, offline binary reverse engineering, keyless CVE intel, and sub-1KB MCP routing.",
   "author": "XtrComSu <xtrcom.su@gmail.com> (https://github.com/XtrComSu)",
   "license": "MIT",

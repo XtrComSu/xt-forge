@@ -134,7 +134,7 @@ fn wants_hub(p: &args::Parsed) -> bool {
         ("mcp", "audit" | "proxy" | "trust" | "connect" | "journal") => true,
         ("mcp", "serve") => p.fbool("meta"),
         ("code", "lsp") => true,
-        ("re", "asar" | "netcap" | "apk" | "decompile" | "trace" | "checksec" | "capa") => true,
+        ("re", "overview" | "functions" | "xrefs-native" | "disasm-native" | "decompile-native" | "asar" | "netcap" | "apk" | "decompile" | "trace" | "checksec" | "capa") => true,
         ("intel", "sources" | "ip" | "cve" | "kev" | "search" | "hash" | "domain") => true,
         ("research", _) => true,
         ("loop", "schedule" | "list" | "stop" | "status") => true,

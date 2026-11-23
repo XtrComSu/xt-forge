@@ -1,0 +1,89 @@
+{
+  "reps": 5,
+  "rows": [
+    {
+      "label": "elf-64",
+      "path": "/tmp/dy",
+      "rea_ok": 5,
+      "rea_runs": 5,
+      "rea_median_s": 11.56,
+      "forge_median_s": 0.003,
+      "rea": {
+        "format": "elf",
+        "arch": "x86_64",
+        "functions": 23,
+        "strings": 74,
+        "segments_ghidra_blocks": 34
+      },
+      "forge": {
+        "format": "elf",
+        "arch": "x86_64",
+        "functions": 10,
+        "loadable_segments": 4
+      }
+    },
+    {
+      "label": "pe-64",
+      "path": "/usr/lib/wine/x86_64-windows/kernel32.dll",
+      "rea_ok": 5,
+      "rea_runs": 5,
+      "rea_median_s": 25.48,
+      "forge_median_s": 0.016,
+      "rea": {
+        "format": "pe",
+        "arch": "x86_64",
+        "functions": 3955,
+        "strings": 3465,
+        "segments_ghidra_blocks": 15
+      },
+      "forge": {
+        "format": "pe",
+        "arch": "x86_64",
+        "functions": 2776,
+        "loadable_segments": 0
+      }
+    },
+    {
+      "label": "pe-32",
+      "path": "/usr/lib/wine/i386-windows/kernel32.dll",
+      "rea_ok": 5,
+      "rea_runs": 5,
+      "rea_median_s": 28.04,
+      "forge_median_s": 0.017,
+      "rea": {
+        "format": "pe",
+        "arch": "x86",
+        "functions": 3530,
+        "strings": 3672,
+        "segments_ghidra_blocks": 13
+      },
+      "forge": {
+        "format": "pe",
+        "arch": "x86",
+        "functions": 3538,
+        "loadable_segments": 0
+      }
+    },
+    {
+      "label": "macho-arm64",
+      "path": "/tmp/mo.bin",
+      "rea_ok": 5,
+      "rea_runs": 5,
+      "rea_median_s": 10.1,
+      "forge_median_s": 0.003,
+      "rea": {
+        "format": "mach-o",
+        "arch": "arm64",
+        "functions": 2,
+        "strings": 8,
+        "segments_ghidra_blocks": 4
+      },
+      "forge": {
+        "format": "macho",
+        "arch": "arm64",
+        "functions": 3,
+        "loadable_segments": 3
+      }
+    }
+  ]
+}

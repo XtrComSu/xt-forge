@@ -5,9 +5,39 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
+
+func TestDecompileReturnsEachRequestedTarget(t *testing.T) {
+	for _, tool := range []string{"cc", "objdump"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s unavailable", tool)
+		}
+	}
+	tmp := t.TempDir()
+	t.Setenv("XT_ROOTS", tmp)
+	source := filepath.Join(tmp, "fixture.c")
+	binary := filepath.Join(tmp, "fixture")
+	if err := os.WriteFile(source, []byte("int first(int x) { return x+1; }\nint second(int x) { return x*2; }\nint main(void) { return first(second(3)); }\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("cc", "-O0", source, "-o", binary).CombinedOutput(); err != nil {
+		t.Fatalf("compile fixture: %v: %s", err, out)
+	}
+
+	got := Decompile(binary, "first, second, first", "", "objdump", 40)
+	results, ok := got["results"].(map[string]map[string]any)
+	if !ok || got["ok"] != true || got["count"] != 2 {
+		t.Fatalf("expected two unique targets in a successful batch: %#v", got)
+	}
+	for _, name := range []string{"first", "second"} {
+		if result := results[name]; result["ok"] != true || result["target"] != name {
+			t.Errorf("unexpected result for %s: %#v", name, result)
+		}
+	}
+}
 
 func TestInspectASARAndNetcapAndAPK(t *testing.T) {
 	tmp := t.TempDir()

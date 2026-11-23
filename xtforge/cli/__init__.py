@@ -290,8 +290,8 @@ def _add_prompt(sub) -> None:
 
 
 def _add_re(sub) -> None:
-    r = sub.add_parser("re", help="binary inspection and native RE analysis")
-    r.add_argument("re_verb", choices=["info", "needed", "sections", "symbols",
+    r = sub.add_parser("re", help="binary inspection, native RE analysis, and project scaffolding")
+    r.add_argument("re_verb", choices=["info", "overview", "functions", "xrefs-native", "dispatch-native", "disasm-native", "decompile-native", "needed", "sections", "symbols",
                                        "strings", "entropy", "pack",
                                        "ioc", "disasm", "graph",
                                        "pe", "cfg", "block", "view", "xrefs",
@@ -300,9 +300,11 @@ def _add_re(sub) -> None:
                                        "annotate", "asar", "netcap", "apk",
                                        "decompile", "trace",
                                        "deep-elf", "anchors", "slice", "live-probe", "rbxm",
-                                       "ida", "borer", "triage"])
+                                       "ida", "borer", "triage", "init-project", "llvm", "archives", "kernelcache", "pdb", "pdb-types", "demangle", "callgraph", "evidence", "search",
+                                       "elfmeta", "wasm", "firmware",
+                                       "bookmarks", "bulk"])
     r.add_argument("value", nargs="?", default=None,
-                   help="binary path or subverb (same as --path)")
+                   help="binary path, new project directory, or subverb")
     r.add_argument("path", nargs="?", default=None)
     r.add_argument("extra", nargs="*", default=[], help="additional positional arguments")
     r.add_argument("--limit", type=int, default=200)
@@ -314,6 +316,13 @@ def _add_re(sub) -> None:
     r.add_argument("--count", type=int, default=32,
                    help="entropy: max blocks to report (disasm: instruction count)")
     r.add_argument("--symbol", help="disasm/cfg: target symbol")
+    r.add_argument("--member", help="SYS: exact executable member path in an IPA archive")
+    r.add_argument("--arch", help="SYS: select a slice of a universal Mach-O, or the architecture of a raw image (with --base)")
+    r.add_argument("--base", type=lambda value: int(value, 0), default=None,
+                   help="SYS: load address for a headerless raw image (decimal or 0x hex)")
+    r.add_argument("--bytes", type=int, default=0, help="disasm-native: maximum bytes to inspect")
+    r.add_argument("--flow", action="store_true", help="disasm-native: follow reachable direct branches")
+    r.add_argument("--max-functions", type=int, default=0, help="xrefs-native: maximum functions to scan")
     r.add_argument("--section", help="disasm: disassemble one section")
     r.add_argument("--start", help="disasm: skip below this hex address")
     r.add_argument("--rva", help="cfg: function start RVA in hex (e.g. 0x1000)")
@@ -327,13 +336,23 @@ def _add_re(sub) -> None:
     r.add_argument("--offset", help="patch: hex or decimal file offset to modify")
     r.add_argument("--patch-bytes", dest="patch_bytes", help="patch: hex bytes to write (e.g. 9090 or c3)")
     r.add_argument("--orig-bytes", dest="orig_bytes", help="patch: expected original hex bytes to verify")
-    r.add_argument("--name", help="annotate: replacement symbol name")
+    r.add_argument("--name", help="annotate: replacement symbol name; init-project: display title")
     r.add_argument("--orig", help="annotate: original symbol name")
     r.add_argument("--comment", help="annotate: analyst note at RVA")
     r.add_argument("--type-decl", dest="type_decl", help="annotate: C type declaration at RVA")
     r.add_argument("--confidence", type=float, default=1.0, help="annotate: confidence score")
     r.add_argument("--format", default="json", choices=["json", "r2", "ghidra"], help="annotate export format")
     r.add_argument("--grep", help="asar: filter archived paths")
+    r.add_argument("--pattern",
+                   help="search: text to find (default mode), or hex/regex with --hex/--regex")
+    r.add_argument("--hex", dest="hex_pattern", action="store_true",
+                   help="search: read --pattern as hex bytes; '??' matches any byte")
+    r.add_argument("--regex", action="store_true",
+                   help="search: read --pattern as a bytes regex (caller owns backtracking cost)")
+    r.add_argument("--context", type=int, default=16,
+                   help="search: bytes of context to show around each match")
+    r.add_argument("--ignore-case", dest="ignore_case", action="store_true",
+                   help="search: case-insensitive text/regex match")
     r.add_argument("--reveal", action="store_true", help="netcap: unmask sensitive headers")
     r.add_argument("--confirm", help="trace: confirm token")
     r.set_defaults(func=cmd_re)

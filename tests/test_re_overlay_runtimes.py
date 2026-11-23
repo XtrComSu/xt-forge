@@ -89,6 +89,15 @@ class TestReOverlayAndRuntimes(unittest.TestCase):
                     os.environ["XT_HOME"] = old
 
     def test_native_rust_and_go_cli(self):
+        # This asserts engine == "rust", which the launcher can only report when the
+        # native Rust binary is present. In a tree where it was never built (a fresh
+        # checkout, or an isolated copy without native/xtforge-rs) the launcher falls
+        # back to Python and the assertion reports a failure that says nothing about
+        # the code. Skip instead: a false failure is worse than a skip, because it
+        # trains people to ignore red runs.
+        native = ROOT / "native" / "xtforge-rs" / "target" / "release" / "xtforge-native"
+        if not native.is_file():
+            self.skipTest(f"native Rust launcher not built at {native}")
         with tempfile.TemporaryDirectory() as td:
             env = {**os.environ, "XT_HOME": td}
             sample = Path(td) / "xor.bin"

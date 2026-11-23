@@ -4,6 +4,89 @@ XT-Forge 0.4.0 uses a three-layer architecture designed around one rule: keep ev
 
 ![Three-Tier Architecture Diagram](assets/architecture-rust-go.png)
 
+## XT-Forge-SYS
+
+XT-Forge-SYS is the binary and systems analysis component within XT-Forge. Its native image overview runs in the Go hub and uses the Go standard library to read ELF, PE, Mach-O and ZIP structures. The Rust launcher and Python CLI expose the same overview. Existing Ghidra, Borer, and IDA integrations provide backend analysis through their respective adapters.
+
+| Input | Native overview coverage |
+| --- | --- |
+| Linux ELF | Architecture, preferred entry address, loadable segments, sections, and dynamic dependencies |
+| Windows PE | Architecture, preferred entry address, virtual sections, and dependencies from the import directory |
+| macOS Mach-O | Thin images and standard universal slices, architecture, entry from `LC_MAIN`, segments, sections, and linked libraries |
+| iOS IPA | Mach-O overview for a selected executable member under `Payload/*.app` |
+
+```sh
+xtforge re overview ./fixture --json
+xtforge re overview ./fixture.ipa --member Payload/Fixture.app/Fixture --json
+```
+
+Omit `--member` to use the unique executable named after its app directory. IPA inspection reads the selected member in memory with a 128 MiB limit. The overview reports preferred virtual addresses and image-relative file offsets. `entry_file_offset` is populated when the entry maps to a readable file-backed byte. Use `slice_offset` to translate a universal slice’s file offsets to the containing Mach-O. Missing entry fields are represented as `null`.
+
+In Go MCP, call `re_overview` via `xt_call`. In the Python MCP surface, use `re_inspect` with `verb: overview`. Both use the native hub. Native disassembly, function recovery, and pseudocode parity are tracked in the [SYS implementation plan](superpowers/plans/2026-11-21-xt-forge-sys.md).
+
+### Native function index
+
+```sh
+xtforge re functions ./fixture --limit 40 --json
+xtforge re functions ./fixture.ipa --arch arm64 --limit 40 --json
+```
+
+The index merges function starts by preferred virtual address and reports a file offset, metadata source, and any available name and size. The result reports the number of indexed starts and whether the output was truncated. An architecture filter selects matching universal slices. A file-backed entry point is included when present.
+
+| Format | Sources |
+| --- | --- |
+| ELF | Function symbols in static and dynamic tables, and fixed-width starts from GNU exception-frame headers. [LSB exception-frame header](https://refspecs.linuxfoundation.org/LSB_2.0.0/LSB-Core/LSB-Core/ehframehdr.html) |
+| PE | x86-64 and arm64 exception directory entries, plus COFF function symbols when present |
+| Mach-O and IPA | `LC_FUNCTION_STARTS` entries and symbols from instruction sections. Instruction-section symbols may include labels |
+
+Use `re_functions` through Go MCP and `re_inspect` with `verb: functions` through Python MCP. The index reports metadata-backed candidates.
+
+### Native instruction decoding and control flow
+
+```sh
+xtforge re disasm-native ./fixture --target choose --flow --json
+xtforge re disasm-native ./fixture.ipa --arch arm64 --target _choose --flow --json
+```
+
+SYS decodes little-endian x86, x86-64, and arm64 instructions in process with vendored Go architecture decoders. A target can be an exact indexed name, a preferred address, or the image entry point. For universal images, select an unambiguous architecture. The command bounds reads to one file-backed window and accepts explicit byte and instruction limits.
+
+The default mode decodes linearly. Flow mode follows reachable direct branches in the selected window and reports basic blocks, call and branch targets, and PC-relative references. Calls are recorded as edges. Indirect destinations remain unresolved and edges outside the decoded window retain their target when available.
+
+Use `re_disasm_native` through Go MCP and `re_inspect` with `verb: disasm-native` through Python MCP. The cross-format check builds synthetic ELF, PE, Mach-O, and IPA fixtures and compares direct calls against LLVM objdump. Run `python3 scripts/verify_sys_native.py` on a Linux x86-64 host with Go, cached Cargo dependencies, a C compiler, MinGW, Clang, LLD, and LLVM objdump. Pass `--native-binary` to test an existing Rust launcher build.
+
+### Cross-function references
+
+```sh
+xtforge re xrefs-native ./fixture --target increment --max-functions 512 --json
+xtforge re xrefs-native ./fixture.ipa --arch arm64 --target _increment --json
+```
+
+SYS seeds the scan from the entry point and metadata-backed starts in file-backed executable regions. Direct calls can add candidate function starts with `direct_call_target` provenance. A direct jump to another known start is reported as a tail-jump candidate. Data references include decoded PC-relative operands and arm64 addresses resolved from adjacent page-base and offset instructions in the same basic block.
+
+Use `re_xrefs_native` through Go MCP and `re_inspect` with `verb: xrefs-native` through Python MCP. Omit the target to list references to any address within the scanned scope. The scan exposes pending and limited function counts, unresolved indirect call sites, and the number of matching references before the output limit.
+
+### Native IR and pseudocode
+
+```sh
+xtforge re decompile-native ./fixture --target choose --json
+```
+
+SYS lifts reachable instructions to typed register, immediate, and memory operations grouped by basic block. The current lifter covers common integer arithmetic and flag-setting operations, explicit branches and calls, selected loads and stores, x86 register pushes and pops, and arm64 register-pair loads and stores. Register aliases and flag predicates refer to the selected ISA. Each operation reads pre-instruction inputs, and writeback records changes to the address register.
+
+The renderer emits register-level pseudocode. It preserves opaque instructions with addresses and raw disassembly, keeps direct targets visible, and reports decoded, lifted, and opaque instruction counts. These counts measure supported instruction semantics within the selected window. They do not measure function completeness, source-level type recovery, or parity with a reference decompiler.
+
+Use `re_decompile_native` through Go MCP and `re_inspect` with `verb: decompile-native` through Python MCP. The synthetic verifier checks arithmetic width and control-flow targets on all four formats.
+
+### ABI-aware structured C
+
+`decompile-native` can also return a `structured` result alongside the raw IR and register-level listing. SYS uses the image format and architecture to select the ordinary integer calling convention. It tracks register values, private stack spills, flags, and return paths to infer argument registers and integer widths. [System V AMD64 ABI](https://gitlab.com/x86-psABIs/x86-64-ABI/-/blob/master/x86-64-ABI/low-level-sys-info.tex) · [Microsoft x64 calling convention](https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention) · [AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst)
+
+The result uses unsigned C integer types for observed bit widths. It can reconstruct acyclic branches, optimized conditional selections, and direct calls or tail transfers to independently recovered functions in the same image. SYS memoizes callees per request, tracks ABI clobbers, and emits each recovered helper once. The structured result lists those dependencies with their original addresses.
+
+SYS omits the structured result when analysis encounters unsupported instructions, unresolved callees, non-stack memory accesses, recursive or unresolved paths, or inconsistent return widths. Raw IR remains available in those cases.
+
+The verifier builds branching leaf and direct-call fixtures at `-O0` and `-O2` for ELF, PE, Mach-O, and IPA. It recompiles the emitted C and compares the return values with the original fixture on 4,096 inputs per recovered function, including zero and the largest 32-bit unsigned value.
+
 ## Why Split Rust and Go?
 
 Trying to solve every workload in one runtime creates trade-offs you can feel immediately at the command line:

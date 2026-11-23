@@ -102,6 +102,45 @@ def _opt(args: dict[str, Any], key: str, flag: str | None = None) -> list[str]:
     return [flag or f"--{key.replace('_', '-')}", str(value)]
 
 
+def _re_inspect_args(args: dict[str, Any]) -> list[str]:
+    verb = args.get("verb") or "info"
+    if verb == "bookmarks":
+        # `re bookmarks <sub> <path> [address]` — the subverb is a positional, so it
+        # has to be spliced in ahead of the path rather than appended as a flag.
+        # Without it every MCP call could only ever list, which would make the
+        # set/unset half of the verb invisible to an agent.
+        command = ["re", "bookmarks", str(args.get("sub") or "list"), _str(args, "path")]
+        address = args.get("target")
+        if address not in (None, ""):
+            command.append(str(address))
+        command.extend(_opt(args, "limit"))
+        command.extend(_opt(args, "name"))
+        command.extend(_opt(args, "comment"))
+        return command
+    command = ["re", "pe", verb[3:]] if verb.startswith("pe_") else ["re", verb]
+    command.extend([_str(args, "path"), *_opt(args, "limit")])
+    options = {
+        "overview": ("member",),
+        "functions": ("member", "arch"),
+        "xrefs-native": ("member", "arch", "target", "max_functions"),
+        "dispatch-native": ("member", "arch", "target"),
+        "disasm-native": ("member", "arch", "target", "bytes", "max_instructions", "flow"),
+        "decompile-native": ("member", "arch", "target", "bytes", "max_instructions"),
+        "callgraph": ("member", "arch", "max_functions", "limit"),
+        "pdb-types": ("limit",),
+        "archives": ("limit",),
+        "search": ("pattern", "hex", "regex", "context", "ignore_case"),
+        # bookmarks takes an address as a positional after the path, so the
+        # subverb has to be forwarded too — `re bookmarks list <path>` and
+        # `re bookmarks set <path> <addr>` are different commands.
+        "bookmarks": ("target", "name", "comment"),
+        "bulk": ("pattern",),
+    }
+    for key in options.get(verb, ()):
+        command.extend(_opt(args, key))
+    return command
+
+
 def _tags(args: dict[str, Any], key: str = "tags") -> list[str]:
     out: list[str] = []
     for tag in args.get(key) or []:
@@ -573,12 +612,29 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _tool(
         "re_inspect",
-        "Inspect binary structures: format headers, sections with entropy, imports, exports, or PE TLS callbacks.",
-        {"path": _TEXT, "verb": {"type": "string", "enum": ["info", "sections", "symbols", "pe_info", "pe_sections", "pe_imports", "pe_exports", "pe_tls", "ioc"]}, "limit": _INT},
-        ["path"],
-        lambda a: (["re", "pe", a.get("verb", "info")[3:], _str(a, "path"), *_opt(a, "limit", "--limit")]
-                   if a.get("verb", "").startswith("pe_")
-                   else ["re", a.get("verb") or "info", _str(a, "path"), *_opt(a, "limit", "--limit")]),
+        "Inspect binary structures or run XT-Forge-SYS function, reference, dispatch-table, disassembly, and IR analysis.",
+        {"path": _TEXT, "verb": {"type": "string", "enum": [
+            "overview", "functions", "xrefs-native", "dispatch-native",
+            "disasm-native", "decompile-native", "info", "sections", "symbols",
+            "pe_info", "pe_sections", "pe_imports", "pe_exports", "pe_tls", "ioc",
+            # Verbs added after this schema was first written. The dispatcher already
+            # forwarded them, but a client reading the enum would never call them — the
+            # schema, not the code, was the thing hiding the capability.
+            "callgraph", "demangle", "pdb", "pdb-types", "evidence",
+            "archives", "kernelcache", "llvm", "xrefs", "search",
+            # Format readers and navigation state. Same reason as above: the CLI
+            # wiring is only half a route — an MCP client that cannot see the verb
+            # in this enum will never call it.
+            "elfmeta", "wasm", "firmware", "bookmarks", "bulk",
+        ]},
+         "limit": _INT, "member": _TEXT, "arch": _TEXT, "target": _TEXT,
+         "bytes": _INT, "max_instructions": _INT, "max_functions": _INT, "flow": _BOOL,
+         "pattern": _TEXT, "hex": _BOOL, "regex": _BOOL, "context": _INT,
+         "ignore_case": _BOOL, "name": _TEXT, "comment": _TEXT,
+         "sub": {"type": "string",
+                 "enum": ["list", "set", "unset", "next", "prev"],
+                 "description": "bookmarks only: which navigation operation to run."}},
+        ["path"], _re_inspect_args,
     ),
     _tool(
         "re_cfg",

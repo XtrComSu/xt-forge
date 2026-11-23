@@ -156,7 +156,7 @@ for line in sys.stdin:
         tmp = Path(self._td.name)
         cancel_log = tmp / "cancels.jsonl"
         cmd = _write_mock_server(tmp, f"""
-import json, sys, threading
+import json, sys, threading, time
 log_p = {str(cancel_log)!r}
 ev = threading.Event()
 def waiter():
@@ -173,6 +173,7 @@ for line in sys.stdin:
     elif method == "tools/list":
         print(json.dumps({{"jsonrpc": "2.0", "id": mid, "result": {{"tools": [{{"name": "slow_write", "description": "Slow", "inputSchema": {{"type": "object"}}}}]}}}}), flush=True)
     elif method == "notifications/cancelled":
+        time.sleep(0.03)
         with open(log_p, "a") as fh:
             fh.write(json.dumps(msg) + "\\n")
         ev.set()

@@ -1915,7 +1915,17 @@ def _build_dsh_patch(
             else:
                 lines.append(f"- id: {dis}\n  disabled: true")
     if rea_path and arm in ("A", "B") and Path(rea_path).is_file():
-        node_bin = shutil.which("node") or "/home/xtrcom/.local/bin/node"
+        # Never hardcode a home directory: this script is committed and other machines
+        # do not have that path. Fall back to the usual per-user install locations and
+        # then to the bare name, which a shell on PATH may still resolve.
+        node_bin = shutil.which("node")
+        if not node_bin:
+            for candidate in (Path.home() / ".local" / "bin" / "node",
+                              Path("/usr/local/bin/node"), Path("/usr/bin/node")):
+                if candidate.is_file():
+                    node_bin = str(candidate)
+                    break
+        node_bin = node_bin or "node"
         lines.append(f"""
 - insert:
     - id: mcp-rea-bench

@@ -301,11 +301,38 @@ def get_info(path: str | Path) -> dict[str, Any]:
             return {"ok": True, **info}
         except Exception as exc:
             return {"ok": False, "err": str(exc), "path": str(path)}
-    return {"ok": False, "err": f"unrecognized binary format for {path}"}
+    # Not ELF or PE. `re info` is the most basic question about a file, and the native
+    # engine already answers it for every format it reads — so answer from there instead
+    # of failing with a format complaint.
+    if (fallback := _info_from_hub(path)) is not None:
+        return fallback
+    return {"ok": False, "err": f"unrecognized binary format for {path}",
+            "error": f"unrecognized binary format for {path}"}
+
+
+def _info_from_hub(path: str | Path) -> dict[str, Any] | None:
+    """Header-level metadata for formats without a dedicated Python reader."""
+    from . import sources
+
+    return sources.info_from_hub(path)
+
+
+def _sections_from_hub(path: str | Path) -> dict[str, Any] | None:
+    """Section table for formats without a dedicated Python reader.
+
+    The decision of *which* layer answers lives in `sources.py`, so format coverage is
+    defined in one place rather than once per verb.
+    """
+    from . import sources
+
+    rows = sources.sections_from_hub(path)
+    if not rows:
+        return None
+    return {"ok": True, "path": str(path), "sections": rows, "engine": "xtforge-hub"}
 
 
 def get_sections(path: str | Path) -> dict[str, Any]:
-    """Extract section table with entropy for ELF or PE."""
+    """Extract section table with entropy for ELF or PE, or any format the hub reads."""
     fmt = sniff_format(path)
     if fmt == "pe":
         from .pe import PEFile, PeError
@@ -320,7 +347,11 @@ def get_sections(path: str | Path) -> dict[str, Any]:
             return elf.sections(path)
         except Exception as exc:
             return {"ok": False, "err": str(exc), "path": str(path)}
-    return {"ok": False, "err": f"unrecognized binary format for {path}"}
+    # Not ELF or PE: try the native engine before giving up.
+    if (fallback := _sections_from_hub(path)) is not None:
+        return fallback
+    return {"ok": False, "err": f"unrecognized binary format for {path}",
+            "error": f"unrecognized binary format for {path}"}
 
 
 def get_symbols(path: str | Path, limit: int = 200) -> dict[str, Any]:

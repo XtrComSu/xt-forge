@@ -2,7 +2,37 @@
 # portable xt-forge launcher — native-first dispatch, python fallback.
 # XT_FORCE_PYTHON=1 forces the Python reference path.
 # Self-locating: resolves ROOT from this script's location (repo root above bin/).
-SCRIPT_PATH="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+
+# "$0" is just a name when the launcher is invoked via PATH. Resolve that name
+# through PATH first; otherwise the relative-link logic below has no base dir.
+SCRIPT_PATH="$0"
+case "$SCRIPT_PATH" in
+  */*) ;;  # already has a directory component
+  *) SCRIPT_PATH="$(command -v "$SCRIPT_PATH" 2>/dev/null || echo "$SCRIPT_PATH")" ;;
+esac
+# PATH entries may be relative (e.g. "."), so normalize to an absolute path.
+case "$SCRIPT_PATH" in
+  /*) ;;
+  *) SCRIPT_PATH="$(pwd)/$SCRIPT_PATH" ;;
+esac
+
+# Follow the symlink chain one hop at a time using plain POSIX `readlink`.
+# No `readlink -f` / `realpath`: readlink prints the raw target of a single link.
+# Relative targets are interpreted from the directory holding that link, while
+# absolute targets are used as-is. Each pass through the loop consumes one link,
+# so the hard cap of 40 iterations also breaks circular symlink chains.
+_links=0
+while [ -L "$SCRIPT_PATH" ] && [ "$_links" -lt 40 ]; do
+  _dir="$(cd -P "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd)" || break
+  _target="$(readlink "$SCRIPT_PATH" 2>/dev/null)" || break
+  case "$_target" in
+    /*) SCRIPT_PATH="$_target" ;;        # absolute link target
+    *)  SCRIPT_PATH="$_dir/$_target" ;;  # relative link target
+  esac
+  _links=$((_links + 1))
+done
+unset _links _dir _target
+
 ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 export XT_HOME="${XT_HOME:-$HOME/.xt-forge}"
 export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"

@@ -8,6 +8,9 @@ import subprocess
 import tempfile
 import tomllib
 import unittest
+import zipfile
+import tarfile
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,12 +49,15 @@ class TestShippedPackages(unittest.TestCase):
         self.proj = _copy_mini_project(self.fake_home)
         self.env = os.environ.copy()
         real_home = Path.home()
+        # Force the real toolchain homes. Inheriting an isolated CARGO_HOME (for example a
+        # scratch directory used by an outer harness) turns the installer's dependency build
+        # into a from-scratch rebuild, which cannot meet the subprocess budget below.
         if (real_home / ".cargo").is_dir():
-            self.env.setdefault("CARGO_HOME", str(real_home / ".cargo"))
+            self.env["CARGO_HOME"] = str(real_home / ".cargo")
         if (real_home / ".rustup").is_dir():
-            self.env.setdefault("RUSTUP_HOME", str(real_home / ".rustup"))
+            self.env["RUSTUP_HOME"] = str(real_home / ".rustup")
         if (real_home / "go").is_dir():
-            self.env.setdefault("GOPATH", str(real_home / "go"))
+            self.env["GOPATH"] = str(real_home / "go")
         self.env["HOME"] = str(self.fake_home)
         self.env["XT_HOME"] = str(self.fake_home / ".xt-forge")
         self.env.pop("PYTHONPATH", None)
@@ -140,7 +146,7 @@ class TestShippedPackages(unittest.TestCase):
             self.assertEqual(doc.returncode, 0, doc.stderr)
             sk = subprocess.run([bpath, "skills", "list", "--json"], env=self.env, text=True, capture_output=True, timeout=15)
             self.assertEqual(sk.returncode, 0, sk.stderr)
-            self.assertEqual(json.loads(sk.stdout)["count"], 24)
+            self.assertEqual(json.loads(sk.stdout)["count"], 26)
 
             init_r, list_r = _mcp_handshake([bpath, "mcp", "serve", "--meta"], self.env)
             self.assertIn("xt-forge", init_r["result"]["serverInfo"]["name"])
@@ -170,7 +176,9 @@ class TestShippedPackages(unittest.TestCase):
             env=self.env,
             text=True,
             capture_output=True,
-            timeout=120,
+            # A cold Rust build of the release target takes ~110s on a modest machine, so the
+            # budget must cover that path; the installer skips the build once artifacts are fresh.
+            timeout=600,
         )
         self.assertEqual(inst.returncode, 0, inst.stderr + inst.stdout)
         local_bin = self.fake_home / ".local" / "bin"
@@ -187,6 +195,126 @@ class TestShippedPackages(unittest.TestCase):
         )
         self.assertEqual(q.returncode, 0, q.stderr)
         self.assertIn("ORDER BY priority DESC, id LIMIT 1", json.loads(q.stdout)["data"]["context"])
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class TestReleaseArchiveContents(unittest.TestCase):
+    """Release integrity: archive contents must match what the filename advertises."""
+
+    DIST_DIR = ROOT / "dist"
+    PLATFORM_RE = re.compile(
+        r"(?:linux|darwin|macos|osx|windows|win32|win64)"
+        r"-(?:x86_64|amd64|arm64|aarch64|x86|i386|i686)",
+        re.IGNORECASE,
+    )
+    SOURCE_STEM_RE = re.compile(r"^xt[_-]forge-\d[\w.]*$", re.IGNORECASE)
+    LAUNCHERS = ("bin/xtforge", "bin/xtforge.cmd")
+    NATIVE_SUFFIXES = (
+        "xtforge-native", "xtforge-native.exe",
+        "xtforge-hub", "xtforge-hub.exe",
+    )
+
+    def setUp(self) -> None:
+        if not self.DIST_DIR.is_dir():
+            self.skipTest(f"no dist/ directory at {self.DIST_DIR}")
+        self.archives = sorted(
+            p for p in self.DIST_DIR.iterdir()
+            if p.is_file()
+            and (p.name.endswith(".tar.gz") or p.name.endswith(".zip"))
+            and (p.name.startswith("xt-forge-") or p.name.startswith("xt_forge-"))
+        )
+
+    @staticmethod
+    def _stem(archive: Path) -> str:
+        for suffix in (".tar.gz", ".zip"):
+            if archive.name.endswith(suffix):
+                return archive.name[:-len(suffix)]
+        return archive.name
+
+    @classmethod
+    def _classify(cls, archive: Path) -> str | None:
+        stem = cls._stem(archive)
+        if cls.PLATFORM_RE.search(stem):
+            return "native"
+        if cls.SOURCE_STEM_RE.fullmatch(stem):
+            return "source"
+        return None
+
+    def _of_kind(self, kind: str) -> list[Path]:
+        return [a for a in self.archives if self._classify(a) == kind]
+
+    @staticmethod
+    def _entry_names(archive: Path) -> list[str]:
+        # List names only; never extract the archive to disk.
+        if archive.name.endswith(".zip"):
+            with zipfile.ZipFile(archive) as zf:
+                return zf.namelist()
+        with tarfile.open(archive, "r:gz") as tf:
+            return tf.getnames()
+
+    def test_every_release_archive_is_accounted_for(self) -> None:
+        unclassified = [a.name for a in self.archives if self._classify(a) is None]
+        self.assertEqual(
+            [], unclassified,
+            f"unclassified release archive(s) in {self.DIST_DIR}: "
+            + ", ".join(unclassified)
+            + " (expected a platform triple for a native archive or a version-only source archive)",
+        )
+
+    def test_native_archives_declare_their_natives(self) -> None:
+        # DEFECT FIXED, 2026-11-23. It was recorded here as an expected failure against the
+        # 0.4.6 artifacts:
+        #   xt-forge-0.4.6-darwin-arm64.tar.gz  541 entries, no native executable
+        #   xt-forge-0.4.6-windows-x86_64.zip   222 entries, no .exe at all
+        #   xt-forge-0.4.6-linux-x86_64.tar.gz  had BOTH xtforge-native and xtforge-hub
+        # macOS and Windows users got a Python-only payload while the launchers advertised
+        # native executables. `scripts/build_release.py` now produces the archives and every
+        # platform bundle carries one; running the suite after rebuilding reported
+        # "unexpected success", which was the signal to delete the decorator — exactly as
+        # the note here said it would be. The 0.4.6 artifacts are kept under
+        # dist/superseded-0.4.6/ as the evidence of what was wrong.
+        problems: list[str] = []
+        for archive in self._of_kind("native"):
+            names = self._entry_names(archive)
+            has_launcher = any(
+                name == launcher or name.endswith("/" + launcher)
+                for name in names for launcher in self.LAUNCHERS
+            )
+            has_native = any(
+                name.endswith(suffix)
+                for name in names for suffix in self.NATIVE_SUFFIXES
+            )
+            if not has_launcher:
+                problems.append(
+                    f"{archive.name}: missing launcher entry (bin/xtforge or bin/xtforge.cmd)"
+                )
+            if not has_native:
+                problems.append(
+                    f"{archive.name}: missing native executable (one of "
+                    + ", ".join(self.NATIVE_SUFFIXES) + ")"
+                )
+        self.assertEqual(
+            [], problems,
+            "platform-named archives are missing their advertised executables:\n"
+            + "\n".join(problems),
+        )
+
+    def test_source_archives_are_marked_source_only(self) -> None:
+        problems: list[str] = []
+        for archive in self._of_kind("source"):
+            names = self._entry_names(archive)
+            if not any(
+                name == "pyproject.toml" or name.endswith("/pyproject.toml")
+                for name in names
+            ):
+                problems.append(f"{archive.name}: missing pyproject.toml")
+        self.assertEqual(
+            [], problems,
+            "source archives must contain pyproject.toml:\n" + "\n".join(problems),
+        )
 
 
 if __name__ == "__main__":

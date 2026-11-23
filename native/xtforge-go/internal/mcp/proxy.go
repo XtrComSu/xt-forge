@@ -52,6 +52,12 @@ func FullCatalog() []CatalogEntry {
 	return []CatalogEntry{
 		// Reverse Engineering
 		{Name: "re_info", Noun: "re", Verb: "info", Category: "re", Description: "Inspect ELF, PE, or Mach-O binary headers, arch, and entry point.", ArgsHint: `{"argv":["re","info","/path/to/bin"]}`, Tags: []string{"binary", "elf", "pe", "macho"}},
+		{Name: "re_overview", Noun: "re", Verb: "overview", Category: "re", Description: "Inspect ELF, PE, Mach-O, or an IPA executable with XT-Forge-SYS. Includes entry points, regions, and dependencies.", ArgsHint: `{"argv":["re","overview","/path/to/bin"]}`, Tags: []string{"binary", "elf", "pe", "macho", "ipa", "entrypoint", "dependencies", "sys"}},
+		{Name: "re_functions", Noun: "re", Verb: "functions", Category: "re", Description: "Index file-backed function starts and names using XT-Forge-SYS. Supports ELF, PE, Mach-O and IPA. Results include metadata provenance.", ArgsHint: `{"argv":["re","functions","/path/to/bin","--limit","40"]}`, Tags: []string{"binary", "elf", "pe", "macho", "ipa", "functions", "symbols", "sys"}},
+		{Name: "re_dispatch_native", Noun: "re", Verb: "dispatch-native", Category: "re", Description: "Recover indirect dispatch jump tables for one function with XT-Forge-SYS. Returns case targets, the table address, entry size, and the index bound. Supports ELF, PE, Mach-O and IPA.", ArgsHint: `{"argv":["re","dispatch-native","/path/to/bin","--target","main"]}`, Tags: []string{"jump-table", "switch", "indirect", "dispatch", "elf", "pe", "macho", "ipa", "sys"}},
+		{Name: "re_xrefs_native", Noun: "re", Verb: "xrefs-native", Category: "re", Description: "Find callers, direct jump candidates, and PC-relative references across functions with XT-Forge-SYS. Supports an exact target name or preferred address.", ArgsHint: `{"argv":["re","xrefs-native","/path/to/bin","--target","main"]}`, Tags: []string{"callers", "cross-references", "elf", "pe", "macho", "ipa", "sys"}},
+		{Name: "re_disasm_native", Noun: "re", Verb: "disasm-native", Category: "re", Description: "Decode instructions and recover bounded control flow with XT-Forge-SYS on x86, x86-64, and arm64 ELF, PE, Mach-O, and IPA images.", ArgsHint: `{"argv":["re","disasm-native","/path/to/bin","--target","entry","--flow"]}`, Tags: []string{"disassembly", "cfg", "elf", "pe", "macho", "ipa", "arm64", "x86", "sys"}},
+		{Name: "re_decompile_native", Noun: "re", Verb: "decompile-native", Category: "re", Description: "Lift a bounded function to structured XT-Forge-SYS IR and register-level pseudocode with named unknown effects and coverage.", ArgsHint: `{"argv":["re","decompile-native","/path/to/bin","--target","entry"]}`, Tags: []string{"decompile", "pseudocode", "ir", "elf", "pe", "macho", "ipa", "arm64", "x86", "sys"}},
 		{Name: "re_sections", Noun: "re", Verb: "sections", Category: "re", Description: "List binary sections with virtual size, raw size, and Shannon entropy.", ArgsHint: `{"argv":["re","sections","/path/to/bin"]}`, Tags: []string{"entropy", "sections"}},
 		{Name: "re_symbols", Noun: "re", Verb: "symbols", Category: "re", Description: "List symbols, imports, or exports.", ArgsHint: `{"argv":["re","symbols","/path/to/bin","--limit","50"]}`, Tags: []string{"symbols", "imports", "exports"}},
 		{Name: "re_disasm", Noun: "re", Verb: "disasm", Category: "re", Description: "Disassemble a binary function or section with instruction mnemonic summary.", ArgsHint: `{"argv":["re","disasm","/path/to/bin","--symbol","main"]}`, Tags: []string{"disasm", "disassemble", "assembly", "instructions", "objdump"}},
@@ -821,6 +827,10 @@ func buildLocalArgv(entry CatalogEntry, rawArgv []string, toolArgs map[string]an
 		if pathVal := popStr("path", "file"); pathVal != "" {
 			out = append(out, pathVal)
 		}
+	case entry.Name == "test_run":
+		if pathVal := popStr("path"); pathVal != "" {
+			out = append(out, pathVal)
+		}
 	case entry.Name == "mem_search":
 		if q := popStr("query", "text"); q != "" {
 			out = append(out, q)
@@ -868,8 +878,23 @@ func buildLocalArgv(entry CatalogEntry, rawArgv []string, toolArgs map[string]an
 				out = append(out, pathVal)
 			}
 			if entry.Name == "re_cfg" || entry.Name == "re_decompile" || entry.Name == "re_disasm" || entry.Name == "re_ida" {
-				if sym := popStr("symbol", "func", "function", "name", "target", "address", "addr", "rva", "va"); sym != "" {
-					out = append(out, "--symbol", sym)
+				symbol := popStr("symbol", "func", "function", "name", "target", "address", "addr", "rva", "va")
+				if entry.Name == "re_decompile" {
+					if values, ok := toolArgs["symbols"].([]any); ok {
+						used["symbols"] = true
+						targets := make([]string, 0, len(values))
+						for _, value := range values {
+							if target, ok := value.(string); ok && strings.TrimSpace(target) != "" {
+								targets = append(targets, strings.TrimSpace(target))
+							}
+						}
+						if len(targets) > 0 {
+							symbol = strings.Join(targets, ",")
+						}
+					}
+				}
+				if symbol != "" {
+					out = append(out, "--symbol", symbol)
 				}
 			} else if entry.Name == "re_anchors" {
 				if tgt := popStr("target", "symbol", "query", "pattern", "string"); tgt != "" {

@@ -12,6 +12,7 @@ native/xtforge-rs/bench.jsonl
 native/xtforge-go/xtforge-hub
 dist/
 build/
+!xtforge/core/build/
 artifacts/
 *.db-shm
 *.db-wal

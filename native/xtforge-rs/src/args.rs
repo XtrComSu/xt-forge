@@ -24,13 +24,13 @@ const VALUE_FLAGS: &[&str] = &[
     "sig", "outcome", "binary", "reason", "threshold", "min-len", "engine",
     "server", "cmd", "prefix", "graph-db", "preset", "line", "col", "target",
     "max-bytes", "symbol", "block", "algo", "scheme", "window", "max-matches",
-    "expected-file", "expected-line",
+    "expected-file", "expected-line", "member", "arch", "bytes", "max-instructions", "max-functions",
 ];
 
 const BOOL_FLAGS: &[&str] = &[
     "json", "all", "pin-only", "stats", "legend", "dry-run", "check", "force",
     "status", "explain", "diagnose", "pin", "symbols", "reveal", "xor", "web",
-    "trust-on-first", "meta", "rank",
+    "trust-on-first", "meta", "rank", "flow",
 ];
 
 pub fn parse(argv: &[String]) -> Parsed {

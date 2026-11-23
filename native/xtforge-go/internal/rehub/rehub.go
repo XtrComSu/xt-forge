@@ -387,9 +387,20 @@ func Decompile(filePath, symbol, rva, engine string, maxLines int) map[string]an
 	if maxLines <= 0 {
 		maxLines = 160
 	}
-	target := symbol
-	if rva != "" {
-		target = rva
+	target := rva
+	var targets []string
+	if target == "" {
+		for _, part := range strings.Split(symbol, ",") {
+			if trimmed := strings.TrimSpace(part); trimmed != "" {
+				targets = append(targets, trimmed)
+				if len(targets) == 8 {
+					break
+				}
+			}
+		}
+		if len(targets) > 0 {
+			target = targets[0]
+		}
 	}
 	if target == "" {
 		target = "main"
@@ -418,6 +429,23 @@ func Decompile(filePath, symbol, rva, engine string, maxLines int) map[string]an
 		}
 	}
 
+	if len(targets) > 1 {
+		results := make(map[string]map[string]any, len(targets))
+		ok := false
+		for _, item := range targets {
+			if _, exists := results[item]; exists {
+				continue
+			}
+			result := decompileTarget(canon, item, engine, borerBin, maxLines)
+			results[item] = result
+			ok = ok || result["ok"] == true
+		}
+		return map[string]any{"ok": ok, "batch": true, "count": len(results), "results": results}
+	}
+	return decompileTarget(canon, target, engine, borerBin, maxLines)
+}
+
+func decompileTarget(canon, target, engine, borerBin string, maxLines int) map[string]any {
 	if engine == "borer" && borerBin != "" {
 		out, runErr := exec.Command(borerBin, "decompile", canon, target, "full", "0", strconv.Itoa(maxLines)).CombinedOutput()
 		if runErr == nil && strings.TrimSpace(string(out)) != "" && !strings.HasPrefix(strings.TrimSpace(string(out)), "error:") {

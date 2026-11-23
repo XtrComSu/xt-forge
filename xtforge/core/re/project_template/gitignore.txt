@@ -1,0 +1,5 @@
+/demo-binary.exe
+/samples/
+/work/
+/build/
+__pycache__/

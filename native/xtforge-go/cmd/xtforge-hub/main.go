@@ -16,6 +16,7 @@ import (
 	"xtforge-hub/internal/mcp"
 	"xtforge-hub/internal/rehub"
 	"xtforge-hub/internal/research"
+	"xtforge-hub/internal/sysimage"
 )
 
 func main() {
@@ -269,14 +270,161 @@ func handleCode(args []string) int {
 }
 
 func handleRE(args []string) int {
-	if len(args) < 2 {
-		return printError("re hub expects: re <asar|netcap|apk|decompile|trace> <path>")
+	// demangle takes symbols rather than a path, so it is the one verb that is
+	// valid with a single argument. Its missing-argument error is handled below.
+	if len(args) == 0 || (len(args) < 2 && args[0] != "demangle") {
+		return printError("re hub expects: re <overview|functions|callgraph|demangle|pdb-types|xrefs-native|dispatch-native|disasm-native|decompile-native|asar|netcap|apk|decompile|trace> <path>")
 	}
 	verb := args[0]
-	filePath := args[1]
-	rest := args[2:]
+	filePath := ""
+	if len(args) > 1 {
+		filePath = args[1]
+	}
+	var rest []string
+	if len(args) > 2 {
+		rest = args[2:]
+	}
 
 	switch verb {
+	case "callgraph":
+		filePath = flagStr(args[1:], "--path", filePath)
+		result, err := sysimage.CallGraph(filePath, flagStr(rest, "--member", ""),
+			flagStr(rest, "--arch", ""), flagInt(rest, "--limit", 0))
+		if err != nil {
+			return printError(err.Error())
+		}
+		return printJSON(result)
+	case "pdb-types":
+		filePath = flagStr(args[1:], "--path", filePath)
+		file, err := os.Open(filePath)
+		if err != nil {
+			return printError(err.Error())
+		}
+		defer file.Close()
+		stat, err := file.Stat()
+		if err != nil {
+			return printError(err.Error())
+		}
+		census, err := sysimage.ReadPDBTypeCensus(file, stat.Size())
+		if err != nil {
+			return printError(err.Error())
+		}
+		signatures, err := sysimage.ReadPDBSignatures(file, stat.Size(), flagInt(rest, "--limit", 0))
+		if err != nil {
+			return printError(err.Error())
+		}
+		// Parameter names live in the symbol stream, not the type stream: the signature
+		// knows `int*, unsigned long` and the S_LOCAL records know `values`, `count`.
+		// They are joined on the procedure's type index.
+		if procedures, procErr := sysimage.ReadPDBProcedures(file, stat.Size(), 0); procErr == nil {
+			byType := make(map[uint32][]sysimage.PDBParameter)
+			for _, procedure := range procedures {
+				if len(procedure.Parameters) > 0 {
+					byType[procedure.TypeIndex] = procedure.Parameters
+				}
+			}
+			for index := range signatures {
+				parameters, ok := byType[signatures[index].Index]
+				if !ok {
+					continue
+				}
+				// The argument list and the parameter records are in the same order, so
+				// each name can be given the type the signature already resolved.
+				for position := range parameters {
+					if position < len(signatures[index].Arguments) {
+						parameters[position].Type = signatures[index].Arguments[position]
+					}
+				}
+				signatures[index].Parameters = parameters
+			}
+		}
+		aggregates, aggErr := sysimage.ReadPDBAggregates(file, stat.Size(), flagInt(rest, "--limit", 0))
+		if aggErr != nil {
+			return printError(aggErr.Error())
+		}
+		return printJSON(map[string]any{"ok": true, "engine": "xt-forge-sys",
+			"path": filePath, "census": census, "signatures": signatures,
+			"aggregates": aggregates})
+	case "overview":
+		filePath = flagStr(args[1:], "--path", filePath)
+		arch := flagStr(rest, "--arch", "")
+		base := flagUint(rest, "--base", 0)
+		var result sysimage.OverviewResult
+		var err error
+		if arch != "" {
+			result, err = sysimage.OverviewWithRaw(filePath, flagStr(args[1:], "--member", ""), arch, base)
+		} else {
+			result, err = sysimage.Overview(filePath, flagStr(args[1:], "--member", ""))
+		}
+		if err != nil {
+			return printError(err.Error())
+		}
+		return printJSON(result)
+	case "functions":
+		filePath = flagStr(args[1:], "--path", filePath)
+		result, err := sysimage.Functions(filePath, flagStr(args[1:], "--member", ""),
+			flagStr(args[1:], "--arch", ""), flagInt(args[1:], "--limit", 200))
+		if err != nil {
+			return printError(err.Error())
+		}
+		return printJSON(result)
+	case "demangle":
+		symbols := args[1:]
+		if len(symbols) == 0 {
+			return printError("usage: re demangle <symbol> [more symbols...]")
+		}
+		demangled := sysimage.DemangleSymbols(symbols)
+		results := make([]map[string]string, len(symbols))
+		for i, symbol := range symbols {
+			results[i] = map[string]string{"symbol": symbol, "demangled": demangled[i]}
+		}
+		return printJSON(map[string]any{"ok": true, "results": results})
+	case "xrefs-native":
+		filePath = flagStr(args[1:], "--path", filePath)
+		result, err := sysimage.References(filePath, sysimage.ReferenceOptions{
+			Member:       flagStr(rest, "--member", ""),
+			Arch:         flagStr(rest, "--arch", ""),
+			Target:       flagStr(rest, "--target", ""),
+			MaxFunctions: flagInt(rest, "--max-functions", 0),
+			Limit:        flagInt(rest, "--limit", 0),
+		})
+		if err != nil {
+			return printError(err.Error())
+		}
+		return printJSON(result)
+	case "dispatch-native":
+		filePath = flagStr(args[1:], "--path", filePath)
+		result, err := sysimage.RecoverDispatch(filePath, sysimage.DispatchOptions{
+			Member: flagStr(rest, "--member", ""),
+			Arch:   flagStr(rest, "--arch", ""),
+			Target: flagStr(rest, "--target", ""),
+		})
+		if err != nil {
+			return printError(err.Error())
+		}
+		return printJSON(result)
+	case "disasm-native", "decompile-native":
+		filePath = flagStr(args[1:], "--path", filePath)
+		options := sysimage.DisassemblyOptions{
+			Member: flagStr(rest, "--member", ""),
+			Arch:   flagStr(rest, "--arch", ""),
+			Target: flagStr(rest, "--target", ""),
+			Bytes:  flagInt(rest, "--bytes", 0),
+			Count:  flagInt(rest, "--max-instructions", 0),
+			Flow:   hasFlag(rest, "--flow"),
+		}
+		if verb == "decompile-native" {
+			result, err := sysimage.Decompile(filePath, options)
+			if err != nil {
+				return printError(err.Error())
+			}
+			return printJSON(result)
+		}
+		result, err := sysimage.Disassemble(filePath, options)
+		if err != nil {
+			return printError(err.Error())
+		}
+		return printJSON(result)
 	case "asar":
 		extract := flagStr(rest, "--out", "")
 		lim := flagInt(rest, "--limit", 200)
@@ -510,6 +658,25 @@ func flagInt(args []string, flag string, def int) int {
 		return def
 	}
 	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return def
+	}
+	return v
+}
+
+// flagUint reads an unsigned value, accepting decimal or 0x-prefixed hex. A base
+// address is naturally written in hex, so decimal-only parsing would silently ignore the
+// flag and load the image at 0.
+func flagUint(args []string, flag string, def uint64) uint64 {
+	raw := flagStr(args, flag, "")
+	if raw == "" {
+		return def
+	}
+	base := 10
+	if strings.HasPrefix(raw, "0x") || strings.HasPrefix(raw, "0X") {
+		base = 0
+	}
+	v, err := strconv.ParseUint(raw, base, 64)
 	if err != nil {
 		return def
 	}

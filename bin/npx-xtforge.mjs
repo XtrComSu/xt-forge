@@ -199,11 +199,22 @@ function cmdInit(argv) {
   const pathEnv = (process.env.PATH || "").split(delimiter)
   if (!pathEnv.includes(localBin)) {
     if (IS_WIN) {
-      console.log(`\n  Add ${localBin} to User PATH cleanly in PowerShell:\n    setx PATH "$env:USERPROFILE\\.local\\bin;$env:PATH"`)
+      // `setx` writes the combined process PATH into the USER variable, truncates at 1024
+      // chars, and duplicates entries on re-run; update the User scope only instead.
+      console.log(`\n  Add ${localBin} to User PATH cleanly in PowerShell:
+    $u = [Environment]::GetEnvironmentVariable('PATH','User')
+    if ($u -notlike "*$HOME\\.local\\bin*") {
+      [Environment]::SetEnvironmentVariable('PATH', "$HOME\\.local\\bin;$u", 'User')
+    }
+  The current shell must be refreshed (open a new PowerShell session) for the change to apply.\n`)
     } else if (IS_MAC) {
-      console.log(`\n  Add ${localBin} to PATH in ~/.zshrc:\n    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc`)
+      console.log(`\n  Add ${localBin} to PATH in ~/.zshrc (idempotent):
+    grep -qF 'export PATH="$HOME/.local/bin:$PATH"' ~/.zshrc 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+  The current shell must be refreshed (source ~/.zshrc) for the change to apply.\n`)
     } else {
-      console.log(`\n  Add ${localBin} to PATH in ~/.bashrc:\n    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc`)
+      console.log(`\n  Add ${localBin} to PATH in ~/.bashrc (idempotent):
+    grep -qF 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+  The current shell must be refreshed (source ~/.bashrc) for the change to apply.\n`)
     }
   }
   if (!args.has("--quiet")) {

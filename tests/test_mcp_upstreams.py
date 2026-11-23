@@ -200,8 +200,15 @@ class TestMcpUpstreamsPython(unittest.TestCase):
         )
         self.assertEqual(rp.returncode, 0, rp.stderr)
         plines = [json.loads(line) for line in rp.stdout.strip().splitlines()]
-        self.assertEqual([t["name"] for t in plines[1]["result"]["tools"]], ["rea_search", "rea_list", "rea_call"])
-        self.assertIn("opened=/bin/sh", plines[3]["result"]["content"][0]["text"])
+        # Index by JSON-RPC id, not by position. The protocol permits responses in any
+        # order, and this test flaked about once in twelve full runs when it assumed
+        # order — plines[3] occasionally held the reply to request 4.
+        by_id = {line["id"]: line for line in plines if "id" in line}
+        self.assertEqual(set(by_id), {1, 2, 3, 4},
+                         "every request must receive exactly one response")
+        self.assertEqual([t["name"] for t in by_id[2]["result"]["tools"]],
+                         ["rea_search", "rea_list", "rea_call"])
+        self.assertIn("opened=/bin/sh", by_id[3]["result"]["content"][0]["text"])
 
 
 if __name__ == "__main__":

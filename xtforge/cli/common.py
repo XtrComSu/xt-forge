@@ -17,7 +17,23 @@ def _flash(args):
     return Flash(base=args.flash_base)
 
 
+def _normalise_failure(obj: Any) -> Any:
+    """Give a failed result an `error` key even when the producer used `err`.
+
+    Some RE helpers (xtforge/core/re/native.py) report failures as {"ok": false,
+    "err": ...} while everything else uses "error". A client that checks `error`
+    therefore saw a failure with no message. Rather than rewrite nineteen call sites
+    and risk breaking existing consumers, both keys are emitted.
+    """
+    if isinstance(obj, dict) and obj.get("ok") is False and "error" not in obj and "err" in obj:
+        merged = dict(obj)
+        merged["error"] = obj["err"]
+        return merged
+    return obj
+
+
 def _out(args, obj: Any, human: str | None = None, code: int = 0) -> int:
+    obj = _normalise_failure(obj)
     if getattr(args, "json", False):
         print(json.dumps(obj, ensure_ascii=False, indent=2, default=str))
     else:

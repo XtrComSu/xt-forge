@@ -385,7 +385,7 @@ def _read_rpc_by_id(stdout, expected_id: int, deadline: float) -> tuple[dict[str
 
 
 def close_subprocess(proc: subprocess.Popen[str] | None) -> None:
-    """Terminate an MCP child process and close all attached stdio pipes."""
+    """Close MCP input and give the child a bounded interval to drain it."""
     if proc is None:
         return
     try:
@@ -394,14 +394,17 @@ def close_subprocess(proc: subprocess.Popen[str] | None) -> None:
     except OSError:
         pass
     try:
-        proc.terminate()
-        proc.wait(timeout=3)
-    except Exception:
         try:
-            proc.kill()
-            proc.wait(timeout=2)
-        except Exception:
-            pass
+            proc.wait(timeout=0.25)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=2)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
     for stream in (proc.stdout, proc.stderr):
         if stream is not None:
             try:
