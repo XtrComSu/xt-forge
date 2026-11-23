@@ -305,6 +305,7 @@ def _add_re(sub) -> None:
                                        "formats", "devicetree", "kconfig", "lnk",
                                        "sqlite", "beam", "evm", "ips",
                                        "uefi", "nvram",
+                                       "dex",
                                        "bookmarks", "bulk"])
     r.add_argument("value", nargs="?", default=None,
                    help="binary path, new project directory, or subverb")

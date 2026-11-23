@@ -813,14 +813,43 @@ def cmd_re(args):
                 confidence=float(getattr(args, "confidence", 1.0) or 1.0),
                 fmt=getattr(args, "format", None) or "json",
             )
-        elif verb in ("asar", "netcap", "apk", "decompile", "trace", "triage"):
+        elif verb in ("asar", "netcap", "apk", "dex", "decompile", "trace", "triage"):
             from ..core.re import runtimes as rt
             if verb == "asar":
                 res = rt.inspect_asar(path, grep=getattr(args, "grep", None) or "", limit=args.limit)
             elif verb == "netcap":
                 res = rt.inspect_netcap(path, reveal=bool(getattr(args, "reveal", False)), limit=args.limit)
+            elif verb == "dex":
+                # The hub does the reading; the Python module is the fallback for
+                # builds without the native runtime, and both answer the same shape.
+                from ..core.re import sysimage as _sys
+                res = _sys._run("dex", str(path), None,
+                                ["--limit", str(getattr(args, "limit", 40) or 40)])
+                if not res.get("ok"):
+                    from ..core.re import dex as _dexmod
+                    res = _dexmod.inspect(str(path),
+                                          class_filter=getattr(args, "symbol", "") or "")
             elif verb == "apk":
                 res = rt.inspect_apk(path)
+                # NOTE: the native hub answers `re apk` first, and it does the DEX
+                # work (internal/rehub/dex.go). This branch is the Python fallback
+                # for builds without the hub, so it enriches the same way rather than
+                # drifting into a second, weaker answer.
+                from ..core.re import dex as _dex
+                _dex_names = [n for n in (res.get("dex_files") or [])
+                              if isinstance(n, str) and n.endswith(".dex")] \
+                    if res.get("ok") else []
+                _dex_summary = []
+                for _name in _dex_names[:8]:
+                    _info = _dex.inspect_entry(path, _name)
+                    if _info.get("ok"):
+                        _dex_summary.append(_info)
+                if _dex_summary:
+                    res["dex_summary"] = _dex_summary
+                    res["dex_totals"] = {
+                        "classes": sum(d["counts"]["classes"] for d in _dex_summary),
+                        "methods": sum(d["counts"]["methods"] for d in _dex_summary),
+                    }
             elif verb == "decompile":
                 res = rt.decompile(path, target=getattr(args, "symbol", None) or getattr(args, "target", None) or "main")
             elif verb == "triage":
@@ -1448,7 +1477,36 @@ def cmd_re(args):
         for item in res.get("imports", [])[:6]:
             lines.append(f"  import  {item['symbol']}")
         human = "\n".join(lines)
-    elif verb in ("annotate", "asar", "netcap", "apk", "decompile", "trace", "triage", "deep-elf", "anchors", "slice", "live-probe", "rbxm", "ida", "borer"):
+    elif verb == "dex":
+        if not res.get("ok"):
+            human = "dex: " + str(res.get("error", "unknown"))
+        else:
+            counts = res.get("counts") or {}
+            verify = res.get("verification") or {}
+            lines = [f"dex {res.get('version')} "
+                     f"({counts.get('classes')} classes, {counts.get('methods')} methods, "
+                     f"{counts.get('strings')} strings)"]
+            if verify.get("checksum_ok") is False:
+                lines.append("  WARNING checksum does not match — file was modified "
+                             "after it was built")
+            if verify.get("signature_ok") is False:
+                lines.append("  WARNING signature does not match")
+            if res.get("entry"):
+                lines.append(f"  entry       {res['entry']} "
+                             f"({res.get('size')} bytes)")
+            for cls in (res.get("classes") or [])[:30]:
+                access = ", ".join(cls.get("access") or [])
+                lines.append(f"  {cls.get('name')}  [{access}]")
+                for method in (cls.get("methods") or [])[:6]:
+                    proto = method.get("proto") or {}
+                    params = ", ".join(proto.get("parameters") or [])
+                    native = " native" if method.get("native") else ""
+                    lines.append(f"    {method.get('name')}({params}) -> "
+                                 f"{proto.get('return_type')}{native}")
+            if res.get("native_methods"):
+                lines.append(f"  native      {len(res['native_methods'])} methods")
+            human = "\n".join(lines)
+    elif verb in ("annotate", "asar", "netcap", "apk", "dex", "decompile", "trace", "triage", "deep-elf", "anchors", "slice", "live-probe", "rbxm", "ida", "borer"):
         human = res.get("output") or res.get("script") or res.get("code") or res.get("pseudocode") or (
             f"{verb} ok={res.get('ok')} count={res.get('count', res.get('chunk_count', len(res.get('files', res.get('annotations', res.get('warnings', []))))))}"
         )

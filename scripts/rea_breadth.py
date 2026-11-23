@@ -198,8 +198,9 @@ cap("Browser / Electron / CDP", ["inspect_web_page", "inspect_electron_page",
     None, "out-of-lane", "requires a running browser and DevTools endpoint")
 cap("APK / Android package", ["inspect_android_package", "inspect_apk_signature",
                               "inspect_android_class", "inspect_android_method"],
-    "apk", "partial", "APK inventory works; class/method enumeration needs a DEX "
-                      "reader we do not have")
+    "apk", "covered",
+    "zip inventory, manifest permissions/components, and DEX class/method "
+    "enumeration with access flags, prototypes and native methods")
 cap("JADX / apktool / JEB providers", ["inspect_jeb_client", "open_jeb_project",
                                        "inspect_apktool_client"],
     None, "out-of-lane", "provider clients for third-party tools")

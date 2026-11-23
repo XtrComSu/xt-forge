@@ -432,7 +432,25 @@ func handleRE(args []string) int {
 	case "netcap":
 		lim := flagInt(rest, "--limit", 50)
 		return printJSONCode(rehub.InspectNetcap(filePath, lim))
+	case "dex":
+		// A loose .dex file, or a .dex inside an APK when it is given as an archive.
+		lim := flagInt(rest, "limit", 40)
+		if strings.HasSuffix(filePath, ".apk") || strings.HasSuffix(filePath, ".zip") {
+			entry := flagStr(rest, "entry", "classes.dex")
+			return printJSONCode(rehub.InspectDexEntryFull(filePath, entry, lim))
+		}
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return printJSONCode(map[string]any{"ok": false, "error": "cannot read file: " + err.Error()})
+		}
+		return printJSONCode(rehub.InspectDexBytes(data, lim))
 	case "apk":
+		// `apk dex` enumerates classes and methods; plain `apk` is the inventory.
+		if hasToken(rest, "dex") {
+			entry := flagStr(rest, "entry", "classes.dex")
+			lim := flagInt(rest, "limit", 40)
+			return printJSONCode(rehub.InspectDexEntryFull(filePath, entry, lim))
+		}
 		return printJSONCode(rehub.InspectAPK(filePath))
 	case "decompile":
 		sym := flagStr(rest, "--symbol", "")
@@ -650,6 +668,17 @@ func flagStr(args []string, flag, def string) string {
 		}
 	}
 	return def
+}
+
+// hasToken reports whether a bare word appears in the argument list, for
+// subcommand-style dispatch (`apk dex`).
+func hasToken(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
 }
 
 func flagInt(args []string, flag string, def int) int {

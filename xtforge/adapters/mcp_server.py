@@ -647,6 +647,8 @@ TOOLS: list[dict[str, Any]] = [
             "sqlite", "beam", "evm", "ips",
             # Firmware state: UEFI variables and boot entries.
             "uefi", "nvram",
+            # Dalvik bytecode: classes and methods from a .dex or an APK.
+            "dex",
         ]},
          "limit": _INT, "member": _TEXT, "arch": _TEXT, "target": _TEXT,
          "bytes": _INT, "max_instructions": _INT, "max_functions": _INT, "flow": _BOOL,

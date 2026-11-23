@@ -63,11 +63,11 @@ func InspectASAR(filePath string, extractDir string, limit int) map[string]any {
 
 	dataOffset := int64(8) + int64(headerPayloadSize)
 	type asarFile struct {
-		Path       string `json:"path"`
-		Size       int64  `json:"size"`
-		Offset     int64  `json:"offset"`
-		Unpacked   bool   `json:"unpacked,omitempty"`
-		SourceMap  bool   `json:"source_map,omitempty"`
+		Path      string `json:"path"`
+		Size      int64  `json:"size"`
+		Offset    int64  `json:"offset"`
+		Unpacked  bool   `json:"unpacked,omitempty"`
+		SourceMap bool   `json:"source_map,omitempty"`
 	}
 	var files []asarFile
 	var sourceMaps []string
@@ -316,15 +316,45 @@ func InspectAPK(filePath string) map[string]any {
 	jadxPath, _ := exec.LookPath("jadx")
 	apktoolPath, _ := exec.LookPath("apktool")
 
+	// A listing of `classes.dex` does not answer the question an analyst asks about
+	// an Android package: which classes and methods are inside. Read each DEX entry
+	// and summarise it. Failures are per-entry so one bad dex does not blank the
+	// whole report.
+	dexSummaries := make([]map[string]any, 0, len(dexFiles))
+	var totalClasses, totalMethods int
+	for _, name := range dexFiles {
+		if len(dexSummaries) >= 8 {
+			break
+		}
+		info := InspectDexEntry(canon, name)
+		if ok, _ := info["ok"].(bool); !ok {
+			continue
+		}
+		dexSummaries = append(dexSummaries, info)
+		if counts, ok := info["counts"].(map[string]any); ok {
+			if n, ok := counts["classes"].(uint32); ok {
+				totalClasses += int(n)
+			}
+			if n, ok := counts["methods"].(uint32); ok {
+				totalMethods += int(n)
+			}
+		}
+	}
+
 	return map[string]any{
 		"ok":           true,
 		"path":         canon,
 		"has_manifest": hasManifest,
 		"dex_files":    dexFiles,
-		"native_libs":  nativeLibs,
-		"assets":       assets,
-		"permissions":  permissions,
-		"components":   components,
+		"dex_summary":  dexSummaries,
+		"dex_totals": map[string]any{
+			"classes": totalClasses,
+			"methods": totalMethods,
+		},
+		"native_libs": nativeLibs,
+		"assets":      assets,
+		"permissions": permissions,
+		"components":  components,
 		"backends": map[string]string{
 			"jadx":    jadxPath,
 			"apktool": apktoolPath,
