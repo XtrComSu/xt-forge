@@ -300,12 +300,61 @@ def tier13_types(path: str, expected: str):
     return payload.get("ok") and len(aggregates) > 0, f"aggregates={len(aggregates)}"
 
 
+_DENSE_SWITCH_SOURCE = """\
+__attribute__((noinline)) int dense(int op, int x) {
+    switch (op) {
+    case 0: return x + 3;
+    case 1: return x + 10;
+    case 2: return x + 17;
+    case 3: return x + 24;
+    case 4: return x + 31;
+    case 5: return x + 38;
+    case 6: return x + 45;
+    case 7: return x + 52;
+    default: return x;
+    }
+}
+int main(void) { return dense(3, 5) - 24; }
+"""
+
+
+def dense_switch_fixture() -> str | None:
+    """Build the dense-switch binary, or return None if no compiler is available.
+
+    Tier 14 used to read a hard-coded /tmp/densebin and skip when it was absent, so
+    the tier reported nothing in every clean checkout — five silent skips in the
+    0.4.7 run. A skipped tier is untested capability that still looks like a clean
+    result in the tally, which is the failure mode this whole script exists to
+    avoid. Building it here makes the tier either pass or fail.
+
+    Two details are load-bearing, both learned by trying the obvious thing first:
+    without `noinline` at -O2 the switch is folded away and there is no table to
+    find, and the function needs a second argument so the compiler cannot
+    constant-fold the result either. With them, the recovered table is
+    `bound=7 entries=8`.
+    """
+    fixture = "/tmp/densebin"
+    compiler = next((c for c in ("clang", "cc", "gcc") if shutil.which(c)), None)
+    if compiler is None:
+        return None
+    source = Path("/tmp/dense_switch_fixture.c")
+    try:
+        source.write_text(_DENSE_SWITCH_SOURCE)
+        built = subprocess.run([compiler, "-O2", "-o", fixture, str(source)],
+                               capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if built.returncode != 0 or not Path(fixture).exists():
+        return None
+    return fixture
+
+
 def tier14_dispatch(path: str, expected: str):
     if expected == "pdb":
         return "skip", "binary tiers do not apply to a symbol file"
-    fixture = "/tmp/densebin"
-    if not Path(fixture).exists():
-        return "skip", "dense-switch fixture absent"
+    fixture = dense_switch_fixture()
+    if fixture is None:
+        return "skip", "no C compiler available to build the dense-switch fixture"
     payload = hub("dispatch-native", fixture)
     tables = payload.get("tables") or []
     return bool(tables) and tables[0].get("bound") == 7, \
