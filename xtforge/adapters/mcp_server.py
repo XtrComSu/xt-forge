@@ -650,7 +650,7 @@ TOOLS: list[dict[str, Any]] = [
             # Dalvik bytecode: classes and methods from a .dex or an APK.
             "dex",
             # Packaging and provenance: keyed archives, build metadata, app bundles.
-            "app", "appgraph", "application-graph", "il2cpp", "il2cpp-metadata", "global-metadata", "dart", "dart-aot", "snapshot", "swift", "swift-types", "ntfs", "ntfs-journal", "firmware", "fv", "uefi-firmware", "assetcatalog", "car", "unknowns", "obligations", "v8cache", "codecache", "ptrace", "playwright",
+            "evidence-export", "evidence-import", "app", "appgraph", "application-graph", "il2cpp", "il2cpp-metadata", "global-metadata", "dart", "dart-aot", "snapshot", "swift", "swift-types", "ntfs", "ntfs-journal", "firmware", "fv", "uefi-firmware", "assetcatalog", "car", "unknowns", "obligations", "v8cache", "codecache", "ptrace", "playwright",
             "objc", "objc-classes", "objc-protocols",
             "keyed", "keyed-archive", "jvm", "maven", "nuget",
             "bundle", "appbundle",

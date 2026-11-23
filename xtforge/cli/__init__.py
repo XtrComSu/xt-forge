@@ -306,7 +306,7 @@ def _add_re(sub) -> None:
                                        "sqlite", "beam", "evm", "ips",
                                        "uefi", "nvram",
                                        "dex",
-                                       "app", "appgraph", "application-graph", "il2cpp", "il2cpp-metadata", "global-metadata", "dart", "dart-aot", "snapshot", "swift", "swift-types", "ntfs", "ntfs-journal", "firmware", "fv", "uefi-firmware", "assetcatalog", "car", "unknowns", "obligations", "v8cache", "codecache", "ptrace", "playwright",
+                                       "evidence-export", "evidence-import", "app", "appgraph", "application-graph", "il2cpp", "il2cpp-metadata", "global-metadata", "dart", "dart-aot", "snapshot", "swift", "swift-types", "ntfs", "ntfs-journal", "firmware", "fv", "uefi-firmware", "assetcatalog", "car", "unknowns", "obligations", "v8cache", "codecache", "ptrace", "playwright",
                                        "objc", "objc-classes", "objc-protocols",
                                        "keyed", "keyed-archive", "jvm", "maven",
                                        "nuget", "appbundle", "bundle",
@@ -340,6 +340,10 @@ def _add_re(sub) -> None:
                    help="cfg: maximum instructions to serialize in block graph")
     r.add_argument("--block-id", help="block: basic block id to fetch instructions for")
     r.add_argument("--out", help="view/patch: output path for companion HTML or patched binary")
+    r.add_argument("--verify", action="store_true",
+                   help="evidence-import: re-hash every recorded input file and report drift")
+    r.add_argument("--note", dest="note", default=None,
+                   help="evidence-export: free-text note stored in the bundle")
     r.add_argument("--target", help="xrefs: target symbol or hex address")
     r.add_argument("--offset", help="patch: hex or decimal file offset to modify")
     r.add_argument("--patch-bytes", dest="patch_bytes", help="patch: hex bytes to write (e.g. 9090 or c3)")

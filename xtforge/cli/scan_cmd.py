@@ -285,6 +285,46 @@ def cmd_re(args):
         return _out(args, {"ok": False, "error": "re needs a path"},
                     "error: re needs a path", code=2)
 
+    if verb in ("evidence-export", "evidence-import"):
+        from ..core.re import evidence as _evidence
+
+        if verb == "evidence-export":
+            records = []
+            try:
+                records.append(_evidence.build(path))
+            except (FileNotFoundError, ValueError) as exc:
+                return _out(args, {"ok": False, "error": str(exc)},
+                            f"error: {exc}", code=2)
+            destination = getattr(args, "out", None) or (str(path) + ".bundle.json")
+            manifest = _evidence.export_bundle(
+                destination, records=records,
+                note=getattr(args, "note", "") or "")
+            human = (f"evidence bundle {manifest['path']}\n"
+                     f"  digest      {manifest['digest']}\n"
+                     f"  records     {manifest['record_count']}\n"
+                     f"  size        {manifest['size']} bytes")
+            return _out(args, manifest, human)
+
+        report = _evidence.import_bundle(
+            path, verify_files=bool(getattr(args, "verify", False)))
+        if not report.get("ok"):
+            return _out(args, report, "evidence import: " + str(report.get("error")),
+                        code=2)
+        lines = [f"evidence bundle {report['path']}",
+                 f"  integrity   {report['integrity']}",
+                 f"  records     {report['record_count']}",
+                 f"  findings    {report['finding_count']}",
+                 f"  unknowns    {report['unknown_count']}"]
+        if report.get("warning"):
+            lines.append(f"  WARNING     {report['warning']}")
+        if "file_checks" in report:
+            changed = report.get("changed_files") or []
+            lines.append(f"  inputs      {len(report['file_checks'])} checked, "
+                         f"{len(changed)} changed")
+            for name in changed[:10]:
+                lines.append(f"    CHANGED   {name}")
+        return _out(args, report, "\n".join(lines))
+
     if verb == "evidence":
         # The record describes the whole file, so it is useful even when the
         # native image model cannot claim the format (a text file, for one).

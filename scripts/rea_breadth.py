@@ -342,9 +342,11 @@ cap("Artifact comparison (binary vs binary)", ["compare_artifacts", "compare_bun
 
 cap("Evidence bundle export/import", ["export_evidence_bundle", "get_evidence_bundle",
     "import_evidence_bundle", "export_environment_bundle"],
-    None, "partial",
-    "findings persist in the annotation overlay and `re annotate` can dump them, but there "
-    "is no signed bundle format with an import path that restores a full investigation")
+    "evidence-export", "covered",
+    "`re evidence-export` writes records, findings and open questions to one JSON bundle "
+    "with a SHA-256 digest over canonical form; `re evidence-import --verify` proves the "
+    "bundle was not edited and re-hashes every recorded input to catch drift. Not a "
+    "signature, and the bundle says so")
 
 cap("Reconstruction obligation ledger", ["build_reconstruction_obligation_ledger",
     "update_unknown", "verify_unknown_resolution", "verify_reconstruction",
