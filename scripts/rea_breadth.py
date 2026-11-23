@@ -360,10 +360,12 @@ cap("Reconstruction obligation ledger", ["build_reconstruction_obligation_ledger
     "update_unknown", "verify_unknown_resolution", "verify_reconstruction",
     "evaluate_reconstruction_coverage", "import_managed_reconstruction",
     "verify_managed_native_boundaries"],
-    "unknowns", "partial",
-    "`re unknowns` records, resolves and waives open questions with provenance, which is "
-    "the ledger. Automated reconstruction coverage scoring against a source project is not "
-    "implemented")
+    "unknowns", "covered",
+    "`re unknowns` records, resolves and waives open questions with provenance; `re coverage` "
+    "starts from the SOURCE instead and scores the reconstruction against it — parsing every "
+    "function definition, splitting present-but-unrecorded from genuinely absent, and "
+    "excluding `static` functions the optimiser inlined from the denominator. Cross-checked "
+    "against `nm` for presence and a real ledger for record state")
 
 cap("Application graph projection", ["project_android_application_graph",
     "project_apple_application_graph", "project_managed_application_graph",

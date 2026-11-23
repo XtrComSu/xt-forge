@@ -231,7 +231,8 @@ def cmd_re(args):
             path = args.path or args.value
     elif verb in ("diff", "fn-match", "fnmatch", "match-functions",
                   "bundle-diff", "compare-bundles", "bundle-compare",
-                  "api", "api-contract", "abi"):
+                  "api", "api-contract", "abi",
+                  "coverage", "recon-coverage", "evaluate-coverage"):
         # These take two positionals: bin1 in `value`, bin2 in `path`. Resolve bin2 BEFORE
         # `path` is rewritten to bin1, otherwise both sides point at the same file and the
         # matcher reports a perfect self-match.
@@ -587,6 +588,15 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("coverage", "recon-coverage", "evaluate-coverage"):
+            from ..core.re import reccoverage as _reccoverage
+            source_root = second_binary or getattr(args, "target", None)
+            if not source_root:
+                return _out(args,
+                            {"ok": False, "error": "coverage needs a source root: "
+                                                   "xtforge re coverage <binary> <src-dir>"},
+                            "error: coverage needs a source root", code=2)
+            res = _reccoverage.evaluate_coverage(path, source_root)
         elif verb in ("api", "api-contract", "abi"):
             from ..core.re import apicontract as _apicontract
             res = _apicontract.audit_contract(path, baseline=second_binary)
@@ -1154,6 +1164,27 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("coverage", "recon-coverage", "evaluate-coverage"):
+        if not res.get("ok"):
+            human = "coverage: " + str(res.get("error", "unknown"))
+        else:
+            counts = res.get("counts") or {}
+            lines = [f"Reconstruction coverage ({res.get('source_functions')} source "
+                     f"functions, {res.get('binary_functions')} in the binary)",
+                     f"  covered     {counts.get('covered', 0)}/{res.get('required')}"
+                     f"  = {res.get('coverage_pct')}%",
+                     f"  present     {res.get('present_pct')}%"
+                     f"  (gap = work done but undocumented)"]
+            if res.get("present_unrecorded"):
+                lines.append(f"  unrecorded  {len(res['present_unrecorded'])}: "
+                             + ", ".join(res["present_unrecorded"][:8]))
+            if res.get("absent"):
+                lines.append(f"  absent      {len(res['absent'])}: "
+                             + ", ".join(res["absent"][:8]))
+            if res.get("absent_expected"):
+                lines.append(f"  inlined     {len(res['absent_expected'])} static "
+                             f"(excluded from the denominator)")
+            human = chr(10).join(lines)
     elif verb in ("api", "api-contract", "abi"):
         if not res.get("ok"):
             human = "api audit: " + str(res.get("error", "unknown"))
