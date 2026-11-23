@@ -541,6 +541,9 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("ptrace", "playwright"):
+            from ..core.re import playwright
+            res = playwright.inspect_playwright_trace(path, limit=args.limit or 200)
         elif verb in ("objc", "objc-classes", "objc-protocols"):
             from ..core.re import objc
             res = objc.inspect_objc(path, limit=args.limit or 500)
@@ -1031,6 +1034,44 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("ptrace", "playwright"):
+        if not res.get("ok"):
+            human = "playwright trace: " + str(res.get("error", "unknown"))
+        else:
+            browser = res.get("browser") or "?"
+            lines = [f"playwright trace v{res.get('version')} ({browser})"
+                     + (f" — {res['title']}" if res.get("title") else "")]
+            lines.append(f"  events      {res.get('event_count')} "
+                         f"({res.get('unparsed_lines')} unparsed line(s))")
+            if res.get("duration_ms"):
+                lines.append(f"  duration    {res['duration_ms']} ms")
+            lines.append(f"  actions     {res.get('action_count')}")
+            for action in (res.get("actions") or [])[:25]:
+                target = (action.get("url") or action.get("selector")
+                          or action.get("expression") or "")
+                duration = action.get("duration_ms")
+                lines.append(f"    {action.get('api')}"
+                             + (f"  {str(target)[:60]}" if target else "")
+                             + (f"  {duration} ms" if duration is not None else ""))
+            if res.get("failure_count"):
+                lines.append(f"  FAILURES    {res['failure_count']}")
+                for failure in res["failures"][:10]:
+                    lines.append(f"    {failure.get('api')}: "
+                                 f"{str(failure.get('message'))[:100]}")
+            if res.get("console_count"):
+                lines.append(f"  console     {res['console_count']} message(s)")
+                for entry in res["console"][:10]:
+                    lines.append(f"    [{entry.get('level')}] "
+                                 f"{str(entry.get('message'))[:100]}")
+            if res.get("network_count"):
+                lines.append(f"  network     {res['network_count']} request(s)")
+                for request in res["network"][:10]:
+                    lines.append(f"    {request.get('status') or '?'} "
+                                 f"{request.get('url')}")
+            if res.get("snapshot_count"):
+                lines.append(f"  snapshots   {res['snapshot_count']} frame(s), "
+                             f"{res.get('screenshot_count')} image(s)")
+            human = "\n".join(lines)
     elif verb in ("objc", "objc-classes", "objc-protocols"):
         if not res.get("ok"):
             human = "objective-c: " + str(res.get("error", "unknown"))
