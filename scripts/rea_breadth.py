@@ -120,8 +120,10 @@ cap("UEFI NVRAM variables", ["inspect_uefi_nvram"],
     "efivarfs inventory, EFI_LOAD_OPTION boot entries with decoded device paths, "
     "boot order, and a Secure Boot assessment")
 cap("Mach-O", ["inspect_macho", "get_objc_classes", "get_objc_protocols"],
-    "info", "partial", "Mach-O parses through the native hub; Objective-C class and "
-                       "protocol enumeration is not exposed as a verb")
+    "objc", "covered",
+    "Mach-O via the native hub, plus re objc: class hierarchy, instance and class "
+    "methods with type encodings, protocol definitions and conformance, categories "
+    "(verified against llvm-objdump --objc-meta-data)")
 cap("Swift types", ["analyze_swift_types"],
     None, "missing", "Swift metadata demangling not built")
 cap("Kernel cache", ["inspect_kernel_module"],

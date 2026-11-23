@@ -541,6 +541,9 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("objc", "objc-classes", "objc-protocols"):
+            from ..core.re import objc
+            res = objc.inspect_objc(path, limit=args.limit or 500)
         elif verb in ("keyed", "keyed-archive"):
             from ..core.re import packaging
             res = packaging.inspect_keyed_archive(path)
@@ -1028,6 +1031,38 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("objc", "objc-classes", "objc-protocols"):
+        if not res.get("ok"):
+            human = "objective-c: " + str(res.get("error", "unknown"))
+        elif not res.get("has_objc"):
+            human = res.get("hint") or "no Objective-C metadata"
+        else:
+            lines = [f"{res.get('class_count', 0)} class(es), "
+                     f"{res.get('protocol_count', 0)} protocol(s)"]
+            for image in res.get("images") or []:
+                for cls in (image.get("classes") or [])[:40]:
+                    parent = f" : {cls['superclass']}" if cls.get("superclass") else ""
+                    lines.append(f"  {cls.get('name')}{parent}")
+                    if cls.get("protocols"):
+                        lines.append(f"     conforms   {', '.join(cls['protocols'])}")
+                    for method in (cls.get("methods") or [])[:15]:
+                        types = method.get("types") or ""
+                        lines.append(f"     -{method.get('name')}"
+                                     + (f"  {types}" if types else ""))
+                    for method in (cls.get("class_methods") or [])[:10]:
+                        types = method.get("types") or ""
+                        lines.append(f"     +{method.get('name')}"
+                                     + (f"  {types}" if types else ""))
+                for proto in (image.get("protocols") or [])[:20]:
+                    lines.append(f"  @protocol {proto.get('name')}")
+                    for method in (proto.get("instance_methods") or [])[:10]:
+                        types = method.get("types") or ""
+                        lines.append(f"     -{method.get('name')}"
+                                     + (f"  {types}" if types else ""))
+                for cat in image.get("categories") or []:
+                    lines.append(f"  @category {cat.get('class')}"
+                                 f"({cat.get('name')})")
+            human = "\n".join(lines)
     elif verb in ("keyed", "keyed-archive"):
         if not res.get("ok"):
             human = "keyed archive: " + str(res.get("error", "unknown"))
