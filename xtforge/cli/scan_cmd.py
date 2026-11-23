@@ -541,6 +541,25 @@ def cmd_re(args):
         elif verb == "firmware":
             from ..core.re import firmware
             res = firmware.inspect(path)
+        elif verb in ("unknowns", "obligations"):
+            from ..core.re import obligations
+            action = args.value if args.value in ("list", "record", "resolve",
+                                                 "waive") else "list"
+            target = path
+            if action == "list":
+                res = obligations.list_unknowns(target, limit=args.limit or 200)
+            elif action == "record":
+                res = obligations.record_unknown(
+                    target, getattr(args, "name", None) or "",
+                    getattr(args, "comment", None) or "")
+            elif action == "resolve":
+                res = obligations.resolve_unknown(
+                    target, getattr(args, "name", None) or "",
+                    getattr(args, "comment", None) or "")
+            else:
+                res = obligations.waive_unknown(
+                    target, getattr(args, "name", None) or "",
+                    getattr(args, "comment", None) or "")
         elif verb in ("v8cache", "codecache"):
             from ..core.re import v8cache
             res = v8cache.inspect_v8_code_cache(path)
@@ -1037,6 +1056,28 @@ def cmd_re(args):
         for warning in (dwarf.get("warnings") or [])[:10]:
             lines.append(f"warning         {warning}")
         human = "\n".join(lines)
+    elif verb in ("unknowns", "obligations"):
+        if not res.get("ok"):
+            human = "obligation ledger: " + str(res.get("error", "unknown"))
+        elif "topic" in res:
+            human = f"{res.get('state')}: {res.get('topic')}"
+            if res.get("resolution"):
+                human += f"\n  resolved by  {res['resolution']}"
+            elif res.get("reason"):
+                human += f"\n  reason       {res['reason']}"
+        else:
+            counts = res.get("counts") or {}
+            lines = [f"{res.get('count', 0)} obligation(s): "
+                     f"{counts.get('open', 0)} open, "
+                     f"{counts.get('waived', 0)} waived, "
+                     f"{counts.get('resolved', 0)} resolved"]
+            if res.get("clean"):
+                lines.append("  no open obligations — nothing outstanding")
+            for entry in res.get("entries") or []:
+                detail = entry.get("resolution") or entry.get("reason") or ""
+                lines.append(f"  [{entry.get('state'):<8}] {entry.get('topic')}"
+                             + (f"  — {detail}" if detail else ""))
+            human = "\n".join(lines)
     elif verb in ("v8cache", "codecache"):
         if not res.get("ok"):
             human = "v8 code cache: " + str(res.get("error", "unknown"))

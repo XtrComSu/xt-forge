@@ -229,7 +229,10 @@ cap("Bookmarks / navigation", ["list_bookmarks", "set_bookmark", "unset_bookmark
 cap("Comments and annotation", ["comment", "inline_comment", "annotate_native_function"],
     "annotate", "covered")
 cap("Unknown tracking / ledger", ["list_unknowns", "record_unknown"],
-    None, "missing", "no obligation/unknown ledger yet")
+    "unknowns", "covered",
+    "per-binary obligation ledger: open/waived/resolved states, waivers require a "
+    "reason, re-recording a resolved item reopens it, and `clean` gates a conclusion "
+    "on nothing being open")
 cap("Managed PE/CLI artifact", ["inspect_managed_artifact"],
     "managed artifact", "covered")
 cap("Managed members (types/methods/CIL)", ["inspect_managed_members"],
