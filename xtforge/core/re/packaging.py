@@ -159,7 +159,7 @@ def decode_interface_builder(path: str | Path, *, max_depth: int = 12) -> dict[s
     }
 
 
-def inspect_keyed_archive(path: str | Path, *, max_depth: int = 12) -> dict[str, Any]:
+def inspect_keyed_archive(path: str | Path | bytes, *, max_depth: int = 12) -> dict[str, Any]:
     """Decode an NSKeyedArchiver plist into a plain object graph.
 
     The archive's shape: `$objects` is a flat list, `$top` names the roots by UID, and
@@ -167,21 +167,31 @@ def inspect_keyed_archive(path: str | Path, *, max_depth: int = 12) -> dict[str,
     graph. Classes are recorded separately (`$class` -> `$classname`), so the report
     includes the class chain — which is what tells you whether an archived object is a
     dictionary, an NSMutableString, or a custom app class.
+
+    Accepts a path or the bytes themselves, matching `inspect_electron_fuses`. Without this, a
+    caller holding an archive in memory had to write it to disk, and — worse — passing bytes read as
+    a *path* failure: `decode_interface_builder(<plist bytes>)` answered `not a regular file:
+    b'<?xml version="1.0"…'`, which describes a missing file to someone who passed no filename.
     """
-    try:
-        raw = _read(path)
-    except (OSError, ValueError, Denied) as exc:
-        return {"ok": False, "path": str(path), "error": str(exc)}
+    if isinstance(path, (bytes, bytearray)):
+        raw = bytes(path)
+        label = "<bytes>"
+    else:
+        label = str(path)
+        try:
+            raw = _read(path)
+        except (OSError, ValueError, Denied) as exc:
+            return {"ok": False, "path": label, "error": str(exc)}
 
     try:
         document = plistlib.loads(raw)
     except (plistlib.InvalidFileException, ValueError, OSError) as exc:
-        return {"ok": False, "path": str(path),
+        return {"ok": False, "path": label,
                 "error": f"not a readable plist: {exc}",
                 "format": "binary" if raw[:8] == _PLIST_MAGIC else "xml"}
 
     if not isinstance(document, dict) or "$archiver" not in document:
-        return {"ok": False, "path": str(path),
+        return {"ok": False, "path": label,
                 "format": "binary" if raw[:8] == _PLIST_MAGIC else "xml",
                 "error": "plist is not an NSKeyedArchiver archive "
                          "(no $archiver key)",
@@ -191,7 +201,7 @@ def inspect_keyed_archive(path: str | Path, *, max_depth: int = 12) -> dict[str,
     objects = document.get("$objects") or []
     top = document.get("$top") or {}
     if not isinstance(objects, list):
-        return {"ok": False, "path": str(path), "error": "$objects is not an array"}
+        return {"ok": False, "path": label, "error": "$objects is not an array"}
 
     classes: dict[int, list[str]] = {}
     for index, entry in enumerate(objects):
@@ -253,7 +263,7 @@ def inspect_keyed_archive(path: str | Path, *, max_depth: int = 12) -> dict[str,
     used_classes = sorted({chain[0] for chain in classes.values()})
     return {
         "ok": True,
-        "path": str(path),
+        "path": label,
         "format": "binary" if raw[:8] == _PLIST_MAGIC else "xml",
         "archiver": document.get("$archiver"),
         "version": document.get("$version"),

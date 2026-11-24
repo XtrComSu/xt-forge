@@ -167,3 +167,78 @@ class InterfaceBuilderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BytesInsteadOfPathTest(unittest.TestCase):
+    """A caller holding an archive in memory must not have to write it to disk first.
+
+    `inspect_electron_fuses` has accepted bytes since it was written. These two did not, and the
+    failure was not merely an inconvenience — passing bytes was treated as a *path*, so the report
+    read:
+
+        not a regular file: b'<?xml version="1.0"…'
+
+    a missing-file diagnosis handed to someone who never passed a filename.
+    """
+
+    def _archive(self) -> bytes:
+        import plistlib
+        U = plistlib.UID
+
+        def convert(node):
+            if isinstance(node, plistlib.UID):
+                return {"CF$UID": node.data}
+            if isinstance(node, dict):
+                return {key: convert(value) for key, value in node.items()}
+            if isinstance(node, list):
+                return [convert(value) for value in node]
+            return node
+
+        return plistlib.dumps(convert({
+            "$archiver": "NSKeyedArchiver", "$version": 100000,
+            "$objects": ["$null", {"$classname": "NSWindowTemplate",
+                                   "NSWindow_Name": "prefs"}],
+            "$top": {"root": U(1)},
+        }), fmt=plistlib.FMT_XML)
+
+    def test_the_archive_decoder_accepts_bytes(self) -> None:
+        from xtforge.core.re import packaging
+        report = packaging.inspect_keyed_archive(self._archive())
+        self.assertTrue(report["ok"], report.get("error"))
+        self.assertEqual(report["path"], "<bytes>")
+
+    def test_the_nib_decoder_accepts_bytes(self) -> None:
+        from xtforge.core.re import packaging
+        report = packaging.decode_interface_builder(self._archive())
+        self.assertTrue(report["ok"], report.get("error"))
+        self.assertEqual(report["classes"], ["NSWindowTemplate"])
+
+    def test_bytes_and_the_same_bytes_on_disk_agree(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from xtforge.core.re import packaging
+        blob = self._archive()
+        directory = tempfile.mkdtemp(prefix="xtnibbytes-")
+        self.addCleanup(__import__("shutil").rmtree, directory, True)
+        path = Path(directory) / "M.nib"
+        path.write_bytes(blob)
+        from_bytes = packaging.decode_interface_builder(blob)
+        from_file = packaging.decode_interface_builder(path)
+        self.assertEqual(from_bytes["classes"], from_file["classes"])
+        self.assertEqual(from_bytes["connection_count"], from_file["connection_count"])
+        self.assertEqual(from_file["path"], str(path))
+
+    def test_garbage_bytes_report_a_parse_error_not_a_path_error(self) -> None:
+        from xtforge.core.re import packaging
+        report = packaging.decode_interface_builder(b"garbage")
+        self.assertFalse(report["ok"])
+        self.assertIn("plist", report["error"].lower())
+        self.assertNotIn("regular file", report["error"])
+
+    def test_the_bytes_label_is_not_the_whole_blob(self) -> None:
+        """Echoing a multi-kilobyte plist into the `path` field makes the report unreadable."""
+        from xtforge.core.re import packaging
+        blob = self._archive()
+        report = packaging.decode_interface_builder(blob)
+        self.assertEqual(report["path"], "<bytes>")
+        self.assertLess(len(report["path"]), 64)
