@@ -449,6 +449,67 @@ def _render_cve_info(res):
     return chr(10).join(lines)
 
 
+def _render_fuses(res):
+    """Render an Electron fuse wire.
+
+    A named function rather than a branch inside `cmd_re`, because the closing sentence is the
+    security conclusion and has to be testable on its own. The data layer once reported nine
+    unrecognised state bytes as nine fuses with `hardening: None` and then dropped them from the
+    summary; the renderer, in a separate branch, printed "no exposure found on this wire" over the
+    top. The same mistake in two places, and the second one is the sentence a reader believes.
+    """
+    if not res.get("ok"):
+        human = "electron fuses: " + str(res.get("error", "unknown"))
+        if res.get("sentinel_count"):
+            human += f"\n  sentinels   {res.get('sentinel_count')} found"
+        return human
+    else:
+        lines = [f"Electron fuses ({res.get('file_size')} bytes, "
+                 f"wire version {res.get('version')}, "
+                 f"{res.get('fuse_count')} fuses)"]
+        if res.get("warning"):
+            lines.append(f"  WARNING     {res['warning']}")
+        if res.get("truncated"):
+            lines.append(f"  TRUNCATED   {res['truncated']}")
+        for fuse in res.get("fuses") or []:
+            mark = {True: "ok  ", False: "RISK", None: "    "}[fuse.get("hardening")]
+            lines.append(f"  [{mark}] {fuse['name']:<42} {fuse['state']:<9} "
+                         f"'{fuse['symbol']}'")
+            if fuse.get("hardening") is False:
+                lines.append(f"          {fuse['meaning']}")
+            elif fuse.get("note"):
+                lines.append(f"          {fuse['note']}")
+        # The all-clear sentence is only true when every fuse's direction was actually
+        # established. A wire of nine unrecognised state bytes reported zero exposure and then
+        # printed "no exposure found on this wire" — nine unknowns presented as a clean bill of
+        # health, which is the one reading this tool exists to prevent.
+        if res.get("exposed"):
+            lines.append(f"  {len(res['exposed'])} exposed: "
+                         + ", ".join(res["exposed"]))
+        undetermined = res.get("undetermined") or []
+        if not res.get("exposed") and undetermined:
+            lines.append(f"  no exposure found among the {res.get('fuse_count', 0)} fuses "
+                         f"this reader could interpret, but {len(undetermined)} of them could "
+                         f"not be interpreted — this is not an all-clear")
+        elif not res.get("exposed"):
+            lines.append("  no exposure found on this wire")
+        if undetermined:
+            lines.append(f"  {len(undetermined)} undetermined: " + ", ".join(undetermined))
+        if res.get("removed"):
+            lines.append(f"  {len(res['removed'])} removed from Electron: "
+                         + ", ".join(res["removed"]))
+        if res.get("sentinel_count", 1) > 1:
+            agreement = ("the slices agree" if res.get("slices_agree")
+                         else "THE SLICES DIFFER")
+            lines.append(f"  universal   {res['sentinel_count']} sentinels, {agreement}")
+        return "\n".join(lines)
+    # Unreachable today — the not-found arm returns above and the success arm returns
+    # below — but an explicit terminal return means a future edit that removes one of
+    # them produces a visible line instead of the empty output with exit 0 that this
+    # function shipped with once.
+    return f"electron fuses: unrecognised result shape: {sorted(res)}"
+
+
 def _render_cdp(res):
     if not res.get("ok"):
         lines = ["cdp: " + str(res.get("error", "unknown"))]
@@ -2203,42 +2264,7 @@ def cmd_re(args):
             lines.append("  classes     " + ", ".join((res.get("classes") or [])[:14]))
             human = "\n".join(lines)
     elif verb in ("fuses", "electron-fuses"):
-        if not res.get("ok"):
-            human = "electron fuses: " + str(res.get("error", "unknown"))
-            if res.get("sentinel_count"):
-                human += f"\n  sentinels   {res.get('sentinel_count')} found"
-        else:
-            lines = [f"Electron fuses ({res.get('file_size')} bytes, "
-                     f"wire version {res.get('version')}, "
-                     f"{res.get('fuse_count')} fuses)"]
-            if res.get("warning"):
-                lines.append(f"  WARNING     {res['warning']}")
-            if res.get("truncated"):
-                lines.append(f"  TRUNCATED   {res['truncated']}")
-            for fuse in res.get("fuses") or []:
-                mark = {True: "ok  ", False: "RISK", None: "    "}[fuse.get("hardening")]
-                lines.append(f"  [{mark}] {fuse['name']:<42} {fuse['state']:<9} "
-                             f"'{fuse['symbol']}'")
-                if fuse.get("hardening") is False:
-                    lines.append(f"          {fuse['meaning']}")
-                elif fuse.get("note"):
-                    lines.append(f"          {fuse['note']}")
-            if res.get("exposed"):
-                lines.append(f"  {len(res['exposed'])} exposed: "
-                             + ", ".join(res["exposed"]))
-            else:
-                lines.append("  no exposure found on this wire")
-            if res.get("undetermined"):
-                lines.append(f"  {len(res['undetermined'])} undetermined (not set by the wire): "
-                             + ", ".join(res["undetermined"]))
-            if res.get("removed"):
-                lines.append(f"  {len(res['removed'])} removed from Electron: "
-                             + ", ".join(res["removed"]))
-            if res.get("sentinel_count", 1) > 1:
-                agreement = ("the slices agree" if res.get("slices_agree")
-                             else "THE SLICES DIFFER")
-                lines.append(f"  universal   {res['sentinel_count']} sentinels, {agreement}")
-            human = "\n".join(lines)
+        human = _render_fuses(res)
     elif verb in ("ntfs", "ntfs-journal"):
         if not res.get("ok"):
             human = "ntfs volume: " + str(res.get("error", "unknown"))

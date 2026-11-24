@@ -411,7 +411,12 @@ def _best_stride(blob: bytes, resolver: "_StringResolver", minimum: int, maximum
     # Require that the winner resolves most of what it samples; otherwise the region is not a
     # record table at all and the caller's implausible-count warning is the honest answer.
     if best[0][0] == 0:
-        assert fallback is not None
+        # Nothing landed on a string start at all. `fallback` is None only if the loop body never
+        # ran, which `best is not None` already excludes, so this is a defensive guard rather than
+        # an invariant an `assert` should express — and an `assert` disappears under `python -O`,
+        # turning a guard into an AttributeError on None.
+        if fallback is None:
+            return best[1], best[2]
         return fallback[1], fallback[2]
     best_rate = best[0][0] / min(best[2], 400)
     if best_rate < 0.5 and fallback is not None:

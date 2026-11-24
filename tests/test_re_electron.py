@@ -236,3 +236,174 @@ class RealBinaryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EveryFuseLandsInOneBucketTest(unittest.TestCase):
+    """A fuse must never be reported and then dropped from the summary.
+
+    Found by stress-testing all-`0xff` state bytes. All nine fuses came back carrying
+    `hardening: None` and a note reading "this is not one of the four documented fuse states", and
+    then appeared in none of `exposed`, `hardened` or `undetermined` — nine unknowns rendering as
+    nine clean fuses. The filter asked for `state == "inherit"`, so any state outside the four
+    documented codes fell through the summary entirely.
+
+    The invariant that makes the output trustworthy: for every fuse the reader reports, exactly one
+    of exposed / hardened / removed / undetermined names it. Without this a caller counting
+    `len(hardened)` to decide whether a build is hardened is counting a number that silently omits
+    what the reader did not understand.
+    """
+
+    def _summary(self, code: int, count: int = 9) -> dict:
+        return electron.inspect_electron_fuses(
+            electron.SENTINEL + bytes([1, count]) + bytes([code]) * count)
+
+    def test_unknown_state_codes_are_undetermined(self) -> None:
+        report = self._summary(0xFF)
+        self.assertTrue(report["ok"], report.get("error"))
+        self.assertEqual(len(report["undetermined"]), 9)
+        self.assertEqual(report["exposed"], [])
+        self.assertEqual(report["hardened"], [])
+
+    def test_an_unrecognised_code_is_never_scored_as_safe(self) -> None:
+        """The dangerous reading: an unknown byte quietly counting as protection present."""
+        report = self._summary(0xFF)
+        self.assertNotIn(True, [fuse.get("hardening") for fuse in report["fuses"]])
+        self.assertNotIn(False, [fuse.get("hardening") for fuse in report["fuses"]])
+
+    def test_every_state_lands_in_exactly_one_bucket(self) -> None:
+        for code in (0x30, 0x31, 0x72, 0x90, 0xFF, 0x00, 0x01):
+            report = self._summary(code)
+            if not report["ok"]:
+                continue
+            named = (report["exposed"] + report["hardened"] + report["removed"]
+                     + report["undetermined"])
+            with self.subTest(code=hex(code)):
+                self.assertEqual(len(named), len(report["fuses"]),
+                                 f"{len(report['fuses'])} fuses reported, "
+                                 f"{len(named)} accounted for")
+                self.assertEqual(len(set(named)), len(named), "a fuse is in two buckets")
+
+    def test_removed_is_not_double_counted_as_undetermined(self) -> None:
+        """`removed` is undetermined in direction but is reported in its own bucket."""
+        report = self._summary(0x72)
+        self.assertEqual(len(report["removed"]), 9)
+        self.assertEqual(report["undetermined"], [])
+
+
+class WireVersionTest(unittest.TestCase):
+    """Only version 1 is documented; another version's slots are not this code's to name.
+
+    Before this check, a wire whose version byte read 2 was decoded as though it were version 1 and
+    the nine v1 fuse names were printed against it. A wrong name on a real slot reads as knowledge;
+    the honest report is that the layout is unknown.
+    """
+
+    def test_version_2_is_refused_rather_than_guessed(self) -> None:
+        report = electron.inspect_electron_fuses(
+            electron.SENTINEL + bytes([2, 9]) + b"\x31" * 9)
+        self.assertFalse(report["ok"])
+        self.assertIn("version 2", report["error"])
+        self.assertEqual(report["fuses"], [], "no names may be invented for an unknown layout")
+
+    def test_the_refusal_still_reports_what_it_saw(self) -> None:
+        report = electron.inspect_electron_fuses(
+            electron.SENTINEL + bytes([7, 4]) + b"\x31" * 4)
+        self.assertEqual(report["version"], 7)
+        self.assertEqual(report["declared_length"], 4)
+
+    def test_version_1_is_unaffected(self) -> None:
+        report = electron.inspect_electron_fuses(
+            electron.SENTINEL + bytes([1, 9]) + b"\x31" * 9)
+        self.assertTrue(report["ok"], report.get("error"))
+        self.assertEqual(report["version"], 1)
+        self.assertEqual(len(report["fuses"]), 9)
+
+
+class AllClearSentenceTest(unittest.TestCase):
+    """The renderer must not print an all-clear when it did not understand the wire.
+
+    Having fixed the data (nine `0xff` fuses now land in `undetermined`), the rendering still ended
+    with "no exposure found on this wire" — the same error in prose. A reader skimming the last line
+    gets a clean bill of health from nine unknowns.
+    """
+
+    def _render(self, wire: bytes) -> str:
+        import tempfile
+        from pathlib import Path
+        from xtforge.cli.scan_cmd import _render_fuses
+        directory = tempfile.mkdtemp(prefix="xtfuse-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(directory, ignore_errors=True))
+        path = Path(directory) / "wire"
+        path.write_bytes(electron.SENTINEL + bytes([1, len(wire)]) + wire)
+        return _render_fuses(electron.inspect_electron_fuses(path))
+
+    def test_unknown_states_do_not_produce_an_all_clear(self) -> None:
+        text = self._render(b"\xff" * 9)
+        self.assertNotIn("no exposure found on this wire", text)
+        self.assertIn("not an all-clear", text)
+        self.assertIn("9 undetermined", text)
+
+    def test_a_genuinely_clean_wire_does_produce_an_all_clear(self) -> None:
+        codes = bytes(0x31 if name in electron._PROTECTIVE_WHEN_ENABLED else 0x30
+                      for name, _ in electron.FUSE_V1_OPTIONS)
+        text = self._render(codes)
+        self.assertIn("no exposure found on this wire", text)
+        self.assertNotIn("not an all-clear", text)
+
+    def test_inherit_also_suppresses_the_all_clear(self) -> None:
+        """`inherit` is a real state, and it also means the direction is unknown."""
+        text = self._render(b"\x90" * 9)
+        self.assertNotIn("no exposure found on this wire", text)
+
+
+class RendererNeverReturnsNothingTest(unittest.TestCase):
+    """Every outcome must render something.
+
+    Extracting the renderer into `_render_fuses` dropped the `return` from the not-found branch, so
+    `re fuses <non-Electron binary>` printed nothing at all and exited 0. An empty result with a
+    success code is the worst failure mode available: a script piping this output sees no error, and
+    a person sees no output and assumes the tool did nothing. The 463 MB Chromium in the Playwright
+    cache is the real case — correctly identified as not-Electron, and silently so.
+    """
+
+    def test_a_non_electron_binary_renders_its_reason(self) -> None:
+        from xtforge.cli.scan_cmd import _render_fuses
+        report = {"ok": False, "file_size": 4096, "sentinel_count": 0,
+                  "error": "the Electron fuse sentinel was not found"}
+        text = _render_fuses(report)
+        self.assertTrue(text.strip(), "the not-found path rendered nothing")
+        self.assertIn("sentinel was not found", text)
+
+    def test_a_truncated_wire_renders_its_reason(self) -> None:
+        from xtforge.cli.scan_cmd import _render_fuses
+        report = {"ok": False, "sentinel_count": 1,
+                  "error": "the sentinel is at the very end of the file"}
+        text = _render_fuses(report)
+        self.assertTrue(text.strip())
+        self.assertIn("very end of the file", text)
+
+    def test_a_successful_wire_renders_a_header(self) -> None:
+        from xtforge.cli.scan_cmd import _render_fuses
+        report = electron.inspect_electron_fuses(
+            electron.SENTINEL + bytes([1, 9]) + b"\x31" * 9)
+        text = _render_fuses(report)
+        self.assertIn("Electron fuses", text)
+        self.assertIn("9 fuses", text)
+
+    def test_every_verdict_produces_non_empty_output(self) -> None:
+        """Enumerated over the real state space rather than one example per branch."""
+        from xtforge.cli.scan_cmd import _render_fuses
+        cases = {
+            "empty": b"",
+            "sentinel only": electron.SENTINEL,
+            "header truncated": electron.SENTINEL + b"\x01",
+            "unknown states": electron.SENTINEL + bytes([1, 9]) + b"\xff" * 9,
+            "inherit": electron.SENTINEL + bytes([1, 9]) + b"\x90" * 9,
+            "removed": electron.SENTINEL + bytes([1, 9]) + b"\x72" * 9,
+            "bad version": electron.SENTINEL + bytes([9, 9]) + b"\x31" * 9,
+            "clean": electron.SENTINEL + bytes([1, 9]) + b"\x30" * 9,
+        }
+        for label, payload in cases.items():
+            with self.subTest(case=label):
+                text = _render_fuses(electron.inspect_electron_fuses(payload))
+                self.assertTrue(text.strip(), f"{label} rendered nothing")

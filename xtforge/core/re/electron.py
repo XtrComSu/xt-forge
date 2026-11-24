@@ -125,6 +125,14 @@ def _read_wire(data: bytes, sentinel_at: int) -> dict[str, Any]:
     length = data[wire_at + 1]
     body_at = wire_at + HEADER_LEN
     body = data[body_at:body_at + length]
+    # Only version 1 is documented. A higher version has, by definition, a layout this code has
+    # never seen, so decoding it with V1 names would put a real name on a possibly-wrong slot —
+    # worse than saying nothing. The bytes are still reported; the interpretation is withheld.
+    if version != 1:
+        return {"ok": False, "sentinel_offset": sentinel_at, "version": version,
+                "declared_length": length, "wire_bytes_read": len(body), "fuses": [],
+                "error": (f"fuse wire version {version} is not version 1; this reader only knows "
+                          f"the version-1 layout and will not guess at the names in another")}
     fuses: list[dict[str, Any]] = []
     for index, code in enumerate(body):
         name, meaning = (FUSE_V1_OPTIONS[index] if index < len(FUSE_V1_OPTIONS)
@@ -224,6 +232,18 @@ def inspect_electron_fuses(path: str | bytes) -> dict[str, Any]:
         specific = next((wire.get("error") for wire in wires if wire.get("error")), None)
         result["error"] = specific or (
             "a sentinel was found but the fuse wire after it could not be read")
+        # Carry through whatever the unreadable wire *did* establish — its version and declared
+        # length — so a caller debugging a refusal is not made to re-decode the header. The empty
+        # `fuses` list is explicit rather than absent: a caller iterating `report["fuses"]` gets
+        # nothing instead of a KeyError, and an absent key must never mean "looks clean".
+        for key in ("version", "declared_length", "wire_bytes_read"):
+            if key in wires[0]:
+                result[key] = wires[0][key]
+        result["fuses"] = []
+        result["exposed"] = []
+        result["hardened"] = []
+        result["removed"] = []
+        result["undetermined"] = []
         return result
     result["version"] = primary["version"]
     result["declared_length"] = primary["declared_length"]
@@ -247,7 +267,13 @@ def inspect_electron_fuses(path: str | bytes) -> dict[str, Any]:
                           if fuse.get("hardening") is True]
     result["removed"] = [fuse["name"] for fuse in primary["fuses"]
                          if fuse["state"] == "removed"]
+    # `undetermined` is every fuse whose direction this reader cannot establish: `inherit` (the wire
+    # does not set it, so the build default applies), `removed` (guards a code path that is gone)
+    # and any code outside the four documented states. The first version of this filtered on
+    # `state == "inherit"` alone, so a wire of nine `0xff` bytes reported nine fuses each carrying
+    # `hardening: None` and a note saying the state was unrecognised — and then landed in none of
+    # `exposed`, `hardened` or `undetermined`. Nine unknowns read as nine clean fuses.
     result["undetermined"] = [fuse["name"] for fuse in primary["fuses"]
                               if fuse.get("hardening") is None
-                              and fuse["state"] == "inherit"]
+                              and fuse["state"] != "removed"]
     return result
