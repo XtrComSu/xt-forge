@@ -228,6 +228,42 @@ def _render_guidance(res):
     return human
 
 
+def _render_hap(res):
+    if not res.get("ok"):
+        lines = ["hap: " + str(res.get("error", "unknown"))]
+        if res.get("hint"):
+            lines.append("  hint: " + str(res["hint"]))
+        return chr(10).join(lines)
+    version = res.get("version") or {}
+    # A .hap built without pack.info carries no bundle name; printing the literal string "None"
+    # would read as a parsed field whose value is the text None.
+    identity = res.get("bundle_name") or f"(module {(res.get('module_name') or 'unnamed')})"
+    stamp = " ".join(part for part in (version.get("name"), f"({version.get('code')})"
+                                       if version.get("code") is not None else "") if part)
+    lines = [f"{identity}  {stamp}".rstrip(),
+             f"  module      {res.get('module_name')}  type {res.get('module_type')}",
+             f"  targets     {', '.join(res.get('device_types') or []) or 'unspecified'}",
+             f"  entries     {res.get('entry_count')}  "
+             f"bytecode {len(res.get('bytecode_files') or [])}  "
+             f"native {len(res.get('native_files') or [])}"]
+    if res.get("unrecognised_device_types"):
+        lines.append(f"  UNKNOWN     device types {res['unrecognised_device_types']}")
+    if res.get("permission_count"):
+        lines.append(f"  permissions {res['permission_count']}")
+        for item in (res["permissions"] or [])[:12]:
+            lines.append(f"    {item.get('name')}")
+    if res.get("ability_count"):
+        lines.append(f"  abilities   {res['ability_count']}")
+        for item in (res["abilities"] or [])[:10]:
+            exported = " exported" if item.get("exported") else ""
+            lines.append(f"    {item.get('kind'):<9} {item.get('name')}{exported}")
+    for item in (res.get("native_files") or [])[:6]:
+        lines.append(f"    native {item['path']} ({item['size']} bytes)")
+    if res.get("note"):
+        lines.append("  " + str(res["note"]))
+    return chr(10).join(lines)
+
+
 def _render_model(res):
     if not res.get("ok"):
         return "model: " + str(res.get("error", "unknown"))
@@ -922,6 +958,9 @@ def cmd_re(args):
         elif verb in ("v8cache", "codecache"):
             from ..core.re import v8cache
             res = v8cache.inspect_v8_code_cache(path)
+        elif verb in ("hap", "harmony"):
+            from ..core.re import harmony as _harmony
+            res = _harmony.inspect_hap(path)
         elif verb in ("model", "model-artifact", "gguf", "safetensors"):
             from ..core.re import modelartifact as _model
             if verb == "gguf":
@@ -1923,6 +1962,8 @@ def cmd_re(args):
             if res.get("truncated"):
                 lines.append(f"  WARNING     {res.get('warning')}")
             human = "\n".join(lines)
+    elif verb in ("hap", "harmony"):
+        human = _render_hap(res)
     elif verb in ("model", "model-artifact", "gguf", "safetensors"):
         human = _render_model(res)
     elif verb in ("gdb", "gdbmi"):

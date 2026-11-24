@@ -406,8 +406,18 @@ cap("Application graph projection", ["project_android_application_graph",
     "exported/permission state, permissions, ABIs, dex and runtime are recovered; also "
     "handles Apple Info.plist and managed assemblies")
 cap("HarmonyOS application graph", ["project_harmony_application_graph"],
-    None, "out-of-lane",
-    "requires HarmonyOS .hap packaging knowledge; not in this engine's lane")
+    "hap", "covered",
+    "`re hap <file>` reads the `.hap` archive statically — a ZIP with module.json and optional "
+    "pack.info — reporting bundle and module identity, target device types, requested "
+    "permissions, and both abilities and extension abilities with their entry points. No SDK, "
+    "device or DevEco toolchain is needed to read a manifest, which is why the exclusion's "
+    "\"requires HarmonyOS packaging knowledge\" was the work rather than a barrier, and "
+    "\"not in this engine's lane\" was circular in a row the audit was deciding. Permission "
+    "entries are accepted as objects or bare strings (the format allows both), unknown module "
+    "and device types are surfaced rather than dropped or mapped to a nearest guess, and an "
+    "absent `exported` stays null instead of becoming False. ArkTS `.abc` bytecode is listed "
+    "with sizes but explicitly not decompiled; native `.so` files extract and go through "
+    "`re disasm-native`")
 
 cap("API surface / contract inspection", ["inspect_api_contract", "inspect_signature",
     "audit_release_exposure"],
