@@ -245,3 +245,108 @@ class HonestyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StringTableTest(unittest.TestCase):
+    """The global string table: the one part of the file decodable without a per-version schema.
+
+    Type and method records were correctly left undecoded — their layouts change between Unity
+    releases, and a decoder without the right schema returns plausible garbage. The string table
+    is different: it is a flat sequence of NUL-terminated UTF-8 and has never varied, so decoding
+    it is sound. It is also where the names are, and reporting only the header left an analyst
+    with a region table and nothing readable.
+    """
+
+    NAMES = ["Object", "ValueType", "Attribute", "Enum", "String", "IEnumerable",
+             "UnityEngine", "MonoBehaviour", "GameObject", "Update", "PlayerController",
+             "A fairly long prose string that is a literal rather than a type name"]
+
+    def _metadata(self, names: list[str] | None = None, *, declare: int | None = None) -> bytes:
+        import struct as _struct
+        blob = b"".join(name.encode() + b"\x00" for name in (names or self.NAMES))
+        header = 296
+        raw = bytearray(header + len(blob))
+        _struct.pack_into("<I", raw, 0x000, 0xFAB11BAF)
+        _struct.pack_into("<I", raw, 0x004, 29)
+        _struct.pack_into("<I", raw, 0x018, header)
+        _struct.pack_into("<I", raw, 0x01C, len(blob) if declare is None else declare)
+        raw[header:header + len(blob)] = blob
+        return bytes(raw)
+
+    def _inspect(self, raw: bytes) -> dict:
+        import tempfile
+        from pathlib import Path
+        from xtforge.core.re import il2cpp
+        directory = Path(tempfile.mkdtemp(prefix="xtil2cpp-"))
+        try:
+            target = directory / "global-metadata.dat"
+            target.write_bytes(raw)
+            return il2cpp.inspect_il2cpp_metadata(target)
+        finally:
+            import shutil
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def test_the_table_decodes_in_order(self) -> None:
+        report = self._inspect(self._metadata())
+        self.assertTrue(report["ok"], report.get("error"))
+        self.assertEqual(report["strings"]["string_count"], len(self.NAMES))
+        self.assertEqual(report["strings"]["head"][:4],
+                         ["Object", "ValueType", "Attribute", "Enum"])
+
+    def test_the_head_is_the_real_unity_fingerprint(self) -> None:
+        """A located table starts with the primitives, so this distinguishes located from lucky."""
+        report = self._inspect(self._metadata())
+        self.assertIn("Object", report["strings"]["head"])
+        self.assertIn("IEnumerable", report["strings"]["head"])
+
+    def test_names_exclude_prose_literals(self) -> None:
+        report = self._inspect(self._metadata())
+        names = report["names"]
+        self.assertIn("PlayerController", names)
+        self.assertNotIn("A fairly long prose string that is a literal rather than a type name",
+                         names,
+                         "a prose literal was reported as a type name")
+
+    def test_a_truncated_table_is_reported_not_refused(self) -> None:
+        """The other regions may still be intact, so refusing the whole file would lose them."""
+        full = self._metadata()
+        report = self._inspect(full[:296 + 20])
+        self.assertTrue(report["ok"], report.get("error"))
+        self.assertTrue(report["strings"].get("truncated"), report["strings"])
+        self.assertIn("only", report["strings"].get("note", ""))
+
+    def test_an_offset_past_the_end_is_an_error_not_a_crash(self) -> None:
+        import struct as _struct
+        raw = bytearray(self._metadata())
+        _struct.pack_into("<I", raw, 0x018, len(raw) + 5000)
+        report = self._inspect(bytes(raw))
+        self.assertTrue(report["ok"], "the header is still readable")
+        self.assertIn("error", report["strings"])
+
+    def test_a_missing_table_is_reported_as_absent(self) -> None:
+        import struct as _struct
+        raw = bytearray(self._metadata())
+        _struct.pack_into("<I", raw, 0x018, 0)
+        _struct.pack_into("<I", raw, 0x01C, 0)
+        report = self._inspect(bytes(raw))
+        self.assertEqual(report["strings"]["string_count"], 0)
+        self.assertIn("no global string table", report["strings"]["note"])
+
+    def test_a_bad_byte_does_not_discard_the_neighbours(self) -> None:
+        """One invalid sequence must not throw away the other ten thousand strings."""
+        blob = b"Good\x00Bad\xff\xfeName\x00AlsoGood\x00"
+        import struct as _struct
+        raws = bytearray(296 + len(blob))
+        _struct.pack_into("<I", raws, 0x000, 0xFAB11BAF)
+        _struct.pack_into("<I", raws, 0x018, 296)
+        _struct.pack_into("<I", raws, 0x01C, len(blob))
+        raws[296:] = blob
+        report = self._inspect(bytes(raws))
+        self.assertTrue(report["ok"], report.get("error"))
+        self.assertIn("Good", report["strings"]["strings"])
+        self.assertIn("AlsoGood", report["strings"]["strings"])
+
+    def test_a_single_huge_string_is_not_mistaken_for_a_type_name(self) -> None:
+        report = self._inspect(self._metadata(["A" * 500, "RealType"]))
+        self.assertNotIn("A" * 500, report["names"])
+        self.assertIn("RealType", report["names"])

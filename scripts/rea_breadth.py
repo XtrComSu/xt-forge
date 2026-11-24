@@ -206,9 +206,15 @@ cap("EVM interface", ["inspect_evm_interface"],
 cap("il2cpp metadata", ["inspect_il2cpp_metadata"],
     "il2cpp", "partial",
     "74-field/296-byte global-metadata header (sanity 0xFAB11BAF, version) and a validated "
-    "region table with truncation and offset checks. Type/method record decoding NOT done: "
-    "layouts vary per Unity version and no real global-metadata.dat was reachable from this "
-    "host to verify against")
+    "region table with truncation and offset checks. The global string table is decoded too: it "
+    "is flat NUL-terminated UTF-8 and has never varied between Unity releases, so unlike the type "
+    "records its layout needs no per-version schema — and it is where every type, namespace, "
+    "method and field name lives. Prose literals are separated from type-shaped names, and the "
+    "first entries are the primitives (`Object`, `ValueType`, `IEnumerable`), which makes a "
+    "correctly located table distinguishable from a lucky one. Partial because `Il2CppTypeDefinition` "
+    "and `Il2CppMethodDefinition` records are still not decoded: their layouts change between "
+    "Unity releases and no real `global-metadata.dat` exists on this host to verify a schema "
+    "against, so decoding them would return plausible garbage")
 cap("Rizin command execution", ["execute_rizin_command", "rizin_command"],
     "id…", None, "out-of-lane: this engine does not drive third-party RE shells")
 C.pop()  # placeholder removed; rizin is stated below properly

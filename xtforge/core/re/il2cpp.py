@@ -206,6 +206,82 @@ def _regions(values: dict[str, int], file_size: int) -> list[dict[str, Any]]:
     return regions
 
 
+def _string_table(raw: bytes, values: dict[str, int], *,
+                  limit: int = 4000) -> dict[str, Any]:
+    """Decode the metadata's global string table: NUL-separated UTF-8, nothing more.
+
+    This is the one part of the file that is safe to decode without a per-version schema. A
+    `Il2CppTypeDefinition` record's layout changes between Unity releases, but the string table is
+    a flat sequence of NUL-terminated strings and its format has never varied — so decoding it
+    cannot produce plausible garbage, which is the objection that correctly blocked the record
+    decoding.
+
+    It is also where most of the readable information lives: every type name, namespace, method
+    name and field name in the assembly is a byte offset into this table. Reporting the header
+    alone left an analyst with a region table and no names at all.
+    """
+    offset = values.get("stringOffset", 0)
+    size = values.get("stringSize", 0)
+    if not offset or size <= 0:
+        return {"strings": [], "string_count": 0,
+                "note": "the file declares no global string table"}
+    if offset >= len(raw):
+        return {"strings": [], "string_count": 0,
+                "error": f"string table offset {offset} is past the end of the file "
+                         f"({len(raw)} bytes)"}
+    # A declared size that runs past the file is truncated, not fatal: read what is there and say
+    # so, rather than refusing a file whose other regions may still be intact.
+    end = min(offset + size, len(raw))
+    truncated = offset + size > len(raw)
+    blob = raw[offset:end]
+
+    strings: list[str] = []
+    for chunk in blob.split(b"\x00"):
+        if not chunk:
+            continue
+        # Names are UTF-8. A byte sequence that is not decodes as replacement characters rather
+        # than raising, because one bad string must not discard the other ten thousand.
+        strings.append(chunk.decode("utf-8", "replace"))
+        if len(strings) >= limit:
+            break
+    report: dict[str, Any] = {
+        "strings": strings,
+        "string_count": len(strings),
+        "table_offset": offset,
+        "table_size": size,
+        # The first strings in a real file are the primitive type names, which makes this a
+        # fingerprint rather than a guess: seeing `Object` and `IEnumerable` near the front is
+        # evidence the table was located correctly.
+        "head": strings[:8],
+    }
+    if truncated:
+        report["truncated"] = True
+        report["note"] = (f"the string table declares {size} bytes but only {len(blob)} are "
+                          f"present; decoded the available prefix")
+    return report
+
+
+def type_names(index: dict[str, Any], *, limit: int = 200) -> list[str]:
+    """The type-shaped names from a decoded string table.
+
+    Unity's metadata stores names and namespaces separately, so a `TypeDefinition`'s display name
+    is `Namespace.Name` and neither half is marked as a type in the table itself. The filter here
+    keeps strings that contain no path separator and no whitespace, which is what a type or
+    namespace name looks like, and drops the long prose strings a managed assembly carries as
+    literals.
+    """
+    names: list[str] = []
+    for text in index.get("strings") or []:
+        if not text or len(text) > 200:
+            continue
+        if any(char in text for char in ("\n", "\t", " ", "/")):
+            continue
+        names.append(text)
+        if len(names) >= limit:
+            break
+    return names
+
+
 def inspect_il2cpp_metadata(path: str | Path) -> dict[str, Any]:
     """Read an il2cpp global-metadata header and its region table."""
     try:
@@ -253,6 +329,10 @@ def inspect_il2cpp_metadata(path: str | Path) -> dict[str, Any]:
         result["truncated_regions"] = truncated
         result["warning"] = (f"{len(truncated)} region(s) extend past the end of the "
                              f"file; the metadata is truncated")
+    strings = _string_table(raw, values)
+    result["strings"] = strings
+    if strings.get("string_count"):
+        result["names"] = type_names(strings)
     result["schema_note"] = (
         "region records are NOT decoded into names: Il2CppTypeDefinition and "
         "Il2CppMethodDefinition change layout between Unity versions, so decoding without "
