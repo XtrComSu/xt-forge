@@ -1,84 +1,84 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title">
 <title id="title">XT-Forge Workflow Navigator</title>
-<rect width="100%" height="100%" fill="#000000"/>
-<rect x="15" y="15" width="1170" height="330" rx="16" fill="#040406" stroke="#1c1f2b" stroke-width="1.5"/>
-<path d="M34 16H1166" stroke="#ff2e3b" stroke-width="3" stroke-linecap="round"/>
-<text x="36" y="48" fill="#ffffff" font-family="monospace" font-weight="700" font-size="19">XT-FORGE  //  WORKFLOW NAVIGATOR</text>
-<text x="36" y="70" fill="#71717a" font-family="system-ui, sans-serif" font-size="14">Select a lane below to direct your analysis or inspect tools for your task.</text>
-<rect x="31" y="88" width="270" height="236" rx="12" fill="#000000" stroke="#181a24" stroke-width="1.2"/>
-<path d="M43 89H289" stroke="#ff2e3b" stroke-width="2" stroke-linecap="round"/>
-<text x="47" y="112" fill="#ff2e3b" font-family="monospace" font-weight="700" font-size="12">01 // NATIVE BINARIES</text>
+<rect width="100%" height="100%" fill="#0a0c11"/>
+<rect x="15" y="15" width="1170" height="330" rx="16" fill="#10121a" stroke="#343949" stroke-width="1.5"/>
+<path d="M34 16H1166" stroke="#ff303d" stroke-width="3" stroke-linecap="round"/>
+<text x="36" y="48" fill="#f2f4fa" font-family="monospace" font-weight="700" font-size="19">XT-FORGE  //  WORKFLOW NAVIGATOR</text>
+<text x="36" y="70" fill="#a3aec4" font-family="system-ui, sans-serif" font-size="14">Select a lane below to direct your analysis or inspect tools for your task.</text>
+<rect x="31" y="88" width="270" height="236" rx="12" fill="#151823" stroke="#2d3343" stroke-width="1.2"/>
+<path d="M43 89H289" stroke="#ff303d" stroke-width="2" stroke-linecap="round"/>
+<text x="47" y="112" fill="#ff303d" font-family="monospace" font-weight="700" font-size="12">01 // NATIVE BINARIES</text>
 <text x="47" y="134" fill="#f2f4fa" font-family="system-ui, sans-serif" font-weight="700" font-size="16">Binary Reverse Engineering</text>
-<text x="47" y="153" fill="#71717a" font-family="system-ui, sans-serif" font-size="12">ELF · PE · Mach-O · Firmware</text>
-<line x1="47" y1="164" x2="285" y2="164" stroke="#1f222e" stroke-width="1"/>
-<rect x="45" y="172" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="51" y="188" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Overview:</text>
-<text x="126" y="188" fill="#e2e8f0" font-family="monospace" font-size="11">re overview &lt;path&gt; --j</text>
-<rect x="45" y="203" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="51" y="219" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Disassembly:</text>
-<text x="126" y="219" fill="#e2e8f0" font-family="monospace" font-size="11">re disasm-native &lt;path</text>
-<rect x="45" y="234" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="51" y="250" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Call references:</text>
-<text x="126" y="250" fill="#e2e8f0" font-family="monospace" font-size="11">re xrefs-native &lt;path&gt;</text>
-<rect x="45" y="265" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="51" y="281" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Normalized diff:</text>
-<text x="126" y="281" fill="#e2e8f0" font-family="monospace" font-size="11">re diff &lt;bin1&gt; &lt;bin2&gt;</text>
-<text x="47" y="312" fill="#ff2e3b" font-family="system-ui, sans-serif" font-weight="600" font-size="13">Jump to Binary Inspection →</text>
-<rect x="320" y="88" width="270" height="236" rx="12" fill="#000000" stroke="#181a24" stroke-width="1.2"/>
-<path d="M332 89H578" stroke="#00e5ff" stroke-width="2" stroke-linecap="round"/>
-<text x="336" y="112" fill="#00e5ff" font-family="monospace" font-weight="700" font-size="12">02 // SOURCE CODE</text>
+<text x="47" y="153" fill="#8b98b0" font-family="system-ui, sans-serif" font-size="12">ELF · PE · Mach-O · Firmware</text>
+<line x1="47" y1="164" x2="285" y2="164" stroke="#282e3d" stroke-width="1"/>
+<rect x="45" y="172" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="51" y="188" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Overview:</text>
+<text x="126" y="188" fill="#dce3f0" font-family="monospace" font-size="11">re overview &lt;path&gt; --j</text>
+<rect x="45" y="203" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="51" y="219" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Disassembly:</text>
+<text x="126" y="219" fill="#dce3f0" font-family="monospace" font-size="11">re disasm-native &lt;path</text>
+<rect x="45" y="234" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="51" y="250" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Call references:</text>
+<text x="126" y="250" fill="#dce3f0" font-family="monospace" font-size="11">re xrefs-native &lt;path&gt;</text>
+<rect x="45" y="265" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="51" y="281" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Normalized diff:</text>
+<text x="126" y="281" fill="#dce3f0" font-family="monospace" font-size="11">re diff &lt;bin1&gt; &lt;bin2&gt;</text>
+<text x="47" y="312" fill="#ff303d" font-family="system-ui, sans-serif" font-weight="600" font-size="13">Jump to Binary Inspection →</text>
+<rect x="320" y="88" width="270" height="236" rx="12" fill="#151823" stroke="#2d3343" stroke-width="1.2"/>
+<path d="M332 89H578" stroke="#5fa8fa" stroke-width="2" stroke-linecap="round"/>
+<text x="336" y="112" fill="#5fa8fa" font-family="monospace" font-weight="700" font-size="12">02 // SOURCE CODE</text>
 <text x="336" y="134" fill="#f2f4fa" font-family="system-ui, sans-serif" font-weight="700" font-size="16">Code Navigation &amp; Call Graphs</text>
-<text x="336" y="153" fill="#71717a" font-family="system-ui, sans-serif" font-size="12">AST symbols · Callers · Dispatch</text>
-<line x1="336" y1="164" x2="574" y2="164" stroke="#1f222e" stroke-width="1"/>
-<rect x="334" y="172" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="340" y="188" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Budgeted search:</text>
-<text x="415" y="188" fill="#e2e8f0" font-family="monospace" font-size="11">route context . --quer</text>
-<rect x="334" y="203" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="340" y="219" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Caller hierarchy:</text>
-<text x="415" y="219" fill="#e2e8f0" font-family="monospace" font-size="11">callers &lt;symbol&gt; .</text>
-<rect x="334" y="234" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="340" y="250" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Execution path:</text>
-<text x="415" y="250" fill="#e2e8f0" font-family="monospace" font-size="11">trace &lt;entry_func&gt; .</text>
-<rect x="334" y="265" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="340" y="281" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Codebase audit:</text>
-<text x="415" y="281" fill="#e2e8f0" font-family="monospace" font-size="11">code audit .</text>
-<text x="336" y="312" fill="#00e5ff" font-family="system-ui, sans-serif" font-weight="600" font-size="13">Jump to Source Navigation →</text>
-<rect x="609" y="88" width="270" height="236" rx="12" fill="#000000" stroke="#181a24" stroke-width="1.2"/>
-<path d="M621 89H867" stroke="#00ff9d" stroke-width="2" stroke-linecap="round"/>
-<text x="625" y="112" fill="#00ff9d" font-family="monospace" font-weight="700" font-size="12">03 // SUPPLY CHAIN</text>
+<text x="336" y="153" fill="#8b98b0" font-family="system-ui, sans-serif" font-size="12">AST symbols · Callers · Dispatch</text>
+<line x1="336" y1="164" x2="574" y2="164" stroke="#282e3d" stroke-width="1"/>
+<rect x="334" y="172" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="340" y="188" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Budgeted search:</text>
+<text x="415" y="188" fill="#dce3f0" font-family="monospace" font-size="11">route context . --quer</text>
+<rect x="334" y="203" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="340" y="219" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Caller hierarchy:</text>
+<text x="415" y="219" fill="#dce3f0" font-family="monospace" font-size="11">callers &lt;symbol&gt; .</text>
+<rect x="334" y="234" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="340" y="250" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Execution path:</text>
+<text x="415" y="250" fill="#dce3f0" font-family="monospace" font-size="11">trace &lt;entry_func&gt; .</text>
+<rect x="334" y="265" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="340" y="281" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Codebase audit:</text>
+<text x="415" y="281" fill="#dce3f0" font-family="monospace" font-size="11">code audit .</text>
+<text x="336" y="312" fill="#5fa8fa" font-family="system-ui, sans-serif" font-weight="600" font-size="13">Jump to Source Navigation →</text>
+<rect x="609" y="88" width="270" height="236" rx="12" fill="#151823" stroke="#2d3343" stroke-width="1.2"/>
+<path d="M621 89H867" stroke="#0ac68d" stroke-width="2" stroke-linecap="round"/>
+<text x="625" y="112" fill="#0ac68d" font-family="monospace" font-weight="700" font-size="12">03 // SUPPLY CHAIN</text>
 <text x="625" y="134" fill="#f2f4fa" font-family="system-ui, sans-serif" font-weight="700" font-size="16">Dependencies &amp; OSV Advisories</text>
-<text x="625" y="153" fill="#71717a" font-family="system-ui, sans-serif" font-size="12">Manifests · Pinned versions · Fixes</text>
-<line x1="625" y1="164" x2="863" y2="164" stroke="#1f222e" stroke-width="1"/>
-<rect x="623" y="172" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="629" y="188" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Inventory deps:</text>
-<text x="704" y="188" fill="#e2e8f0" font-family="monospace" font-size="11">re deps .</text>
-<rect x="623" y="203" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="629" y="219" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Check advisories:</text>
-<text x="704" y="219" fill="#e2e8f0" font-family="monospace" font-size="11">re vulns .</text>
-<rect x="623" y="234" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="629" y="250" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Safe remediation:</text>
-<text x="704" y="250" fill="#e2e8f0" font-family="monospace" font-size="11">re remediate .</text>
-<rect x="623" y="265" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="629" y="281" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Apply updates:</text>
-<text x="704" y="281" fill="#e2e8f0" font-family="monospace" font-size="11">re remediate . --write</text>
-<text x="625" y="312" fill="#00ff9d" font-family="system-ui, sans-serif" font-weight="600" font-size="13">Jump to Dependency Checks →</text>
-<rect x="898" y="88" width="270" height="236" rx="12" fill="#000000" stroke="#181a24" stroke-width="1.2"/>
-<path d="M910 89H1156" stroke="#ffb700" stroke-width="2" stroke-linecap="round"/>
-<text x="914" y="112" fill="#ffb700" font-family="monospace" font-weight="700" font-size="12">04 // AI AGENT GATEWAY</text>
+<text x="625" y="153" fill="#8b98b0" font-family="system-ui, sans-serif" font-size="12">Manifests · Pinned versions · Fixes</text>
+<line x1="625" y1="164" x2="863" y2="164" stroke="#282e3d" stroke-width="1"/>
+<rect x="623" y="172" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="629" y="188" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Inventory deps:</text>
+<text x="704" y="188" fill="#dce3f0" font-family="monospace" font-size="11">re deps .</text>
+<rect x="623" y="203" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="629" y="219" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Check advisories:</text>
+<text x="704" y="219" fill="#dce3f0" font-family="monospace" font-size="11">re vulns .</text>
+<rect x="623" y="234" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="629" y="250" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Safe remediation:</text>
+<text x="704" y="250" fill="#dce3f0" font-family="monospace" font-size="11">re remediate .</text>
+<rect x="623" y="265" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="629" y="281" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Apply updates:</text>
+<text x="704" y="281" fill="#dce3f0" font-family="monospace" font-size="11">re remediate . --write</text>
+<text x="625" y="312" fill="#0ac68d" font-family="system-ui, sans-serif" font-weight="600" font-size="13">Jump to Dependency Checks →</text>
+<rect x="898" y="88" width="270" height="236" rx="12" fill="#151823" stroke="#2d3343" stroke-width="1.2"/>
+<path d="M910 89H1156" stroke="#f5b449" stroke-width="2" stroke-linecap="round"/>
+<text x="914" y="112" fill="#f5b449" font-family="monospace" font-weight="700" font-size="12">04 // AI AGENT GATEWAY</text>
 <text x="914" y="134" fill="#f2f4fa" font-family="system-ui, sans-serif" font-weight="700" font-size="16">Stdio MCP Gateway</text>
-<text x="914" y="153" fill="#71717a" font-family="system-ui, sans-serif" font-size="12">Sub-1.4KB catalog · Tool discovery</text>
-<line x1="914" y1="164" x2="1152" y2="164" stroke="#1f222e" stroke-width="1"/>
-<rect x="912" y="172" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="918" y="188" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Launch gateway:</text>
-<text x="993" y="188" fill="#e2e8f0" font-family="monospace" font-size="11">xt-forge --meta</text>
-<rect x="912" y="203" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="918" y="219" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Tool discovery:</text>
-<text x="993" y="219" fill="#e2e8f0" font-family="monospace" font-size="11">xt_discover(query=...)</text>
-<rect x="912" y="234" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="918" y="250" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Tool execution:</text>
-<text x="993" y="250" fill="#e2e8f0" font-family="monospace" font-size="11">xt_call(name=..., args</text>
-<rect x="912" y="265" width="242" height="24" rx="5" fill="#08080c" stroke="#12131a"/>
-<text x="918" y="281" fill="#71717a" font-family="system-ui, sans-serif" font-size="11">Batch queries:</text>
-<text x="993" y="281" fill="#e2e8f0" font-family="monospace" font-size="11">xt_batch(calls=[...])</text>
-<text x="914" y="312" fill="#ffb700" font-family="system-ui, sans-serif" font-weight="600" font-size="13">Jump to MCP Section →</text>
+<text x="914" y="153" fill="#8b98b0" font-family="system-ui, sans-serif" font-size="12">Sub-1.4KB catalog · Tool discovery</text>
+<line x1="914" y1="164" x2="1152" y2="164" stroke="#282e3d" stroke-width="1"/>
+<rect x="912" y="172" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="918" y="188" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Launch gateway:</text>
+<text x="993" y="188" fill="#dce3f0" font-family="monospace" font-size="11">xt-forge --meta</text>
+<rect x="912" y="203" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="918" y="219" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Tool discovery:</text>
+<text x="993" y="219" fill="#dce3f0" font-family="monospace" font-size="11">xt_discover(query=...)</text>
+<rect x="912" y="234" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="918" y="250" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Tool execution:</text>
+<text x="993" y="250" fill="#dce3f0" font-family="monospace" font-size="11">xt_call(name=..., args</text>
+<rect x="912" y="265" width="242" height="24" rx="5" fill="#0d0f15"/>
+<text x="918" y="281" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">Batch queries:</text>
+<text x="993" y="281" fill="#dce3f0" font-family="monospace" font-size="11">xt_batch(calls=[...])</text>
+<text x="914" y="312" fill="#f5b449" font-family="system-ui, sans-serif" font-weight="600" font-size="13">Jump to MCP Section →</text>
 </svg>

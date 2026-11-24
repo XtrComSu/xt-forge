@@ -296,7 +296,7 @@ $ xt-forge re overview ./demo --json
         },
         {
           "name": ".debug_line_str",
-          "entropy": 4.138502179294739,
+          "entropy": 4.314972767530033,
           "class": "structured",
           "bytes": 34
         },
@@ -404,7 +404,7 @@ $ xt-forge re overview ./demo --json
         },
         {
           "name": ".note.gnu.build-id",
-          "entropy": 4.1916116417513765,
+          "entropy": 4.247167197306932,
           "class": "structured",
           "bytes": 36
         },

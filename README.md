@@ -22,11 +22,11 @@
 </div>
 
 <p align="center">
-  <img src="docs/assets/overview-cards.svg" alt="XT-Forge Capabilities" width="100%" />
+  <img src="docs/assets/xt-oss-banner.png" alt="XT-Forge Overview" width="100%" />
 </p>
 
 <p align="center">
-  <img src="docs/assets/overview-showcase.gif" alt="XT-Forge v0.4.8-Damascus XT-OSS Overview Showcase" width="100%" />
+  <img src="docs/assets/overview-showcase.gif" alt="XT-Forge Overview Showcase" width="100%" />
 </p>
 
 ---
