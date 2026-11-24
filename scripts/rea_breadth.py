@@ -483,7 +483,7 @@ cap("ADB device and package management", ["list_adb_packages",
 cap("Android class and reference queries", ["search_android_classes",
     "trace_android_references", "decode_android_resources",
     "inspect_android_jni_bindings"],
-    "dex-search", "partial",
+    "dex-search", "covered",
     "These four were filed under device management and excluded for it, but none of them needs a "
     "device — they are reads of the DEX tables `re dex` already parses. `re dex-search <apk> "
     "--symbol=<pattern>` lists matching classes with their resolved superclasses, and `re "
@@ -496,9 +496,12 @@ cap("Android class and reference queries", ["search_android_classes",
     "so a `label=\"@string/app_name\"` reference resolves to its text. That is verified against "
     "the same APK: package `os.xt.status`, `versionCode 3` (a typed integer with no string in the "
     "file), four declared permissions, and three components with their authoritative exported "
-    "flags. Partial only because JNI binding recovery "
-    "(`inspect_android_jni_bindings`) needs native-method-to-symbol matching, which is not "
-    "implemented")
+    "flags. JNI bindings (`inspect_android_jni_bindings`) are recovered too: `re apk` walks each "
+    "`class_data_item` for ACC_NATIVE methods and derives the exact symbol the runtime resolves "
+    "(`Java_com_example_Native_doIt`), with the real escaping rules — a literal `_` becomes `_1`, "
+    "`;` becomes `_2`, `[` becomes `_3`, and the `/` package separator stays a plain `_`. That "
+    "symbol was verified against `nm -D` on a library compiled to export it",
+    probe=["re", "dex-search", "{apk}", "--symbol=Activity"])
 
 cap("Browser / Electron / web-runtime observation", ["capture_browser_scenario",
     "capture_electron_scenario", "capture_web_screenshot", "observe_web_execution",

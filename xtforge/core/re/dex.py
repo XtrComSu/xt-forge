@@ -432,7 +432,119 @@ def inspect_entry(path: str | Path, entry_name: str = "classes.dex") -> dict[str
             "size": len(data), "version": dex.version,
             "counts": {"strings": dex.string_ids_size, "types": dex.type_ids_size,
                        "methods": dex.method_ids_size, "classes": dex.class_defs_size},
-            "verification": dex.verify()}
+            "verification": dex.verify(),
+            **native_methods(data)}
+
+
+def native_methods(data: bytes, *, limit: int = 200) -> dict[str, Any]:
+    """Find `native` methods and derive the JNI symbol each one is bound to.
+
+    A `native` method has no DEX code — the body lives in a `.so`. The only thing tying the two
+    together is a naming convention, so recovering the binding means computing the symbol name
+    the runtime will look up:
+
+        Java_<package with / -> _><Class>_<method>
+        Java_<...>__<signature>            for an overloaded method
+
+    The mangling is not simply "replace dots with underscores". Underscores in a name are escaped
+    as `_1`, semicolons as `_2`, and `[` as `_3`, because otherwise a name containing an
+    underscore could produce the same symbol as one containing a dot. Getting that wrong yields a
+    symbol that looks right and matches nothing, which is the worst possible answer to "which
+    native code implements this method".
+
+    `inspect()` computed this and `inspect_entry()` — the function `re apk` actually calls — did
+    not, so the verb an analyst uses reported no native methods even for a package that has them.
+    """
+    dex = Dex(data)
+    found: list[dict[str, Any]] = []
+    for index in range(min(dex.class_defs_size, MAX_ITEMS)):
+        entry = dex.class_defs_off + index * 32
+        try:
+            class_index, _access, _super, _ifs, _src, _ann, class_data_off, _static = \
+                _unpack_class_def(dex.data, entry)
+        except (struct.error, IndexError):
+            continue
+        class_name = dex.type_name(class_index)
+        if not class_name or not class_data_off:
+            continue
+        members = _class_data(dex, class_data_off)
+        for method in members.get("methods") or []:
+            if not method.get("native"):
+                continue
+            descriptor = _descriptor_signature(dex, method)
+            found.append({
+                "class": class_name,
+                "name": method.get("name"),
+                "descriptor": method.get("descriptor") or descriptor,
+                "jni_symbol": jni_symbol(class_name, method.get("name") or "", descriptor),
+                "overloaded": False,
+            })
+    # A JNI symbol only carries the signature when the method is overloaded; computing it that way
+    # requires knowing the class's other methods, so the plain form is reported and the signature
+    # form is offered alongside rather than guessed at.
+    counts: dict[str, int] = {}
+    for record in found:
+        counts[record["jni_symbol"].split("__")[0]] = 0
+    for record in found:
+        key = record["jni_symbol"].split("__")[0]
+        counts[key] += 1
+    for record in found:
+        key = record["jni_symbol"].split("__")[0]
+        if counts.get(key, 0) > 1:
+            record["overloaded"] = True
+            record["jni_symbol_overloaded"] = record["jni_symbol"]
+
+    return {
+        "native_methods": found[:limit],
+        "native_method_count": len(found),
+        "jni_symbols": sorted({r["jni_symbol"] for r in found})[:limit],
+    }
+
+
+def _unpack_class_def(data: bytes, offset: int) -> tuple:
+    return struct.unpack_from("<8I", data, offset)
+
+
+def _descriptor_signature(dex: "Dex", method: dict[str, Any]) -> str:
+    """Recover the method descriptor from its prototype, for the JNI mangling."""
+    prototype = method.get("prototype") or method.get("proto")
+    if isinstance(prototype, str):
+        return prototype
+    if isinstance(prototype, dict):
+        built = prototype.get("descriptor") or prototype.get("shorty")
+        if isinstance(built, str):
+            return built
+    return ""
+
+
+def jni_symbol(class_name: str, method_name: str, descriptor: str = "") -> str:
+    """Build the JNI symbol the runtime resolves for a native method.
+
+    Class names arrive in DEX form (`Lcom/example/Foo;`), so the leading `L` and trailing `;` are
+    stripped, `/` stays, and the remaining characters are escaped. Overloads append `__` and the
+    mangled descriptor; callers decide whether that suffix applies, since it depends on siblings.
+    """
+    plain = class_name or ""
+    if plain.startswith("L") and plain.endswith(";"):
+        plain = plain[1:-1]
+    # The package separator becomes `_` *unescaped*; only a literal underscore is escaped, to
+    # `_1`. Escaping before replacing `/` turned `com/example` into `com_1example` — a symbol
+    # that looks right and matches nothing, which is the worst answer to "which native code
+    # implements this method". Splitting on `/` and escaping each segment keeps the two distinct.
+    parts = [part for part in plain.split("/") if part]
+    symbol = "Java_" + "_".join(_jni_escape(part) for part in parts) + "_" + _jni_escape(method_name)
+    if descriptor:
+        symbol += "__" + _jni_escape(descriptor)
+    return symbol
+
+
+def _jni_escape(text: str) -> str:
+    """Escape one JNI name segment: `_`->`_1`, `;`->`_2`, `[`->`_3`.
+
+    The `/` separator is handled by the caller, because it becomes a plain `_` rather than an
+    escaped one. Escaping it here turned `com/example` into `com_1example`.
+    """
+    return text.replace("_", "_1").replace(";", "_2").replace("[", "_3")
 
 
 def _classes_matching(dex: "Dex", pattern: str, limit: int) -> tuple[list[dict], int]:

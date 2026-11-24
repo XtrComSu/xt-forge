@@ -22,8 +22,14 @@ from xtforge.core.re import dex
 
 # A minimal but structurally valid DEX: header, string ids, type ids, method ids, class defs.
 def build_dex(class_names: list[str], method_names: list[str],
-              super_name: str = "Ljava/lang/Object;") -> bytes:
-    """Assemble a DEX whose only real content is the string, type and id tables."""
+              super_name: str = "Ljava/lang/Object;",
+              native_methods: list[tuple[str, str]] | None = None) -> bytes:
+    """Assemble a DEX with the string, type and id tables, plus optional native methods.
+
+    `native_methods` is a list of (class name, method name). Each gets an entry in a
+    `class_data_item` marked ACC_NATIVE, which is the only place the compiler records that a
+    method's body lives in a shared library rather than in DEX code.
+    """
     strings: list[str] = []
     def intern(text: str) -> int:
         if text not in strings:
@@ -34,6 +40,8 @@ def build_dex(class_names: list[str], method_names: list[str],
         intern(super_name)
     for name in method_names:
         intern(name)
+    for _cls, method in (native_methods or []):
+        intern(method)
 
     header_size = 0x70
     string_ids_off = header_size
@@ -46,8 +54,38 @@ def build_dex(class_names: list[str], method_names: list[str],
     class_defs_off = method_ids_off + method_ids_size * 8
     class_defs_size = len(class_names)
 
+    # class_data_items come after the class-def table and before the string data, because the
+    # class-def records must know the offset of each one before it is written.
+    class_data_blobs: dict[int, bytes] = {}
+    if native_methods:
+        def uleb(value: int) -> bytes:
+            out = b""
+            while True:
+                byte = value & 0x7F
+                value >>= 7
+                if value:
+                    out += bytes([byte | 0x80])
+                else:
+                    out += bytes([byte])
+                    return out
+
+        class_data_base = class_defs_off + class_defs_size * 32
+        cursor = class_data_base
+        for class_name in class_names:
+            own = [m for cls, m in (native_methods or []) if cls == class_name]
+            if not own:
+                continue
+            blob = uleb(0) + uleb(0) + uleb(len(own)) + uleb(0)  # static, instance, direct, virtual
+            previous = 0
+            for method in own:
+                index = method_names.index(method)
+                blob += uleb(index - previous) + uleb(0x0100) + uleb(0)  # ACC_NATIVE, no code
+                previous = index
+            class_data_blobs[class_names.index(class_name)] = blob
+            cursor += len(blob)
+
     # Lay out string data, aligned to 4 bytes as the format requires.
-    data_start = class_defs_off + class_defs_size * 32
+    data_start = class_defs_off + class_defs_size * 32 + sum(len(b) for b in class_data_blobs.values())
     string_data = b""
     offsets: list[int] = []
     for text in strings:
@@ -76,13 +114,22 @@ def build_dex(class_names: list[str], method_names: list[str],
         # class_idx points into type_ids; entry 0 is the first interned string, which is a
         # class name in these fixtures.
         out += struct.pack("<HHI", 0, 0, strings.index(name))
-    for name in class_names:
-        # superclass_idx is a type_ids index, not an offset. The fixture writes
-        # 0xFFFFFFFF (NO_INDEX) for every class, which correctly resolves to None — so the
-        # test asserting a resolved superclass was asserting a value the fixture never encoded.
-        # intern() gives each class its superclass string immediately after its own name.
-        out += struct.pack("<IIIIIIII", strings.index(name), 0x1,
-                           strings.index(super_name), 0, 0xFFFFFFFF, 0, 0, 0)
+    # Second pass over class_defs, now that class_data offsets are known.
+    out_class_defs = bytearray()
+    running = class_defs_off + class_defs_size * 32
+    for position, name in enumerate(class_names):
+        blob = class_data_blobs.get(position)
+        class_data_off = 0
+        if blob is not None:
+            class_data_off = running
+            running += len(blob)
+        # superclass_idx is a type_ids index, not an offset. intern() gives each class its
+        # superclass string immediately after its own name.
+        out_class_defs += struct.pack("<IIIIIIII", strings.index(name), 0x1,
+                                      strings.index(super_name), 0, 0xFFFFFFFF, 0,
+                                      class_data_off, 0)
+    out += bytes(out_class_defs)
+    out += b"".join(class_data_blobs[key] for key in sorted(class_data_blobs))
     out += string_data
 
     # Header fields the reader validates.
@@ -268,3 +315,122 @@ class RealApkTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NativeMethodTest(unittest.TestCase):
+    """Recovering `native` methods and the JNI symbol each one binds to.
+
+    A `native` method has no DEX code: the body is in a `.so`, and the only link between the two
+    is a naming convention. `inspect()` computed this list and `inspect_entry()` — the function
+    `re apk` actually calls — did not, so the verb an analyst uses reported nothing for a package
+    that had native methods. (It happens that the real APK here has none; the earlier claim that
+    `inspect_entry` "dropped" them was mine and wrong, which is why the synthetic fixture below
+    exists rather than a claim about a real package.)
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import tempfile
+        cls.directory = Path(tempfile.mkdtemp(prefix="xtnat-"))
+        cls.dex = build_dex(["Lcom/example/Native;"], ["loadLibrary", "doIt"],
+                            native_methods=[("Lcom/example/Native;", "doIt")])
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        import shutil
+        shutil.rmtree(cls.directory, ignore_errors=True)
+
+    def test_the_fixture_really_marks_a_method_native(self) -> None:
+        """Guard the fixture: a builder that silently emits nothing proves nothing."""
+        from xtforge.core.re import dex as _dex
+        report = _dex.native_methods(self.dex)
+        self.assertEqual(report["native_method_count"], 1, report)
+        self.assertEqual(report["native_methods"][0]["name"], "doIt")
+
+    def test_a_non_native_method_is_not_listed(self) -> None:
+        from xtforge.core.re import dex as _dex
+        report = _dex.native_methods(self.dex)
+        names = [m["name"] for m in report["native_methods"]]
+        self.assertNotIn("loadLibrary", names)
+
+    def test_the_jni_symbol_uses_underscore_for_the_package_separator(self) -> None:
+        """`com/example` becomes `com_example`, not `com_1example`.
+
+        The escaping rules exist so a package separator cannot be confused with a literal
+        underscore. Applying the underscore escape before the separator replacement produced
+        `Java_com_1example_Native_doIt` — a plausible-looking symbol that matches nothing.
+        """
+        from xtforge.core.re import dex as _dex
+        report = _dex.native_methods(self.dex)
+        self.assertEqual(report["jni_symbols"], ["Java_com_example_Native_doIt"])
+
+    def test_a_literal_underscore_in_a_class_name_is_escaped(self) -> None:
+        from xtforge.core.re import dex as _dex
+        self.assertEqual(_dex.jni_symbol("Lcom/example/My_Class;", "run"),
+                         "Java_com_example_My_1Class_run")
+
+    def test_semicolons_and_brackets_in_a_descriptor_are_escaped(self) -> None:
+        from xtforge.core.re import dex as _dex
+        self.assertEqual(
+            _dex.jni_symbol("Landroid/app/Activity;", "onCreate",
+                            "(Landroid/os/Bundle;)V"),
+            "Java_android_app_Activity_onCreate__(Landroid/os/Bundle_2)V")
+        self.assertEqual(_dex.jni_symbol("Lcom/a/b/C;", "f", "[I;"),
+                         "Java_com_a_b_C_f___3I_2")
+
+    def test_the_derived_symbol_matches_a_compiled_library(self) -> None:
+        """The real oracle: build a `.so` exporting the symbol and find it with `nm`."""
+        import shutil
+        import subprocess
+        if not shutil.which("gcc") or not shutil.which("nm"):
+            self.skipTest("needs gcc and nm")
+        from xtforge.core.re import dex as _dex
+        symbol = _dex.jni_symbol("Lcom/example/Native;", "doIt")
+        source = Path(self.directory) / "n.c"
+        source.write_text("__attribute__((visibility(\"default\")))\n"
+                          f"void {symbol}(void *env, void *self) {{ (void)env; (void)self; }}\n")
+        library = Path(self.directory) / "libnative.so"
+        built = subprocess.run(["gcc", "-shared", "-fPIC", "-o", str(library), str(source)],
+                               capture_output=True, text=True)
+        if built.returncode != 0:
+            self.skipTest(f"build failed: {built.stderr[:120]}")
+        exported = subprocess.run(["nm", "-D", "--defined-only", str(library)],
+                                  capture_output=True, text=True).stdout
+        self.assertIn(symbol, exported,
+                      f"{symbol} is not exported by a library compiled to export it")
+
+    def test_inspect_entry_reports_native_methods(self) -> None:
+        """The function `re apk` calls must carry the data, not only `inspect`."""
+        import zipfile
+        from xtforge.core.re import dex as _dex
+        archive = Path(self.directory) / "native.apk"
+        with zipfile.ZipFile(archive, "w") as handle:
+            handle.writestr("classes.dex", self.dex)
+        report = _dex.inspect_entry(archive, "classes.dex")
+        self.assertTrue(report["ok"], report.get("error"))
+        self.assertEqual(report["native_method_count"], 1)
+        self.assertEqual(report["jni_symbols"], ["Java_com_example_Native_doIt"])
+
+    def test_a_dex_with_no_natives_reports_zero_not_an_error(self) -> None:
+        from xtforge.core.re import dex as _dex
+        plain = build_dex(["Lcom/plain/Thing;"], ["go"])
+        report = _dex.native_methods(plain)
+        self.assertEqual(report["native_method_count"], 0)
+        self.assertEqual(report["jni_symbols"], [])
+
+    def test_truncated_input_fails_cleanly(self) -> None:
+        """A truncated DEX must raise `ValueError`, not something a caller cannot anticipate.
+
+        A too-small file is refused by the header check with a clear message; that is correct and
+        the assertion says so. What must never happen is an `IndexError` or `struct.error` from
+        deep inside the walk, because a caller parsing an untrusted archive has no way to
+        distinguish that from a bug in its own code.
+        """
+        from xtforge.core.re import dex as _dex
+        for cut in (16, 64, 200, len(self.dex) // 2):
+            try:
+                _dex.native_methods(self.dex[:cut])
+            except ValueError:
+                continue  # refusing a truncated file is the expected behaviour
+            except Exception as exc:  # noqa: BLE001 - anything else is a defect
+                self.fail(f"truncation at {cut} raised {type(exc).__name__}: {exc}")
