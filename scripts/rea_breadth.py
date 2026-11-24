@@ -115,7 +115,30 @@ cap("ELF notes / build-id", ["inspect_elf_notes"],
 cap("ELF unwind ranges", ["inspect_elf_unwind_ranges"],
     "elfmeta", "covered", probe=["re", "elfmeta", "{elf}"])
 cap("ELF dependencies (DT_NEEDED)", ["inspect_elf_dependencies"],
-    "needed", "covered", probe=["re", "needed", "{elf}"])
+    "needed", "covered",
+    "`re needed` reads DT_NEEDED and reports the shared libraries by name, which is what REA's "
+    "tool does. The row used to stop there, and a name is not an answer to the question the row "
+    "implies: a dependency's *version* is what decides whether it is vulnerable. That gap is now "
+    "closed by verbs that go past naming to identification and consequence, without inflating "
+    "this row's tool count — no REA tool was added to it. `re deps` inventories a tree or a "
+    "compiled artifact at exact versions across Go, npm, PyPI, crates.io, Maven, NuGet, "
+    "Packagist, RubyGems, pub and Hex: go.mod, go.sum, package.json, package-lock, Cargo.toml, "
+    "Cargo.lock, requirements.txt, pyproject.toml, Gemfile.lock, composer.lock, pom.xml, "
+    "packages.config, pubspec.yaml, and a Go binary's own buildinfo (verified against `go "
+    "version -m` on a binary built here: go1.27.3 and github.com/google/uuid 1.3.0). A manifest "
+    "holding a range rather than a pin is reported `resolved: false` and deliberately *not* "
+    "queried — a vulnerability is a property of a version, and attributing CVEs to a range's "
+    "lower bound manufactures findings. `re vulns` matches every pinned version against OSV and "
+    "decides from each advisory's own `affected` ranges, so a version above a `fixed` event is "
+    "not reported even though OSV still lists the package. `re remediate` plans the version bumps "
+    "and, with `--write`, applies them and confirms each by re-parsing the file. Measured end to "
+    "end on a two-package Go tree: 8 distinct vulnerabilities, both packages bumped, re-scan drops "
+    "to 6 with gin fully clean, original kept as go.mod.xtbak. Two bugs the tests caught: a "
+    "two-branch advisory range kept one mutable `inside` flag, so reaching the second `introduced` "
+    "made 1.6.0 read clean against an advisory it sits inside; and `apply()` computed `ok` from "
+    "the verification pass alone, so an edit rejected in the first pass returned success having "
+    "written nothing",
+    probe=["re", "deps", "{goproject}"])
 cap("ELF debug link", ["inspect_elf_debug_link"],
     "elfmeta", "covered",
     "section name and CRC-32 of the separate debug file, verified against zlib", probe=["re", "elfmeta", "{elf}"])
@@ -717,6 +740,17 @@ def _fixtures() -> dict[str, str]:
     electronfuse.write_bytes(b"\x7fELF" + b"\x00" * 60 + sentinel
                              + bytes([1, len(wire)]) + wire + b"\x00" * 60)
     out["electronfuse"] = str(electronfuse)
+
+    # A Go project with two dependencies pinned to versions that really are vulnerable, so the
+    # `re deps` probe exercises a manifest rather than an empty directory. No network is needed to
+    # inventory it; only `re vulns` reaches OSV, and the probe is `re deps`.
+    goproject_dir = workdir / "goproject"
+    goproject_dir.mkdir()
+    (goproject_dir / "go.mod").write_text(
+        "module example.com/probe\n\ngo 1.21\n\nrequire (\n"
+        "\tgithub.com/gin-gonic/gin v1.6.0\n"
+        "\tgolang.org/x/text v0.3.0\n)\n")
+    out["goproject"] = str(goproject_dir)
 
     crash = workdir / "f.crash"
     crash.write_text(_json.dumps({"crash_info": {"type": "EXC_BAD_ACCESS"},
