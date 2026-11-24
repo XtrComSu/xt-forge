@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="190" viewBox="0 0 1200 190" role="img" aria-labelledby="title">
+<title id="title">XT-Forge Capabilities</title>
+<rect width="100%" height="100%" fill="#000000"/>
+<rect x="15" y="15" width="1170" height="160" rx="14" fill="#040406" stroke="#1c1f2b" stroke-width="1.5"/>
+<path d="M34 16H1166" stroke="#ff2e3b" stroke-width="3" stroke-linecap="round"/>
+<rect x="31" y="32" width="270" height="126" rx="10" fill="#000000" stroke="#181a24" stroke-width="1"/>
+<text x="53" y="68" fill="#00ff9d" font-family="monospace, monospace" font-weight="700" font-size="21">• 1.35 KB</text>
+<text x="53" y="100" fill="#e2e8f0" font-family="system-ui, sans-serif" font-weight="600" font-size="14">--meta MCP Gateway</text>
+<text x="53" y="126" fill="#71717a" font-family="system-ui, sans-serif" font-size="12">Wraps Ghidra, Borer &amp; Craft Anything</text>
+<rect x="320" y="32" width="270" height="126" rx="10" fill="#000000" stroke="#181a24" stroke-width="1"/>
+<text x="342" y="68" fill="#ff2e3b" font-family="monospace, monospace" font-weight="700" font-size="21">• 7 / 7</text>
+<text x="342" y="100" fill="#e2e8f0" font-family="system-ui, sans-serif" font-weight="600" font-size="14">Benchmark Tiers Won</text>
+<text x="342" y="126" fill="#71717a" font-family="system-ui, sans-serif" font-size="12">100% pass rate vs raw 229-tool REA</text>
+<rect x="609" y="32" width="270" height="126" rx="10" fill="#000000" stroke="#181a24" stroke-width="1"/>
+<text x="631" y="68" fill="#00e5ff" font-family="monospace, monospace" font-weight="700" font-size="21">• 0 FPs</text>
+<text x="631" y="100" fill="#e2e8f0" font-family="system-ui, sans-serif" font-weight="600" font-size="14">AST Code Audit</text>
+<text x="631" y="126" fill="#71717a" font-family="system-ui, sans-serif" font-size="12">Verified on 190 CPython &amp; prod files</text>
+<rect x="898" y="32" width="270" height="126" rx="10" fill="#000000" stroke="#181a24" stroke-width="1"/>
+<text x="920" y="68" fill="#ffb700" font-family="monospace, monospace" font-weight="700" font-size="21">• 6.9 ms</text>
+<text x="920" y="100" fill="#e2e8f0" font-family="system-ui, sans-serif" font-weight="600" font-size="14">Native Rust + Go Core</text>
+<text x="920" y="126" fill="#71717a" font-family="system-ui, sans-serif" font-size="12">17.9x faster call-graph &amp; binary diff</text>
+</svg>

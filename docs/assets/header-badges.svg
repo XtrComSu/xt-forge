@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="36" viewBox="0 0 1180 36" role="img" aria-labelledby="title">
+<title id="title">XT-Forge v0.4.8-Damascus</title>
+<rect width="100%" height="100%" fill="none"/>
+<g font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, monospace" font-size="12">
+<g transform="translate(10, 6)">
+<rect width="189" height="24" rx="5" fill="#000000" stroke="#1f222e" stroke-width="1"/>
+<path d="M 0,5 Q 0,0 5,0 L 60,0 L 60,24 L 5,24 Q 0,24 0,19 Z" fill="#0d0e14"/>
+<path d="M 60,0 L 184,0 Q 189,0 189,5 L 189,19 Q 189,24 184,24 L 60,24 Z" fill="#ff2e3b"/>
+<text x="30.0" y="16" fill="#c0cad9" text-anchor="middle" font-weight="600">XT-OSS</text>
+<text x="124.5" y="16" fill="#ffffff" text-anchor="middle" font-weight="700">v0.4.8-Damascus</text>
+</g>
+<g transform="translate(211, 6)">
+<rect width="233" height="24" rx="5" fill="#000000" stroke="#1f222e" stroke-width="1"/>
+<path d="M 0,5 Q 0,0 5,0 L 90,0 L 90,24 L 5,24 Q 0,24 0,19 Z" fill="#0d0e14"/>
+<path d="M 90,0 L 228,0 Q 233,0 233,5 L 233,19 Q 233,24 228,24 L 90,24 Z" fill="#00ff9d"/>
+<text x="45.0" y="16" fill="#c0cad9" text-anchor="middle" font-weight="600">vs Raw REA</text>
+<text x="161.5" y="16" fill="#000000" text-anchor="middle" font-weight="700">93.3% Win (42/45)</text>
+</g>
+<g transform="translate(456, 6)">
+<rect width="218" height="24" rx="5" fill="#000000" stroke="#1f222e" stroke-width="1"/>
+<path d="M 0,5 Q 0,0 5,0 L 67,0 L 67,24 L 5,24 Q 0,24 0,19 Z" fill="#0d0e14"/>
+<path d="M 67,0 L 213,0 Q 218,0 218,5 L 218,19 Q 218,24 213,24 L 67,24 Z" fill="#252836"/>
+<text x="33.5" y="16" fill="#c0cad9" text-anchor="middle" font-weight="600">engines</text>
+<text x="142.5" y="16" fill="#ffffff" text-anchor="middle" font-weight="700">Rust + Go + Python</text>
+</g>
+<g transform="translate(686, 6)">
+<rect width="226" height="24" rx="5" fill="#000000" stroke="#1f222e" stroke-width="1"/>
+<path d="M 0,5 Q 0,0 5,0 L 90,0 L 90,24 L 5,24 Q 0,24 0,19 Z" fill="#0d0e14"/>
+<path d="M 90,0 L 221,0 Q 226,0 226,5 L 226,19 Q 226,24 221,24 L 90,24 Z" fill="#00e5ff"/>
+<text x="45.0" y="16" fill="#c0cad9" text-anchor="middle" font-weight="600">MCP schema</text>
+<text x="158.0" y="16" fill="#000000" text-anchor="middle" font-weight="700">1.35 KB (--meta)</text>
+</g>
+<g transform="translate(924, 6)">
+<rect width="211" height="24" rx="5" fill="#000000" stroke="#1f222e" stroke-width="1"/>
+<path d="M 0,5 Q 0,0 5,0 L 60,0 L 60,24 L 5,24 Q 0,24 0,19 Z" fill="#0d0e14"/>
+<path d="M 60,0 L 206,0 Q 211,0 211,5 L 211,19 Q 211,24 206,24 L 60,24 Z" fill="#ffb700"/>
+<text x="30.0" y="16" fill="#c0cad9" text-anchor="middle" font-weight="600">skills</text>
+<text x="135.5" y="16" fill="#000000" text-anchor="middle" font-weight="700">24 XTF-* Workflows</text>
+</g>
+<g transform="translate(1147, 6)">
+<rect width="107" height="24" rx="5" fill="#000000" stroke="#1f222e" stroke-width="1"/>
+<path d="M 0,5 Q 0,0 5,0 L 67,0 L 67,24 L 5,24 Q 0,24 0,19 Z" fill="#0d0e14"/>
+<path d="M 67,0 L 102,0 Q 107,0 107,5 L 107,19 Q 107,24 102,24 L 67,24 Z" fill="#3b82f6"/>
+<text x="33.5" y="16" fill="#c0cad9" text-anchor="middle" font-weight="600">license</text>
+<text x="87.0" y="16" fill="#ffffff" text-anchor="middle" font-weight="700">MIT</text>
+</g>
+</g>
+</svg>

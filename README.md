@@ -6,12 +6,9 @@
   <p><strong>Supreme local agent workbench for call-graph context, AST correctness auditing, normalized binary diffing, keyless CVE intel, and sub-1KB MCP routing.</strong></p>
   <p>Engineered in <strong>Rust</strong>, <strong>Go</strong>, and zero-dependency <strong>Python 3.11+</strong> under <strong>XT-OSS</strong> by <a href="https://xtrcom.xyz">XtrComSu</a>.</p>
   <p>
-    <a href="https://github.com/XtrComSu/xt-forge-dev/releases"><img src="https://img.shields.io/badge/XT--OSS-v0.4.8--Damascus-FF2E2E?style=flat-square&logo=github" alt="Release v0.4.8-Damascus" /></a>
-    <img src="https://img.shields.io/badge/vs%20Raw%20REA%20(5%20reps%20median)-93.3%25%20Standalone%20Win%20(42%2F45)-34D399?style=flat-square" alt="93.3% Standalone Pass Rate vs 22.2% Raw REA" />
-    <img src="https://img.shields.io/badge/engines-Rust%20%2B%20Go%20%2B%20Python%203.11%2B-0C0D12?style=flat-square" alt="Rust + Go + Python" />
-    <img src="https://img.shields.io/badge/MCP%20schema-1.35%20KB%20(--meta)-60A5FA?style=flat-square" alt="1.35 KB MCP Schema" />
-    <img src="https://img.shields.io/badge/skills-24%20XTF--*%20Workflows-F59E0B?style=flat-square" alt="24 XTF-* Skills" />
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3B82F6?style=flat-square" alt="MIT License" /></a>
+    <a href="https://github.com/XtrComSu/xt-forge-dev/releases">
+      <img src="docs/assets/header-badges.svg" alt="XT-Forge v0.4.8-Damascus" />
+    </a>
   </p>
   <p>
     <a href="#install-on-linux-macos-and-windows">Quickstart &amp; Install</a> ·
@@ -25,9 +22,7 @@
 </div>
 
 <p align="center">
-  <a href="https://xtrcom.xyz">
-    <img src="docs/assets/xt-oss-banner.png" alt="XT-Forge v0.4.8-Damascus" width="100%" />
-  </a>
+  <img src="docs/assets/overview-cards.svg" alt="XT-Forge Capabilities" width="100%" />
 </p>
 
 <p align="center">
