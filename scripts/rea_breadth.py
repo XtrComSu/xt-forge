@@ -87,13 +87,13 @@ cap("PE imports", ["inspect_pe_imports"],
 cap("PE exports", ["inspect_native_exports"],
     "pe", "covered")
 cap("Binary diff", ["compare_native_artifacts", "compare_native_functions"],
-    "diff", "covered")
+    "diff", "covered", probe=["re", "diff", "{elf}", "{elf2}"])
 cap("C++ RTTI / vtables", ["inspect_native_data_type"],
-    "rtti", "covered")
+    "rtti", "covered", probe=["re", "rtti", "{elf}"])
 cap("Demangling", ["demangle"],
-    "demangle", "covered")
+    "demangle", "covered", probe=["re", "demangle", "{elf}"])
 cap("Crash / recorded artifact", ["inspect_recorded_crash"],
-    "crash", "covered")
+    "crash", "covered", probe=["re", "crash", "{crash}"])
 
 # ------------------------------------------------------- ELF metadata surface
 cap("DWARF compile units", ["inspect_dwarf_units"],
@@ -106,13 +106,13 @@ cap("ELF dependencies (DT_NEEDED)", ["inspect_elf_dependencies"],
     "needed", "covered", probe=["re", "needed", "{elf}"])
 cap("ELF debug link", ["inspect_elf_debug_link"],
     "elfmeta", "covered",
-    "section name and CRC-32 of the separate debug file, verified against zlib")
+    "section name and CRC-32 of the separate debug file, verified against zlib", probe=["re", "elfmeta", "{elf}"])
 
 # --------------------------------------------------------------- other formats
 cap("WebAssembly inventory", ["inspect_wasm_artifact"],
     "wasm", "covered", probe=["re", "wasm", "{wasm}"])
 cap("WASM interface compare", ["compare_wasm_interfaces"],
-    "wasm compare", "covered")
+    "wasm compare", "covered", probe=["re", "wasm", "compare", "{wasm_a}", "{wasm_b}"])
 cap("UEFI firmware volume", ["inspect_uefi_firmware"],
     "firmware", "covered", probe=["re", "firmware", "{blob}"])
 cap("UEFI firmware extraction", ["extract_uefi_firmware"],
@@ -138,9 +138,9 @@ cap("Kernel cache", ["inspect_kernel_module"],
     "kernelcache", "covered")
 cap("Apple IPS crash reports", ["inspect_apple_ips"],
     "ips", "covered",
-    "two-object and single-document forms, faulting thread frames resolved to images")
+    "two-object and single-document forms, faulting thread frames resolved to images", probe=["re", "ips", "{ips}"])
 cap("plist", ["inspect_plist"],
-    "formats plist", "covered")
+    "formats plist", "covered", probe=["re", "formats", "plist", "{plist}"])
 cap("Asset catalog", ["inspect_asset_catalog"],
     "car", "covered",
     "BOMStore container: block table as (addr,size) pairs, per-block type tags, "
@@ -151,7 +151,7 @@ cap("devicetree", ["inspect_devicetree"],
     "nodes, properties, memory reservations; finds an FDT embedded in a container")
 cap("Kernel build config", ["inspect_kernel_build_config"],
     "kconfig", "covered",
-    "IKCONFIG gzip blob, /proc/config.gz and plaintext .config")
+    "IKCONFIG gzip blob, /proc/config.gz and plaintext .config", probe=["re", "kconfig", "{kconfig}"])
 cap("PE certificates", ["inspect_pe_certificates"],
     "pe certificates", "covered",
     "the table is located and described; the signature is not chained to a trust root")
@@ -174,7 +174,7 @@ cap("Rust binary metadata", ["inspect_rust_binary"],
     "verified against `rustc --version`; crate candidates inferred and labelled as "
     "inferences rather than presented as identity")
 cap("Python .pyc", ["inspect_python_pyc"],
-    "formats pyc", "covered")
+    "formats pyc", "covered", probe=["re", "formats", "pyc", "{pyc}"])
 cap("Erlang BEAM", ["inspect_erlang_beam"],
     "beam", "covered",
     "chunk inventory, module name, exports, compiler version and source paths")
@@ -186,7 +186,7 @@ cap("V8 code cache", ["inspect_v8_code_cache"],
 cap("SQLite database", ["inspect_sqlite_database"],
     "sqlite", "covered",
     "header parsed directly so truncated/hot-journalled files are described, "
-    "not refused; schema names cross-checked against the sqlite3 module")
+    "not refused; schema names cross-checked against the sqlite3 module", probe=["re", "sqlite", "{sqlite}"])
 cap("NTFS journal", ["inspect_ntfs_journal"],
     "ntfs", "partial",
     "volume, MFT, resident values with update-sequence fixups verified against ntfsls; "
@@ -202,7 +202,7 @@ cap("NTFS journal", ["inspect_ntfs_journal"],
     "so there is no real oracle on this host and the record layout stays unclaimed")
 cap("EVM interface", ["inspect_evm_interface"],
     "evm", "covered",
-    "selectors from the PUSH4/EQ dispatcher; raw bytecode or hex text")
+    "selectors from the PUSH4/EQ dispatcher; raw bytecode or hex text", probe=["re", "evm", "{evm}"])
 cap("il2cpp metadata", ["inspect_il2cpp_metadata"],
     "il2cpp", "partial",
     "74-field/296-byte global-metadata header (sanity 0xFAB11BAF, version) and a validated "
@@ -257,7 +257,7 @@ cap("Packet capture (TShark)", ["inspect_packet_capture", "inspect_packet_fields
     "netcap", "covered",
     "pcap and pcapng (both byte orders, micro/nano timestamps), HAR and SAZ: flows, "
     "endpoint attribution, plaintext HTTP requests with query redaction. No display "
-    "filter language of its own")
+    "filter language of its own", probe=["re", "netcap", "{pcapng}"])
 cap("Signal decoding (sigrok)", ["decode_signal_recording",
                                  "inspect_signal_decoders"],
     None, "out-of-lane", "requires sigrok decoders and a saved logic capture")
@@ -273,7 +273,7 @@ cap("Unknown tracking / ledger", ["list_unknowns", "record_unknown"],
     "unknowns", "covered",
     "per-binary obligation ledger: open/waived/resolved states, waivers require a "
     "reason, re-recording a resolved item reopens it, and `clean` gates a conclusion "
-    "on nothing being open")
+    "on nothing being open", probe=["re", "unknowns", "{elf}"])
 cap("Managed PE/CLI artifact", ["inspect_managed_artifact"],
     "managed artifact", "covered")
 cap("Managed members (types/methods/CIL)", ["inspect_managed_members"],
@@ -325,7 +325,7 @@ cap("Byte read and search", ["search_native_bytes", "read_bytes", "search_bytes"
 
 cap("String extraction and search", ["list_strings", "search_strings"],
     "strings", "covered",
-    "`re strings` extracts and filters string tables with encoding detection")
+    "`re strings` extracts and filters string tables with encoding detection", probe=["re", "strings", "{elf}"])
 
 cap("Symbol name demangling", ["demangle_swift"],
     "demangle", "covered",
@@ -334,17 +334,17 @@ cap("Symbol name demangling", ["demangle_swift"],
 cap("Procedure listing and metadata", ["list_procedures", "procedure_info",
     "procedure_address", "list_architectures", "binary_overview"],
     "functions", "covered",
-    "function table with address, size and name; `re functions` plus `re overview`")
+    "function table with address, size and name; `re functions` plus `re overview`", probe=["re", "functions", "{elf}"])
 
 cap("Segment and section listing", ["list_segments"],
     "sections", "covered",
-    "segment/section map with addresses, sizes and permission bits")
+    "segment/section map with addresses, sizes and permission bits", probe=["re", "sections", "{elf}"])
 
 cap("Procedure disassembly and instruction listing", ["procedure_assembly",
     "read_function_instructions", "procedure_callees", "procedure_callers",
     "analyze_function", "resolve_containing_procedure"],
     "disasm", "covered",
-    "`re disasm --target` gives instructions; `re callgraph` gives callees/callers")
+    "`re disasm --target` gives instructions; `re callgraph` gives callees/callers", probe=["re", "disasm", "{elf}"])
 
 cap("Cross-references", ["find_xrefs_to_name", "procedure_references"],
     "xrefs", "covered", "`re xrefs --target` resolves references to a named symbol")
@@ -352,7 +352,7 @@ cap("Cross-references", ["find_xrefs_to_name", "procedure_references"],
 cap("Pseudocode / decompilation", ["procedure_pseudo_code", "decompile_all",
     "batch_decompile", "decompile_jeb_item", "list_jeb_units"],
     "decompile", "covered",
-    "`re decompile` emits IL pseudocode; `re decompile --all` walks every function")
+    "`re decompile` emits IL pseudocode; `re decompile --all` walks every function", probe=["re", "decompile", "{elf}"])
 
 cap("Function search and matching", ["compare_functions", "match_native_functions",
     "search_procedures"],
@@ -367,7 +367,7 @@ cap("Call graph and call-path tracing", ["get_call_graph", "build_call_path",
     "trace_call_path", "resolve_native_call_targets"],
     "callgraph", "covered",
     "`re callgraph` builds the graph; `re graph --path A B` resolves a path between two "
-    "symbols")
+    "symbols", probe=["re", "callgraph", "{elf}"])
 
 cap("Artifact comparison (binary vs binary)", ["compare_artifacts", "compare_bundles",
     "compare_application_versions"],
@@ -447,7 +447,7 @@ cap("Firmware extraction and region inspection", ["extract_firmware", "extract_a
 
 cap("Dylib resolution tracing", ["trace_dylib_resolution"],
     "needed", "covered",
-    "`re needed` lists required dylibs/shared objects with their resolved load paths")
+    "`re needed` lists required dylibs/shared objects with their resolved load paths", probe=["re", "needed", "{elf}"])
 
 cap("Debugger session control (gdb / rizin / frida)", ["start_gdb_session",
     "gdb_console", "gdb_session_status", "close_gdb_session", "start_rizin_debug_session",
@@ -558,7 +558,7 @@ cap("Guided workflows and analysis guidance", ["guided_workflows", "inspect_guid
     "comes at that position, and what its result would tell you. Searchable by concept and by "
     "conclusion, plus a reverse lookup from any verb to its workflows and neighbours. The "
     "module validates every verb against the CLI at import and the parity test keeps the verb "
-    "list honest, so guidance cannot cite a command that does not exist")
+    "list honest, so guidance cannot cite a command that does not exist", probe=["re", "overview", "{elf}"])
 
 
 def _fixtures() -> dict[str, str]:
@@ -596,6 +596,148 @@ def _fixtures() -> dict[str, str]:
     blob = workdir / "blob.bin"
     blob.write_bytes(bytes(range(256)) * 8)
     out["blob"] = str(blob)
+
+    # The rest are generated too, for the same reason: a probe must test the tool, not whatever
+    # happens to be installed. 71 of 90 covered rows carried no probe at all, which means the
+    # claim was verified by nothing, and most of them only lacked a small well-formed input.
+    import json as _json
+    import sqlite3
+    import zipfile
+
+    db_path = workdir / "f.sqlite"
+    try:
+        connection = sqlite3.connect(db_path)
+        connection.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)")
+        connection.execute("INSERT INTO t (name) VALUES ('alpha')")
+        connection.commit()
+        connection.close()
+        out["sqlite"] = str(db_path)
+    except (sqlite3.Error, OSError):
+        pass
+
+    plist = workdir / "f.plist"
+    plist.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        '<plist version="1.0"><dict>'
+        '<key>CFBundleIdentifier</key><string>com.example.probe</string>'
+        '<key>CFBundleVersion</key><string>42</string>'
+        '</dict></plist>\n')
+    out["plist"] = str(plist)
+
+    import importlib.util as _ilu
+    pyc = workdir / "f.pyc"
+    try:
+        pyc.write_bytes(_ilu.MAGIC_NUMBER + b"\x00\x00\x00\x00" + b"\x00" * 12
+                        + b"probe")
+        out["pyc"] = str(pyc)
+    except (AttributeError, OSError):
+        pass
+
+    jar = workdir / "f.jar"
+    with zipfile.ZipFile(jar, "w") as archive:
+        archive.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n")
+    out["jar"] = str(jar)
+
+    pcapng = workdir / "f.pcapng"
+    pcapng.write_bytes(
+        bytes.fromhex("0a0d0d0a") + (28).to_bytes(4, "little")
+        + bytes.fromhex("4d3c2b1a") + (1).to_bytes(2, "little") + (0).to_bytes(2, "little")
+        + (0xFFFFFFFFFFFFFFFF).to_bytes(8, "little") + (28).to_bytes(4, "little"))
+    out["pcapng"] = str(pcapng)
+
+    crash = workdir / "f.crash"
+    crash.write_text(_json.dumps({"crash_info": {"type": "EXC_BAD_ACCESS"},
+                                  "procName": "probe", "pid": 1}))
+    out["crash"] = str(crash)
+
+    kconfig = workdir / "f.config"
+    kconfig.write_text("CONFIG_ARM64=y\nCONFIG_SMP=y\n# CONFIG_X is not set\n")
+    out["kconfig"] = str(kconfig)
+
+    evm = workdir / "f.evm"
+    evm.write_bytes(bytes.fromhex("6001600201600055"))
+    out["evm"] = str(evm)
+
+    ips = workdir / "f.ips"
+    ips.write_text('{"bug_type":"309","incident_id":"probe","os_version":"x"}')
+    out["ips"] = str(ips)
+
+    def _wasm(exports: list) -> bytes:
+        types = bytes.fromhex("01") + bytes([4, 0x60, 0x00, 0x00])
+        funcs = bytes.fromhex("03") + bytes([2, 1, 0])
+        body = bytes([len(exports)])
+        for name in exports:
+            body += bytes([len(name)]) + name.encode() + bytes([0x00, 0x00])
+        export_section = bytes.fromhex("07") + bytes([len(body)]) + body
+        code = bytes.fromhex("0a") + bytes([4, 1, 2, 0, 0x0B])
+        return bytes.fromhex("0061736d01000000") + types + funcs + export_section + code
+
+    for label, exports in (("wasm_a", ["alpha", "beta"]), ("wasm_b", ["beta", "gamma"])):
+        path = workdir / f"{label}.wasm"
+        path.write_bytes(_wasm(exports))
+        out[label] = str(path)
+
+    # A real PE, so every `pe` subcommand is probed against a genuine image rather than a
+    # hand-built header that could agree with a matching misreading.
+    mingw = next((c for c in ("x86_64-w64-mingw32-gcc", "i686-w64-mingw32-gcc")
+                  if shutil.which(c)), None)
+    if mingw:
+        pe_src = workdir / "pe.c"
+        pe_src.write_text("int add(int a,int b){return a+b;}\n"
+                          "int main(void){return add(1,2);}\n")
+        pe = workdir / "probe.exe"
+        built = subprocess.run([mingw, "-O0", "-o", str(pe), str(pe_src)],
+                               capture_output=True, text=True)
+        if built.returncode == 0 and pe.is_file():
+            out["pe"] = str(pe)
+
+    # A Go binary, which carries the buildinfo blob `formats go` reads.
+    if shutil.which("go"):
+        go_src = workdir / "gomain.go"
+        go_src.write_text('package main\nimport "fmt"\n'
+                          'func main(){ fmt.Println("probe") }\n')
+        go_bin = workdir / "probe_go"
+        built = subprocess.run(["go", "build", "-o", str(go_bin), str(go_src)],
+                               capture_output=True, text=True,
+                               env={**__import__("os").environ, "GO111MODULE": "off",
+                                    "GOFLAGS": "-mod=mod"})
+        if built.returncode == 0 and go_bin.is_file():
+            out["go"] = str(go_bin)
+
+    # A Rust binary, which carries the `.rustc` section `formats rust` reads.
+    if shutil.which("rustc"):
+        rust_src = workdir / "main.rs"
+        rust_src.write_text('fn main(){ println!("probe"); }\n')
+        rust_bin = workdir / "probe_rust"
+        built = subprocess.run(["rustc", "-o", str(rust_bin), str(rust_src)],
+                               capture_output=True, text=True)
+        if built.returncode == 0 and rust_bin.is_file():
+            out["rust"] = str(rust_bin)
+
+    # The APK already on this host: a real package, not a synthetic zip with a manifest.
+    for candidate in (Path.home() / "XT-OSS-Exynos9611/flash/XtStatus.apk",):
+        if candidate.is_file():
+            out["apk"] = str(candidate)
+
+    # A real GGUF, if one is still on disk, and the OVMF firmware volume from /tmp.
+    for label, candidate in (
+            ("gguf", Path.home() / "work/lunaris/xt-lunaris-v4-Q5_K_M.gguf"),
+            ("ovmf", Path("/tmp/ovmf_dec.bin"))):
+        if candidate.is_file():
+            out[label] = str(candidate)
+
+    if compiler and "elf" in out:
+        src2 = workdir / "probe2.c"
+        src2.write_text("int helper(int x){return x*4;}\n"
+                        "int main(void){return helper(9);}\n")
+        binary2 = workdir / "probe_elf2"
+        built2 = subprocess.run([compiler, "-O0", "-g", str(src2), "-o", str(binary2)],
+                                capture_output=True, text=True)
+        if built2.returncode == 0 and binary2.is_file():
+            out["elf2"] = str(binary2)
+
     return out
 
 

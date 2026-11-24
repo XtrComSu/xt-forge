@@ -1881,7 +1881,14 @@ def cmd_re(args):
                 lines.append(f"    rec {entry['record']:>3} {kind} "
                              f"{entry.get('name', '')}")
             human = "\n".join(lines)
-    elif verb in ("firmware", "fv", "uefi-firmware"):
+    elif verb in ("firmware", "fv", "uefi-firmware") and not (
+            res.get("volume") or res.get("files") or res.get("format")):
+        # Two engines answer for firmware and they return different shapes: `firmware.inspect`
+        # reports `format`/`volume`/`files`/`size`, `firmwarevolume.inspect_firmware_volume`
+        # reports `volume_count`/`file_size`/`file_count`. This branch only knows the second, so
+        # when it claimed the first its real data — 19 files in a 16 MB OVMF image — rendered as
+        # "UEFI firmware image (None volume(s), None bytes)". Deferring on the presence of the
+        # first shape's keys lets the later `firmware` branch, which was unreachable, render it.
         if not res.get("ok"):
             human = "firmware volume: " + str(res.get("error", "unknown"))
             if res.get("hint"):
@@ -2411,9 +2418,17 @@ def cmd_re(args):
                 lines.append(f"  {p_row.get('dll')}!{p_row.get('import_name')}"
                              f"  -> {p_row.get('managed_method')}")
             human = "\n".join(lines)
-    elif verb == "wasm" and isinstance(res.get("interface_identical"), bool):
+    elif verb == "wasm" and ("interface_identical" in res or "left_error" in res
+                             or "right_error" in res):
         if not res.get("ok"):
-            human = "wasm compare: " + str(res.get("error", "unknown"))
+            # A failed comparison has no `interface_identical`, and gating on that key sent it to
+            # the single-module renderer, which printed "format None version None size None" —
+            # a table of nulls where the reason belonged. The error names which side failed.
+            lines = ["wasm compare: " + str(res.get("error", "unknown"))]
+            for side in ("left_error", "right_error"):
+                if res.get(side):
+                    lines.append(f"  {side.split('_')[0]:<6} {res[side]}")
+            human = "\n".join(lines)
         else:
             left, right = res["left"], res["right"]
             lines = [f"wasm interface: {res['summary']}",
