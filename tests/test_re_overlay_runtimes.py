@@ -73,15 +73,24 @@ class TestReOverlayAndRuntimes(unittest.TestCase):
                 self.assertIn("...", auth_val)
                 self.assertNotIn("supersecret_token_value", auth_val)
 
+                # A real binary manifest, not a plain-text fake. The previous fixture was the
+                # bytes `android.permission.INTERNET`, which only a byte-scanner could satisfy —
+                # so this test was asserting the bug rather than the behaviour. A manifest whose
+                # pool is genuinely UTF-16LE is the only fixture that means anything here.
+                from xtforge.core.re import axml as _axml
                 apk_p = Path(td) / "test.apk"
                 with zipfile.ZipFile(apk_p, "w") as zf:
                     zf.writestr("classes.dex", b"dex\n035\x00")
-                    zf.writestr("AndroidManifest.xml", b"android.permission.INTERNET")
+                    zf.writestr("AndroidManifest.xml",
+                                _binary_manifest([("uses-permission",
+                                                   {"name": "android.permission.INTERNET"})]))
                     zf.writestr("lib/arm64-v8a/libnative.so", b"\x7fELF")
                 kres = rt.inspect_apk(apk_p)
                 self.assertTrue(kres["ok"])
                 self.assertIn("classes.dex", kres["dex_files"])
-                self.assertIn("android.permission.INTERNET", kres["permissions"])
+                self.assertIn("android.permission.INTERNET", kres["permissions"],
+                              f"permissions were {kres['permissions']}; the manifest is binary "
+                              "XML, so it must be decoded rather than scanned")
             finally:
                 if old is None:
                     os.environ.pop("XT_HOME", None)
@@ -126,3 +135,95 @@ class TestReOverlayAndRuntimes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _binary_manifest(children: list) -> bytes:
+    """Build a minimal but genuine Android binary XML manifest.
+
+    Structure: XML header, a UTF-16LE string pool, a resource map, then start/end element chunks.
+    Attribute geometry follows the platform: the element body begins at chunk+8, so
+    `attributeStart` (measured from chunk+16) points at chunk+16+20, and the records live there.
+    """
+    import struct as _struct
+
+    strings: list[str] = []
+    index: dict[str, int] = {}
+
+    def intern(value: str) -> int:
+        if value not in index:
+            index[value] = len(strings)
+            strings.append(value)
+        return index[value]
+
+    body = bytearray()
+
+    def element(tag: str, attributes: dict[str, str], *, start: bool) -> None:
+        tag_index = intern(tag)
+        if start:
+            for key in attributes:
+                intern(key)
+            for value in attributes.values():
+                intern(value)
+            header = bytearray(22)
+            _struct.pack_into("<I", header, 12, tag_index)   # name at chunk+20
+            _struct.pack_into("<H", header, 16, 20)          # attributeStart from chunk+16
+            _struct.pack_into("<H", header, 18, 20)          # attributeSize
+            _struct.pack_into("<H", header, 20, len(attributes))
+            records = bytearray()
+            for key, value in attributes.items():
+                record = bytearray(20)
+                _struct.pack_into("<I", record, 4, intern(key))
+                _struct.pack_into("<I", record, 8, intern(value))  # rawValue
+                record[15] = 0x03                                  # TYPE_STRING
+                _struct.pack_into("<I", record, 16, intern(value))
+                records += record
+            total = 16 + 20 + len(records)
+            chunk = bytearray(total)
+            _struct.pack_into("<H", chunk, 0, 0x0102)
+            _struct.pack_into("<H", chunk, 2, 16)
+            _struct.pack_into("<I", chunk, 4, total)
+            chunk[8:8 + len(header)] = header
+            chunk[36:36 + len(records)] = records
+            body.extend(chunk)
+        else:
+            chunk = bytearray(28)
+            _struct.pack_into("<H", chunk, 0, 0x0103)
+            _struct.pack_into("<H", chunk, 2, 16)
+            _struct.pack_into("<I", chunk, 4, 28)
+            _struct.pack_into("<I", chunk, 20, tag_index)
+            body.extend(chunk)
+
+    element("manifest", {"package": "com.example"}, start=True)
+    for tag, attributes in children:
+        element(tag, attributes, start=True)
+        element(tag, attributes, start=False)
+    element("manifest", {}, start=False)
+
+    data = bytearray()
+    offsets = []
+    for value in strings:
+        offsets.append(len(data))
+        encoded = value.encode("utf-16-le")
+        data += _struct.pack("<H", len(encoded) // 2) + encoded + b"\x00\x00"
+    while len(data) % 4:
+        data += b"\x00"
+    header_size = 28
+    pool_size = header_size + len(offsets) * 4 + len(data)
+    pool = bytearray(pool_size)
+    _struct.pack_into("<H", pool, 0, 0x0001)
+    _struct.pack_into("<H", pool, 2, header_size)
+    _struct.pack_into("<I", pool, 4, pool_size)
+    _struct.pack_into("<I", pool, 8, len(strings))
+    _struct.pack_into("<I", pool, 16, 0)                       # UTF-16LE
+    _struct.pack_into("<I", pool, 20, header_size + len(offsets) * 4)
+    for position, offset in enumerate(offsets):
+        _struct.pack_into("<I", pool, header_size + position * 4, offset)
+    pool[header_size + len(offsets) * 4:] = data
+
+    document = bytes(pool) + bytes(body)
+    out = bytearray(8 + len(document))
+    _struct.pack_into("<H", out, 0, 0x0003)
+    _struct.pack_into("<H", out, 2, 8)
+    _struct.pack_into("<I", out, 4, len(out))
+    out[8:] = document
+    return bytes(out)

@@ -149,17 +149,38 @@ def inspect_apk(path: str | Path) -> dict[str, Any]:
         dex = [n for n in names if n.endswith(".dex")]
         libs = [n for n in names if n.startswith("lib/") and n.endswith(".so")]
         has_manifest = "AndroidManifest.xml" in names
-        perms: list[str] = []
+        # The manifest is binary XML, and its string pool is UTF-16LE — so a byte scan for
+        # `android.permission.X` matches nothing at all. It did exactly that: this function
+        # returned `permissions: []` for a real APK carrying four. Decoding the format is the
+        # only way to read it, and it also yields components, exported flags and a resolved label.
+        manifest: dict[str, Any] = {}
+        resources: dict[int, str] = {}
         if has_manifest:
-            raw_m = zf.read("AndroidManifest.xml")
-            for m in re.findall(rb"android\.permission\.[A-Z0-9_]+", raw_m):
-                p = m.decode("ascii", errors="ignore")
-                if p not in perms:
-                    perms.append(p)
+            from . import axml
+            if "resources.arsc" in names:
+                try:
+                    resources = axml.parse_arsc(zf.read("resources.arsc"))
+                except (axml.AxmlError, OSError):
+                    resources = {}
+            try:
+                manifest = axml.inspect_manifest(canon, resources=resources)
+            except axml.AxmlError as exc:
+                manifest = {"ok": False, "error": str(exc)}
+        perms = [name for name in (manifest.get("permissions") or []) if name]
         return {
             "ok": True, "path": str(canon), "has_manifest": has_manifest,
             "dex_files": dex, "native_libs": libs[:40],
             "permissions": perms[:50], "total_entries": len(names), "engine": "python",
+            "package": manifest.get("package"),
+            "version_code": manifest.get("version_code"),
+            "version_name": manifest.get("version_name"),
+            "uses_sdk": manifest.get("uses_sdk") or {},
+            "components": manifest.get("components") or {},
+            "features": manifest.get("features") or [],
+            "application": manifest.get("application") or {},
+            "resource_count": len(resources),
+            "resources": {f"{key:#010x}": value for key, value in sorted(resources.items())},
+            "manifest_error": manifest.get("error"),
         }
 
 

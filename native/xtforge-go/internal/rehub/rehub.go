@@ -341,8 +341,20 @@ func InspectAPK(filePath string) map[string]any {
 		}
 	}
 
-	permissions := extractAXMLStrings(manifestBytes, `android\.permission\.[A-Z0-9_]+`)
-	components := extractAXMLStrings(manifestBytes, `[a-zA-Z0-9_]+\.(?:[a-zA-Z0-9_]+\.)+[A-Z][a-zA-Z0-9_]+(?:Activity|Service|Receiver|Provider)`)
+	// Decode the manifest rather than scraping it. The scraper over-reported permissions: on a
+	// real APK it returned five where four are declared, because a service's `permission=`
+	// attribute is not a requested permission. It also could not produce components at all —
+	// the regex matched nothing, so `components` was always empty.
+	permissions := []string{}
+	components := []AXMLComponent{}
+	var manifestSummary *AXMLManifest
+	if len(manifestBytes) > 0 {
+		if decoded, err := ParseAXMLManifest(manifestBytes); err == nil {
+			manifestSummary = decoded
+			permissions = decoded.Permissions
+			components = decoded.Components
+		}
+	}
 	jadxPath, _ := exec.LookPath("jadx")
 	apktoolPath, _ := exec.LookPath("apktool")
 
@@ -385,40 +397,12 @@ func InspectAPK(filePath string) map[string]any {
 		"assets":      assets,
 		"permissions": permissions,
 		"components":  components,
+		"manifest":    manifestSummary,
 		"backends": map[string]string{
 			"jadx":    jadxPath,
 			"apktool": apktoolPath,
 		},
 	}
-}
-
-func extractAXMLStrings(raw []byte, pat string) []string {
-	if len(raw) == 0 {
-		return nil
-	}
-	// Android binary XML stores strings in both UTF-8 and UTF-16LE string pools.
-	var asciiBuf strings.Builder
-	for i := 0; i < len(raw); i++ {
-		b := raw[i]
-		if b >= 0x20 && b <= 0x7e {
-			asciiBuf.WriteByte(b)
-		} else if b == 0 {
-			continue
-		} else {
-			asciiBuf.WriteByte(' ')
-		}
-	}
-	re := regexp.MustCompile(pat)
-	seen := map[string]bool{}
-	var out []string
-	for _, m := range re.FindAllString(asciiBuf.String(), -1) {
-		if !seen[m] {
-			seen[m] = true
-			out = append(out, m)
-		}
-	}
-	sort.Strings(out)
-	return out
 }
 
 func findBorerBinary() string {

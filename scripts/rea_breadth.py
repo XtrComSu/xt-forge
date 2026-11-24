@@ -490,9 +490,15 @@ cap("Android class and reference queries", ["search_android_classes",
     "dex-refs <apk> --symbol=<name>` finds where a method or field is declared across every "
     "`.dex` entry in the archive. Verified against a real APK: 36 classes scanned with framework "
     "superclasses resolved (`Landroid/service/quicksettings/TileService` for a real TileService "
-    "subclass), and 25 references to `onCreate`. Partial because resource decoding "
-    "(`decode_android_resources`) and JNI binding recovery are still not implemented here — "
-    "those need `resources.arsc` parsing and native-method-to-symbol matching")
+    "subclass), and 25 references to `onCreate`. Resource decoding "
+    "(`decode_android_resources`) is now implemented too: `AndroidManifest.xml` is decoded as the "
+    "binary XML it is — string pool, resource map, typed attributes — and `resources.arsc` is read "
+    "so a `label=\"@string/app_name\"` reference resolves to its text. That is verified against "
+    "the same APK: package `os.xt.status`, `versionCode 3` (a typed integer with no string in the "
+    "file), four declared permissions, and three components with their authoritative exported "
+    "flags. Partial only because JNI binding recovery "
+    "(`inspect_android_jni_bindings`) needs native-method-to-symbol matching, which is not "
+    "implemented")
 
 cap("Browser / Electron / web-runtime observation", ["capture_browser_scenario",
     "capture_electron_scenario", "capture_web_screenshot", "observe_web_execution",
