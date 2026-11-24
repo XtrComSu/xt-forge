@@ -336,6 +336,119 @@ def _render_gdb(res):
     return chr(10).join(lines)
 
 
+def _render_deps(res):
+    if not res.get("ok"):
+        lines = ["deps: " + str(res.get("error", "unknown"))]
+        if res.get("hint"):
+            lines.append("  hint " + str(res["hint"]))
+        return chr(10).join(lines)
+    ecosystems = res.get("ecosystems") or {}
+    lines = [f"Dependencies in {res.get('root')}",
+             f"  {res.get('dependency_count')} dependenc(ies) from "
+             f"{res.get('manifest_count')} manifest(s)"
+             f"  resolved {res.get('resolved_count')}"
+             f"  unresolved {res.get('unresolved_count')}"]
+    if ecosystems:
+        lines.append("  ecosystems  " + "  ".join(f"{name}={count}"
+                                                  for name, count in ecosystems.items()))
+    for entry in (res.get("toolchains") or [])[:4]:
+        lines.append(f"  toolchain   {entry.get('kind')} {entry.get('version')}")
+    for manifest in (res.get("manifests") or [])[:10]:
+        lines.append(f"  {manifest.get('kind'):<12} {manifest.get('path')}"
+                     f"  ({manifest.get('dependency_count')} deps, "
+                     f"{manifest.get('resolved_count')} resolved)")
+    for item in (res.get("dependencies") or [])[:25]:
+        pin = "" if item.get("resolved") else "  (range, not a pinned version)"
+        lines.append(f"    {str(item.get('ecosystem')):<9} {str(item.get('name'))[:44]:<44} "
+                     f"{str(item.get('version') or '-')[:16]:<16}{pin}")
+    if len(res.get("dependencies") or []) > 25:
+        lines.append(f"    ... {len(res['dependencies']) - 25} more")
+    if res.get("errors"):
+        lines.append(f"  {len(res['errors'])} manifest(s) could not be read:")
+        for error in res["errors"][:5]:
+            lines.append(f"    {error.get('path')}: {error.get('error')}")
+    return chr(10).join(lines)
+
+
+def _render_vulns(res):
+    if not res.get("ok"):
+        return "vulns: " + str(res.get("error", "unknown"))
+    counts = res.get("severity_counts") or {}
+    badge = "  ".join(f"{name}={count}" for name, count in counts.items()) or "none"
+    inventory = res.get("inventory") or {}
+    lines = [f"Vulnerability scan of {inventory.get('root') or '?'}",
+             f"  queried {res.get('queried_count')} dependenc(ies)"
+             f"  clean {res.get('clean_count')}"
+             f"  affected packages {res.get('affected_package_count')}",
+             f"  {res.get('vulnerability_count')} distinct vulnerabilit(ies)  {badge}"]
+    for finding in (res.get("findings") or [])[:12]:
+        lines.append(f"  {str(finding.get('worst_severity')):<8} "
+                     f"{str(finding.get('name'))[:40]} {finding.get('version')}"
+                     f"  ({finding.get('vulnerability_count')} vuln(s))")
+        for vuln in (finding.get("vulnerabilities") or [])[:4]:
+            fixed = ", ".join(vuln.get("fixed_in") or []) or "no fix published"
+            identifiers = vuln.get("alias_group") or [vuln.get("id")]
+            shown = identifiers[0] if identifiers else vuln.get("id")
+            lines.append(f"      {str(shown):<18} {str(vuln.get('severity')):<8} "
+                         f"fixed in {fixed}")
+            if vuln.get("summary"):
+                lines.append(f"          {str(vuln['summary'])[:88]}")
+    if res.get("unresolved_count"):
+        lines.append(f"  {res['unresolved_count']} dependenc(ies) had no pinned version and were "
+                     f"not queried:")
+        for item in (res.get("unresolved") or [])[:5]:
+            lines.append(f"    {item.get('ecosystem')} {item.get('name')} {item.get('version') or ''}")
+    if res.get("errors"):
+        lines.append(f"  {len(res['errors'])} lookup(s) failed; the scan is not complete")
+    if not res.get("findings"):
+        lines.append("  no vulnerabilities found"
+                     + ("" if res.get("complete") else " (but the scan is incomplete)"))
+    return chr(10).join(lines)
+
+
+def _render_remediate(res):
+    apply_report = res.get("apply") or {}
+    plan = res.get("plan") or {}
+    lines = [_render_vulns(res.get("scan") or {})]
+    lines.append("")
+    lines.append(f"Remediation plan: {plan.get('edit_count')} edit(s), "
+                 f"{plan.get('skipped_count')} skipped")
+    for edit in (plan.get("edits") or [])[:15]:
+        lines.append(f"  {str(edit.get('name'))[:40]:<40} {edit.get('from')} -> {edit.get('to')}"
+                     f"  ({len(edit.get('fixes') or [])} advisory(ies))")
+    for skip in (plan.get("skipped") or [])[:6]:
+        lines.append(f"  skip {str(skip.get('name'))[:36]:<36} {skip.get('reason')}")
+    lines.append(f"  {apply_report.get('note', '')}")
+    if apply_report.get("files_changed"):
+        lines.append("  files written:")
+        for path in apply_report["files_changed"]:
+            lines.append(f"    {path}")
+    for verified in (apply_report.get("verified") or [])[:10]:
+        mark = "ok" if verified.get("ok") else "FAILED"
+        lines.append(f"    [{mark}] {str(verified.get('name'))[:34]:<34} {verified.get('from')} "
+                     f"-> {verified.get('to')}  verified_by={verified.get('verified_by')}")
+    return chr(10).join(lines)
+
+
+def _render_cve_info(res):
+    if not res.get("ok"):
+        return "cve: " + str(res.get("error", "unknown"))
+    lines = [f"{res.get('id')}  {res.get('severity')}"
+             + (f"  CVSS {res.get('cvss')}" if res.get("cvss") is not None else ""),
+             f"  {str(res.get('summary') or '')[:100]}"]
+    if res.get("aliases"):
+        lines.append("  aliases     " + ", ".join(str(a) for a in res["aliases"][:6]))
+    for package in (res.get("affected_packages") or [])[:6]:
+        lines.append(f"  affects     {package.get('ecosystem')} {package.get('name')}")
+        for declared in (package.get("ranges") or [])[:3]:
+            events = " ".join(f"{key}:{value}" for event in declared.get("events") or []
+                              for key, value in event.items())
+            lines.append(f"    {declared.get('type')} {events[:88]}")
+    if res.get("details"):
+        lines.append("  details     " + str(res["details"])[:400].replace(chr(10), " "))
+    return chr(10).join(lines)
+
+
 def _render_cdp(res):
     if not res.get("ok"):
         lines = ["cdp: " + str(res.get("error", "unknown"))]
@@ -570,6 +683,71 @@ def cmd_re(args):
         else:
             res = _guidance.list_workflows()
         return _out(args, res, _render_guidance(res), code=0 if res.get("ok") else 2)
+
+    if verb in ("deps", "vulns", "cve-scan", "remediate", "cve-info"):
+        from ..core import deps as _deps
+        from ..core.deps import remediate as _remediate
+        from ..core.deps import vulns as _vulns
+
+        value = (getattr(args, "value", None) or "").strip()
+        symbol = getattr(args, "symbol", None)
+        limit = getattr(args, "limit", None) or 400
+
+        if verb == "cve-info":
+            res = _vulns.advisory(symbol or value)
+            return _out(args, res, _render_cve_info(res), code=0 if res.get("ok") else 2)
+
+        target = path or (value or ".")
+        # A compiled artifact carries its own module graph in buildinfo, which is what is actually
+        # deployed — stronger evidence than any manifest sitting in a tree.
+        if Path(target).is_file():
+            try:
+                raw = Path(target).read_bytes()[:4 * 1024 * 1024]
+            except OSError as exc:
+                res = {"ok": False, "error": str(exc), "path": str(target)}
+                return _out(args, res, _render_deps(res), code=2)
+            toolchains = _deps.detect_binary_toolchains(raw)
+            inventory = {
+                "ok": True, "root": str(target), "manifests": [], "manifest_count": 0,
+                "dependency_count": len(toolchains["embedded_modules"]),
+                "resolved_count": len(toolchains["embedded_modules"]),
+                "unresolved_count": 0,
+                "ecosystems": {"Go": len(toolchains["embedded_modules"])} if
+                               toolchains["embedded_modules"] else {},
+                "scopes": {"runtime": len(toolchains["embedded_modules"])},
+                "dependencies": toolchains["embedded_modules"],
+                "toolchains": toolchains["toolchains"], "errors": [], "complete": True,
+            }
+        else:
+            inventory = _deps.discover(target, include_dev=not getattr(args, "no_dev", False))
+            if not inventory.get("ok"):
+                return _out(args, inventory, _render_deps(inventory), code=2)
+            inventory["toolchains"] = []
+
+        if verb == "deps":
+            return _out(args, inventory, _render_deps(inventory),
+                        code=0 if inventory.get("ok") else 2)
+
+        scan = _vulns.scan(inventory.get("dependencies") or [], limit=limit,
+                           include_dev=not getattr(args, "no_dev", False))
+        scan["inventory"] = {key: inventory.get(key) for key in
+                             ("root", "manifest_count", "dependency_count", "resolved_count",
+                              "unresolved_count", "ecosystems", "toolchains")}
+
+        if verb in ("vulns", "cve-scan"):
+            return _out(args, scan, _render_vulns(scan), code=0 if scan.get("ok") else 2)
+
+        # remediate: plan, then apply only when explicitly asked.
+        plan = _remediate.plan(inventory.get("dependencies") or [], scan.get("findings") or [],
+                              allow_major=bool(getattr(args, "allow_major", False)),
+                              include_dev=not getattr(args, "no_dev", False))
+        write = bool(getattr(args, "write", False))
+        applied = _remediate.apply(plan.get("edits") or [], write=write) if plan.get("edits") else {
+            "ok": True, "applied_count": 0, "failure_count": 0, "files_changed": [],
+            "verified": [], "failures": [], "note": "nothing to remediate"}
+        result = {"ok": applied.get("ok", False), "scan": scan, "plan": plan, "apply": applied}
+        return _out(args, result, _render_remediate(result),
+                    code=0 if applied.get("ok") else 2)
 
     if verb == "cdp":
         from ..core.re import cdp as _cdp

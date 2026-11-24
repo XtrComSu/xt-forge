@@ -47,6 +47,7 @@ KNOWN_VERBS = frozenset({
     "maven", "nuget", "appbundle", "bundle", "bookmarks", "bulk",
     # The guidance verbs themselves, so a workflow may reference them.
     "guidance", "workflows", "guide", "cdp", "dex-search", "dex-refs", "hap", "model", "gdb",
+    "deps", "vulns", "cve-scan", "remediate", "cve-info",
 })
 
 # A step is (verb, purpose, what-the-result-tells-you). Every field is required: a purpose with

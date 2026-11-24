@@ -308,9 +308,16 @@ def _add_re(sub) -> None:
                                        "dex",
                                        "guidance", "workflows", "guide", "goto", "nav", "resume", "bookmark", "step", "capture-diff", "capture-compare", "correlate", "coverage", "recon-coverage", "evaluate-coverage", "api", "api-contract", "abi", "bundle-diff", "compare-bundles", "bundle-compare", "fn-match", "fnmatch", "match-functions", "firmware-carve", "carve", "extract-firmware", "evidence-export", "evidence-import", "app", "appgraph", "application-graph", "il2cpp", "il2cpp-metadata", "global-metadata", "dart", "dart-aot", "snapshot", "swift", "swift-types", "ntfs", "ntfs-journal", "firmware", "fv", "uefi-firmware", "assetcatalog", "car", "unknowns", "obligations", "v8cache", "codecache", "cdp", "dex-search", "dex-refs", "hap", "model", "gdb", "ptrace", "playwright",
                                        "objc", "objc-classes", "objc-protocols",
+                                       "deps", "vulns", "cve-scan", "remediate", "cve-info",
                                        "keyed", "keyed-archive", "jvm", "maven",
                                        "nuget", "appbundle", "bundle",
                                        "bookmarks", "bulk"])
+    r.add_argument("--write", action="store_true",
+                   help="remediate: actually write the edits (default is a verified dry run)")
+    r.add_argument("--allow-major", action="store_true",
+                   help="remediate: propose fixes that cross a major version")
+    r.add_argument("--no-dev", action="store_true",
+                   help="deps/vulns/remediate: skip dev and build dependencies")
     r.add_argument("value", nargs="?", default=None,
                    help="binary path, new project directory, or subverb")
     r.add_argument("path", nargs="?", default=None)
