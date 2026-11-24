@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the README workflow and captured CLI output as standalone SVG."""
+"""Render the README diagrams and captured CLI walkthroughs."""
 
 from html import escape
 import json
@@ -76,6 +76,33 @@ def capture(name: str) -> tuple[str, dict]:
     return command, json.loads(output)
 
 
+def feature_banner() -> str:
+    cards = [
+        ("ELF · PE · Mach-O", "Native inspection", "Sections, symbols and xrefs", "#ff303d"),
+        ("4 MCP tools", "Compact catalog", "Discover, schema, call and batch", "#5fa8fa"),
+        ("OSV", "Dependency checks", "Advisories for resolved versions", "#0ac68d"),
+        ("JSON", "Analysis output", "Structured results and saved evidence", "#f5b449"),
+    ]
+    body = [
+        '<rect width="100%" height="100%" fill="#0a0c11"/>',
+        '<rect x="15" y="15" width="1170" height="169" rx="17" fill="#10121a" stroke="#343949"/>',
+        '<path d="M34 16H1166" stroke="#ff303d" stroke-width="3" stroke-linecap="round"/>',
+    ]
+    for index, (headline, label, description, color) in enumerate(cards):
+        x = 31 + index * 289
+        body.extend([
+            f'<rect x="{x}" y="36" width="270" height="131" rx="12" fill="#151823" stroke="#2d3343"/>',
+            f'<circle cx="{x + 23}" cy="67" r="4" fill="{color}"/>',
+            f'<text x="{x + 37}" y="76" fill="#f2f4fa" font-family="monospace" '
+            f'font-weight="700" font-size="22">{escape(headline)}</text>',
+            f'<text x="{x + 20}" y="110" fill="#c2cada" font-family="system-ui,sans-serif" '
+            f'font-weight="600" font-size="15">{escape(label)}</text>',
+            f'<text x="{x + 20}" y="136" fill="#a3aec4" font-family="system-ui,sans-serif" '
+            f'font-size="13">{escape(description)}</text>',
+        ])
+    return svg("xt-forge capabilities", 1200, 199, "\n".join(body))
+
+
 def animation(filename: str, title: str, stages: list[tuple[str, str, list[str], list[tuple[str, str]]]]) -> None:
     def font(family: str, size: int):
         try:
@@ -84,38 +111,69 @@ def animation(filename: str, title: str, stages: list[tuple[str, str, list[str],
         except (OSError, subprocess.CalledProcessError):
             return ImageFont.load_default(size=size)
 
-    brand = font("sans-serif:style=Bold", 28)
-    heading = font("sans-serif:style=Bold", 23)
-    label = font("monospace:style=Bold", 14)
-    mono = font("monospace", 15)
-    small = font("monospace", 12)
+    heading = font("monospace:style=Bold", 19)
+    label = font("monospace:style=Bold", 15)
+    mono = font("monospace", 17)
+    small = font("monospace", 14)
+    icon_path = ASSETS.parent / "xtforge-icon.png"
+    with Image.open(icon_path) as logo:
+        icon = logo.convert("RGBA").resize((32, 32), Image.Resampling.LANCZOS)
     frames, durations = [], []
+    red, green, blue, white, muted = "#ff303d", "#25ce99", "#6aaefd", "#eef0f6", "#949eb3"
     for index, (stage, command, lines, details) in enumerate(stages):
-        for visible in range(0, len(lines) + 1, 1):
-            frame = Image.new("RGB", (960, 433), "#101116")
+        chrome = Image.new("RGB", (1200, 645), "#090a0e")
+        draw = ImageDraw.Draw(chrome)
+        draw.rounded_rectangle((18, 18, 1181, 626), 16, fill="#0f1016", outline="#363a49", width=2)
+        draw.rounded_rectangle((19, 19, 1180, 77), 15, fill="#15171e")
+        draw.rectangle((19, 51, 1180, 77), fill="#15171e")
+        chrome.paste(icon, (37, 32), icon)
+        draw.text((79, 30), f"XT-FORGE  //  {title.upper()}", fill=white, font=heading)
+        draw.text((79, 55), "Rust + Go + Python  /  CLI and MCP", fill=muted, font=small)
+        draw.rounded_rectangle((918, 32, 1157, 64), 8, fill="#13141a", outline=red)
+        draw.text((1037, 48), "XT-OSS  •  v0.4.8 DAMASCUS", fill=red, font=label, anchor="mm")
+        draw.line((19, 77, 1180, 77), fill=red)
+        x = 38
+        for step, (name, *_) in enumerate(stages):
+            tab = f"{step + 1:02d}  {name}"
+            width = int(draw.textlength(tab, font=label)) + 26
+            active = step == index
+            draw.rounded_rectangle((x, 93, x + width, 126), 7,
+                                   fill="#24181f" if active else "#171920",
+                                   outline=red if active else "#333747")
+            draw.text((x + 13, 109), tab, fill=white if active else muted, font=label, anchor="lm")
+            x += width + 10
+        draw.rounded_rectangle((38, 139, 1162, 582), 11, fill="#08090d", outline="#303443")
+        draw.text((42, 605), "XT-OSS  //  xt-forge  |  Rust + Go + Python", fill=muted, font=small, anchor="lm")
+        draw.text((1158, 605), "XT-STYLE  •  xtrcom.xyz", fill=red, font=label, anchor="rm")
+        prompt = "xt-forge:~$ "
+        command = command.removeprefix("$ ")
+        line_y = 161
+        text_x = 58 + int(draw.textlength(prompt, font=mono))
+        step_size = max(1, len(command) // 12)
+        typing = list(range(0, len(command), step_size))
+        for count in typing:
+            frame = chrome.copy()
             draw = ImageDraw.Draw(frame)
-            draw.rectangle((0, 0, 959, 4), fill="#ff5057")
-            draw.text((26, 14), "XT", fill="#ff5057", font=brand)
-            draw.text((76, 17), title, fill="#f1f3f9", font=heading)
-            draw.line((26, 58, 934, 58), fill="#393b48")
-            draw.rounded_rectangle((25, 75, 666, 365), 12, fill="#181a22", outline="#393b48")
-            draw.rounded_rectangle((684, 75, 934, 365), 12, fill="#191b23", outline="#393b48")
-            draw.text((44, 92), stage, fill="#ff8589", font=label)
-            draw.line((44, 121, 645, 121), fill="#393b48")
-            draw.text((44, 134), command, fill="#a2e8ca", font=small)
-            for row, line in enumerate(lines[:visible]):
-                draw.text((44, 166 + row * 21), line, fill="#e5e9f5", font=mono)
-            for row, (key, value) in enumerate(details):
-                y = 99 + row * 78
-                draw.text((703, y), key, fill="#a8b0c5", font=small)
-                draw.text((703, y + 24), value, fill="#f1f3f9", font=mono)
-            for step, (leg, *_) in enumerate(stages):
-                x = 25 + step * 300
-                color = "#ff5057" if step == index else "#555b6c"
-                draw.line((x, 389, x + 256, 389), width=2, fill=color)
-                draw.text((x, 398), leg, fill=color if step != index else "#f1f3f9", font=small)
+            draw.text((58, line_y), prompt, fill=red, font=mono)
+            draw.text((text_x, line_y), command[:count], fill=white, font=mono)
+            cursor = text_x + int(draw.textlength(command[:count], font=mono))
+            draw.rectangle((cursor, line_y + 1, cursor + 9, line_y + 19), fill=red)
             frames.append(frame)
-            durations.append(2200 if visible == len(lines) else (480 if visible == 0 else 180))
+            durations.append(65 if count else 230)
+        for visible in range(len(lines) + 1):
+            frame = chrome.copy()
+            draw = ImageDraw.Draw(frame)
+            draw.text((58, line_y), prompt, fill=red, font=mono)
+            draw.text((text_x, line_y), command, fill=white, font=mono)
+            for row, line in enumerate(lines[:visible]):
+                color = blue if line.lstrip().startswith("0x") else white
+                draw.text((58, 205 + row * 27), line, fill=color, font=mono)
+            if visible == len(lines):
+                summary = "   |   ".join(f"{key.lower()}: {value}" for key, value in details)
+                draw.rounded_rectangle((57, 528, 1141, 566), 7, fill="#111b1a", outline="#226f59")
+                draw.text((70, 547), summary, fill=green, font=small, anchor="lm")
+            frames.append(frame)
+            durations.append(2300 if visible == len(lines) else 105)
     frames[0].save(ASSETS / filename, save_all=True, append_images=frames[1:],
                    duration=durations, loop=0, optimize=True)
 
@@ -138,6 +196,7 @@ def main() -> None:
         f"Resolved: {inventory['resolved_count']}   Unresolved: {inventory['unresolved_count']}",
     ]
     figures = {
+        "features": feature_banner(),
         "workflow": workflow(),
         "disassembly": terminal("Instructions from main", [command, "", *instructions]),
         "dependencies": terminal("Dependency inventory", [deps_command, "", *deps]),

@@ -1,4 +1,5 @@
 <div align="center">
+  <a href="https://xtrcom.xyz"><img src="docs/assets/xtforge-icon.png" alt="XT-Forge logo" width="96" /></a>
   <h1>xt-forge</h1>
   <p>Binary inspection, code navigation, and an MCP gateway.</p>
   <p>
@@ -14,7 +15,7 @@ xt-forge reads ELF, Windows PE, and Mach-O binaries from the command line. Use i
 
 Version 0.4.8 adds dependency inventory and OSV advisory checks, expands binary and container inspection, and adds evidence export and comparison. [Changelog](CHANGELOG.md)
 
-![Workflow showing input files, analysis steps, and CLI, MCP, or evidence output](docs/assets/release-review/workflow.svg)
+![XT-Forge capabilities for native binaries, MCP, dependency advisories, and structured results](docs/assets/release-review/features.svg)
 
 ## Install
 
@@ -158,6 +159,8 @@ The gateway can connect to upstream tools such as Ghidra, IDA, and Borer when th
 
 ## Runtime and dispatch
 
+![Workflow showing input files, analysis steps, and CLI, MCP, or evidence output](docs/assets/release-review/workflow.svg)
+
 ```mermaid
 flowchart LR
     Shell["Shell or script"] --> Launcher["xt-forge CLI"]
@@ -180,6 +183,13 @@ Most file and source commands work offline. Advisory lookup contacts OSV. Backen
 ## Benchmarks
 
 The recorded 0.4.7 ELF and PE benchmark passed 70 of 70 checks against reference tools or known fixture results. A separate agent evaluation on 0.4.6 completed 42 of 45 tasks with standalone xt-forge and 10 of 45 with REA 6.7.0 on the same model and harness. [Methodology and results](docs/BENCHMARKS.md)
+
+<details>
+<summary>0.4.6 agent benchmark chart</summary>
+
+![Pass counts, wall time, and token usage across the nine agent benchmark tiers](docs/bench_9tier_charts.png)
+
+</details>
 
 ## Development
 
