@@ -4,8 +4,10 @@
   <p>Binary inspection, code navigation, and an MCP gateway.</p>
   <p>
     <a href="#install">Install</a> ·
+    <a href="#workflow-navigator">Workflow navigator</a> ·
     <a href="#binary-inspection">Binary inspection</a> ·
     <a href="#dependency-and-advisory-checks">Dependencies</a> ·
+    <a href="#source-navigation">Source navigation</a> ·
     <a href="#mcp">MCP</a> ·
     <a href="CHANGELOG.md">Changelog</a>
   </p>
@@ -16,6 +18,19 @@ xt-forge reads ELF, Windows PE, and Mach-O binaries from the command line. Use i
 Version 0.4.8 adds dependency inventory and OSV advisory checks, expands binary and container inspection, and adds evidence export and comparison. [Changelog](CHANGELOG.md)
 
 ![XT-Forge capabilities for native binaries, MCP, dependency advisories, and structured results](docs/assets/release-review/features.svg)
+
+## Workflow navigator
+
+Direct your workflow using the roadmap below to find the commands, guides, and tools for your target:
+
+[![XT-Forge Workflow Navigator: Native binaries, source navigation, supply chain, and agent gateway](docs/assets/release-review/navigator.svg)](#workflow-navigator)
+
+| Workflow | Primary task | Key commands | Output & Evidence |
+| --- | --- | --- | --- |
+| **[Native binaries](#binary-inspection)** | Header inspection, disassembly, CFG flow, and cross-references | `re overview`, `re disasm-native`, `re xrefs-native`, `re diff` | JSON image metadata, instruction lists, call references |
+| **[Source code](#source-navigation)** | Token-budgeted context search, AST callers, and dispatch traces | `route context`, `callers`, `code trace`, `code audit` | Relevant code windows, call hierarchy, active dispatch path |
+| **[Supply chain](#dependency-and-advisory-checks)** | Dependency resolution, OSV CVE queries, and guarded fixes | `re deps`, `re vulns`, `re remediate`, `re cve-info` | Resolved package versions, vulnerability findings, `.xtbak` patches |
+| **[AI Agent gateway](#mcp)** | Sub-1.4KB stdio MCP hub with on-demand tool discovery | `xt-forge --meta`, `xt_discover`, `xt_call`, `xt_batch` | Compact catalog (~350 tokens), schema on demand, tool execution |
 
 ## Install
 
@@ -122,40 +137,56 @@ xt-forge re remediate .
 
 `re deps` reads dependency manifests and supported compiled metadata, including Go build information. `re vulns` sends resolved package names and versions to OSV and checks the advisory's affected ranges. Unresolved version ranges stay in the inventory without an advisory lookup. `re cve-info` shows a single advisory by ID.
 
-The example reads a sample `go.mod` and shows the version recorded in the manifest alongside the resolved package identity used for advisory lookup.
+The walkthrough inspects a sample `go.mod`, resolves package identity for OSV lookup, and previews vulnerability findings with safe remediation.
 
-![Animated terminal walkthrough showing a Go manifest and the resolved dependency inventory](docs/assets/release-review/dependency-walkthrough.gif)
+![Animated terminal walkthrough showing dependency resolution and OSV vulnerability advisory remediation](docs/assets/release-review/dependency-walkthrough.gif)
 
-[Static inventory](docs/assets/release-review/dependencies.svg) · [Sample manifest](docs/assets/release-review/manifest.txt) · [Inventory output](docs/assets/release-review/dependencies.txt)
+[Static inventory](docs/assets/release-review/dependencies.svg) · [Sample manifest](docs/assets/release-review/manifest.txt) · [Inventory output](docs/assets/release-review/dependencies.txt) · [Remediation preview](docs/assets/release-review/remediation.txt)
 
 `re remediate` previews proposed version changes. Add `--write` to apply supported edits. The command verifies each candidate file before writing and retains an `.xtbak` copy of a changed file. Review the diff and run your package manager and tests before merging. [Example plan](docs/assets/session-captures/03-remediate-dry.txt)
 
 ## Source navigation
 
+Search token-budgeted context windows across large repositories, resolve caller hierarchies via AST parsing, and trace active runtime dispatch chains without reading files repeatedly.
+
 ```sh
-xt-forge route context . --query "where is the request routed?" --json
-xt-forge callers dispatch_request . --json
+xt-forge route context . --query "authenticate dispatch token" --json
+xt-forge callers authenticate . --json
 xt-forge trace dispatch_request . --json
 ```
 
-Use context search to collect relevant source, `callers` to trace references, and `trace` to follow re-exports and configured dispatch. See the [CLI guide](docs/GUIDE.md) and the [skill catalog](skills/README.md).
+The walkthrough queries authentication logic within token bounds, resolves callers of `authenticate` to their definitions and lines, and traces execution hops through dispatch handlers.
+
+![Animated terminal walkthrough showing context routing, callers hierarchy, and execution dispatch](docs/assets/release-review/source-walkthrough.gif)
+
+[Static source navigation](docs/assets/release-review/source-navigation.svg) · [Context search](docs/assets/release-review/source_context.txt) · [Callers graph](docs/assets/release-review/source_callers.txt) · [Dispatch trace](docs/assets/release-review/source_trace.txt)
+
+See the [CLI guide](docs/GUIDE.md) and the [skill catalog](skills/README.md) for full argument options.
 
 ## MCP
+
+Run xt-forge as a minimal stdio Model Context Protocol (MCP) server for AI coding agents:
 
 ```sh
 xt-forge --meta
 ```
 
-Register that command as a stdio MCP server in your client. The compact catalog exposes four tools:
+Instead of overwhelming the LLM's context window with dozens of tool schemas upfront (~25+ KB), the `--meta` gateway exposes a compact 4-tool catalog weighing only **1.35 KB** (~350 tokens). Tools and upstream engines (Ghidra, IDA, Borer) are discovered and loaded on demand.
 
 | Tool | Use |
 | --- | --- |
-| `xt_discover` | Find tools by name or task |
-| `xt_schema` | Read the argument schema for a selected tool |
-| `xt_call` | Run a tool |
-| `xt_batch` | Submit several tool calls |
+| `xt_discover` | Find tools on-demand by name, task, or keyword across native commands and connected upstreams |
+| `xt_schema` | Retrieve detailed argument schemas for a discovered tool before invocation |
+| `xt_call` | Execute an analysis tool with crash-safe journaling and automated error recovery |
+| `xt_batch` | Submit multiple read-only tool calls concurrently to minimise round trips |
 
-The gateway can connect to upstream tools such as Ghidra, IDA, and Borer when those backends are configured. See [MCP setup](docs/MCP-GATEWAY-AND-STEERING.md) and the [client configurations](integrations/).
+The walkthrough initializes the stdio gateway, queries for binary analysis tools, and runs `re_overview` through `xt_call` returning structured image JSON in 18ms.
+
+![Animated terminal walkthrough showing stdio MCP gateway initialization, tool discovery, and execution](docs/assets/release-review/mcp-walkthrough.gif)
+
+[Static MCP gateway](docs/assets/release-review/mcp-gateway.svg) · [Gateway init](docs/assets/release-review/mcp_init.txt) · [Tool discovery](docs/assets/release-review/mcp_discover.txt) · [Tool execution](docs/assets/release-review/mcp_call.txt)
+
+See [MCP setup](docs/MCP-GATEWAY-AND-STEERING.md) and the [client configurations](integrations/) for Claude Desktop, OpenCode, and Cline presets.
 
 ## Runtime and dispatch
 

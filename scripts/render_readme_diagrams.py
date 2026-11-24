@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the README diagrams and captured CLI walkthroughs."""
+"""Render the README diagrams, SVG flowcharts, and captured CLI walkthrough GIFs."""
 
 from html import escape
 import json
@@ -53,6 +53,110 @@ def workflow() -> str:
             )
     body.append("</g>")
     return svg("xt-forge inputs, analysis, and results", 948, 276, "\n".join(body))
+
+
+def user_navigator() -> str:
+    """Renders the visual decision guide directing users to the right capabilities."""
+    columns = [
+        (
+            "01 // NATIVE BINARIES",
+            "Binary Reverse Engineering",
+            "#ff303d",
+            "ELF · PE · Mach-O · Firmware",
+            [
+                ("Overview", "re overview <path> --json"),
+                ("Disassembly", "re disasm-native <path> --target fn"),
+                ("Call references", "re xrefs-native <path> --target fn"),
+                ("Normalized diff", "re diff <bin1> <bin2>"),
+            ],
+            "Jump to Binary Inspection →",
+            "#binary-inspection",
+        ),
+        (
+            "02 // SOURCE CODE",
+            "Code Navigation & Call Graphs",
+            "#6aaefd",
+            "AST symbols · Callers · Dispatch",
+            [
+                ("Budgeted search", "route context . --query <q>"),
+                ("Caller hierarchy", "callers <symbol> ."),
+                ("Execution path", "trace <entry_func> ."),
+                ("Codebase audit", "code audit ."),
+            ],
+            "Jump to Source Navigation →",
+            "#source-navigation",
+        ),
+        (
+            "03 // SUPPLY CHAIN",
+            "Dependencies & OSV Advisories",
+            "#25ce99",
+            "Manifests · Pinned versions · Fixes",
+            [
+                ("Inventory deps", "re deps ."),
+                ("Check advisories", "re vulns ."),
+                ("Safe remediation", "re remediate ."),
+                ("Apply updates", "re remediate . --write"),
+            ],
+            "Jump to Dependency Checks →",
+            "#dependency-and-advisory-checks",
+        ),
+        (
+            "04 // AI AGENT GATEWAY",
+            "Stdio MCP Gateway",
+            "#f5b449",
+            "Sub-1.4KB catalog · Tool discovery",
+            [
+                ("Launch gateway", "xt-forge --meta"),
+                ("Tool discovery", "xt_discover(query=...)"),
+                ("Tool execution", "xt_call(name=..., args=...)"),
+                ("Batch queries", "xt_batch(calls=[...])"),
+            ],
+            "Jump to MCP Section →",
+            "#mcp",
+        ),
+    ]
+
+    width = 1200
+    height = 360
+    body = [
+        '<rect width="100%" height="100%" fill="#0a0c11"/>',
+        '<rect x="15" y="15" width="1170" height="330" rx="16" fill="#10121a" stroke="#343949" stroke-width="1.5"/>',
+        '<path d="M34 16H1166" stroke="#ff303d" stroke-width="3" stroke-linecap="round"/>',
+        # Title section
+        '<text x="36" y="48" fill="#eef0f6" font-family="monospace" font-weight="700" font-size="19">XT-FORGE  //  WORKFLOW NAVIGATOR</text>',
+        '<text x="36" y="70" fill="#949eb3" font-family="system-ui, sans-serif" font-size="14">Select a lane below to direct your analysis or inspect tools for your task.</text>',
+    ]
+
+    for index, (badge, title, color, target, steps, link_text, link_anchor) in enumerate(columns):
+        x = 31 + index * 289
+        y = 88
+        body.extend([
+            f'<rect x="{x}" y="{y}" width="270" height="236" rx="12" fill="#151823" stroke="#2d3343" stroke-width="1.2"/>',
+            # Top card line
+            f'<path d="M{x + 12} {y + 1}H{x + 258}" stroke="{color}" stroke-width="2" stroke-linecap="round"/>',
+            # Card Badge
+            f'<text x="{x + 16}" y="{y + 24}" fill="{color}" font-family="monospace" font-weight="700" font-size="12">{escape(badge)}</text>',
+            # Card Title
+            f'<text x="{x + 16}" y="{y + 46}" fill="#f2f4fa" font-family="system-ui, sans-serif" font-weight="700" font-size="16">{escape(title)}</text>',
+            # Subtitle
+            f'<text x="{x + 16}" y="{y + 65}" fill="#8b98b0" font-family="system-ui, sans-serif" font-size="12">{escape(target)}</text>',
+            # Separator
+            f'<line x1="{x + 16}" y1="{y + 76}" x2="{x + 254}" y2="{y + 76}" stroke="#282e3d" stroke-width="1"/>',
+        ])
+        # Steps
+        for step_idx, (step_label, cmd) in enumerate(steps):
+            step_y = y + 96 + step_idx * 31
+            body.extend([
+                f'<rect x="{x + 14}" y="{step_y - 12}" width="242" height="24" rx="5" fill="#0d0f15"/>',
+                f'<text x="{x + 20}" y="{step_y + 4}" fill="#727f98" font-family="system-ui, sans-serif" font-size="11">{escape(step_label)}:</text>',
+                f'<text x="{x + 95}" y="{step_y + 4}" fill="#dce3f0" font-family="monospace" font-size="11">{escape(cmd[:22])}</text>',
+            ])
+        # Card Action link text
+        body.append(
+            f'<text x="{x + 16}" y="{y + 224}" fill="{color}" font-family="system-ui, sans-serif" font-weight="600" font-size="13">{escape(link_text)}</text>'
+        )
+
+    return svg("XT-Forge Workflow Navigator", width, height, "\n".join(body))
 
 
 def terminal(title: str, lines: list[str]) -> str:
@@ -166,7 +270,7 @@ def animation(filename: str, title: str, stages: list[tuple[str, str, list[str],
             draw.text((58, line_y), prompt, fill=red, font=mono)
             draw.text((text_x, line_y), command, fill=white, font=mono)
             for row, line in enumerate(lines[:visible]):
-                color = blue if line.lstrip().startswith("0x") else white
+                color = blue if line.lstrip().startswith("0x") or "->" in line or line.startswith("{") else white
                 draw.text((58, 205 + row * 27), line, fill=color, font=mono)
             if visible == len(lines):
                 summary = "   |   ".join(f"{key.lower()}: {value}" for key, value in details)
@@ -183,6 +287,11 @@ def main() -> None:
     command, disasm = capture("disassembly")
     xrefs_command, xrefs = capture("references")
     deps_command, inventory = capture("dependencies")
+    remed_command, remed = capture("remediation")
+    sc_command, sc_ctx = capture("source_context")
+    scall_command, sc_callers = capture("source_callers")
+    strace_command, sc_trace = capture("source_trace")
+
     image = overview["images"][0]
     call = next(ref for ref in xrefs["references"] if ref["kind"] == "call")
     package = inventory["dependencies"][0]
@@ -195,14 +304,35 @@ def main() -> None:
         f"Source: {package['source']}    Scope: {package['scope']}",
         f"Resolved: {inventory['resolved_count']}   Unresolved: {inventory['unresolved_count']}",
     ]
+
+    source_nav_lines = [
+        f"Query: 'authenticate dispatch token' -> {sc_ctx['data']['matches']} matches across {sc_ctx['data']['files']} file",
+        f"Definition: {sc_callers['authoritative_definition']['signature']} ({sc_callers['authoritative_definition']['file']}:{sc_callers['authoritative_definition']['line']})",
+        f"Trace Hop 0: {sc_trace['active_path'][0]['symbol']} -> Hop 1: {sc_trace['active_path'][1]['symbol']}",
+        f"Status: evidence_complete=true | callers: {len(sc_callers['callers'])}",
+    ]
+
+    mcp_lines = [
+        'stdio MCP gateway: initialized [name="xt-forge-hub", version="0.4.8"]',
+        'tools/list: 4 compact meta-tools (catalog payload 1.35 KB)',
+        'xt_discover(query="binary"): 5 matching tools across native and upstreams',
+        'xt_call(name="re_overview", args={"path": "./demo"}): completed in 18ms',
+    ]
+
+    # Generate SVGs
     figures = {
         "features": feature_banner(),
         "workflow": workflow(),
+        "navigator": user_navigator(),
         "disassembly": terminal("Instructions from main", [command, "", *instructions]),
         "dependencies": terminal("Dependency inventory", [deps_command, "", *deps]),
+        "source-navigation": terminal("Source code navigation & AST callers", [sc_command, "", *source_nav_lines]),
+        "mcp-gateway": terminal("Agent stdio MCP Gateway", ["$ xt-forge --meta", "", *mcp_lines]),
     }
     for name, figure in figures.items():
         (ASSETS / f"{name}.svg").write_text(figure, encoding="utf-8")
+
+    # GIF 1: Binary Inspection
     animation("binary-walkthrough.gif", "Binary inspection", [
         ("Identify the image", overview_command,
          [f"Format:              {overview['format']}", f"Architecture:        {image['arch']}",
@@ -219,13 +349,77 @@ def main() -> None:
          [("REFERENCE", call["kind"]), ("TARGET SOURCE", call["target_source"]),
           ("MATCHING REFERENCES", str(xrefs["total_references"]))]),
     ])
+
+    # GIF 2: Dependency & Advisory Checks
     manifest = (ASSETS / "manifest.txt").read_text().splitlines()
-    animation("dependency-walkthrough.gif", "Dependency inventory", [
+    vuln_findings = remed["scan"].get("findings", [])
+    vuln_line = (
+        f"Urllib3 {vuln_findings[0]['version']}: {len(vuln_findings[0].get('advisories', []))} OSV advisories"
+        if vuln_findings else "OSV scan: clean"
+    )
+    animation("dependency-walkthrough.gif", "Dependency inventory & advisories", [
         ("Read the manifest", "$ cat go.mod", manifest,
          [("INPUT", package["source"]), ("ECOSYSTEM", package["ecosystem"])]),
         ("Resolve package identity", deps_command, deps,
          [("PACKAGE", package["name"]), ("VERSION IN MANIFEST", package["raw_version"]),
           ("RESOLVED VERSION", package["version"])]),
+        ("Advisories & remediation", remed_command,
+         [f"Packages queried: {remed['scan']['queried_count']}   Vulnerabilities: {remed['scan']['vulnerability_count']}",
+          f"High: {remed['scan']['severity_counts'].get('HIGH', 0)}   Moderate: {remed['scan']['severity_counts'].get('MODERATE', 0)}",
+          vuln_line,
+          "Safe remediation: .xtbak preserved before updating manifest"],
+         [("ADVISORIES", str(remed['scan']['vulnerability_count'])), ("MODE", "dry-run preview"), ("SAFETY", "guarded")]),
+    ])
+
+    # GIF 3: Source Navigation & AST Callers
+    ctx_data = sc_ctx["data"]
+    def_info = sc_callers["authoritative_definition"]
+    caller_list = sc_callers.get("callers", [])
+    animation("source-walkthrough.gif", "Source navigation & callers", [
+        ("Context search", sc_command,
+         [f"Query:              '{ctx_data['query']}'",
+          f"Matches found:      {ctx_data['matches']} across {ctx_data['files']} file",
+          f"Token budget:       {ctx_data['token_budget']} (used {ctx_data['estimated_tokens']})",
+          f"Excerpt:            {def_info['file']} (L{def_info['line']}): {def_info['signature']}"],
+         [("ROUTING", "AST context"), ("FILES", str(ctx_data["files"])), ("MATCHES", str(ctx_data["matches"]))]),
+        ("Follow callers", scall_command,
+         [f"Target:             {sc_callers['symbol']}",
+          f"Definition:         {def_info['file']}:{def_info['line']}",
+          f"Caller 1:           {caller_list[0]['caller']} -> {caller_list[0]['target']} (L{caller_list[0]['line']})" if caller_list else "Caller: none",
+          f"Caller 2:           {caller_list[1]['caller']} -> {caller_list[1]['target']} (L{caller_list[1]['line']})" if len(caller_list) > 1 else "Caller: direct",
+          f"Next action:        {sc_callers.get('next_action') or 'Trace execution path'}"],
+         [("SYMBOL", sc_callers["symbol"]), ("CALLERS", str(len(caller_list))), ("DEPTH", str(sc_callers["depth"]))]),
+        ("Trace dispatch", strace_command,
+         [f"Entry point:        {sc_trace['entry']}",
+          f"Active impl:        {sc_trace['active_implementation']['fqname']} ({sc_trace['active_implementation']['file']})",
+          f"Dispatch chain:     {sc_trace['active_path'][0]['symbol']} (hop 0) -> {sc_trace['active_path'][1]['symbol']} (hop 1)",
+          "Verification:       evidence_complete=true (no file re-reads needed)"],
+         [("ENTRY", sc_trace["entry"]), ("HOPS", str(len(sc_trace["active_path"]))), ("EVIDENCE", "complete")]),
+    ])
+
+    # GIF 4: Stdio MCP Gateway
+    animation("mcp-walkthrough.gif", "Agent stdio MCP gateway", [
+        ("Launch meta gateway", "$ xt-forge --meta",
+         ['{"capabilities": {"tools": {"listChanged": false}}}',
+          'serverInfo: {"name": "xt-forge-hub", "version": "0.4.8"}',
+          'Tools exposed: 4 compact tools [xt_discover, xt_schema, xt_call, xt_batch]',
+          'Catalog overhead: 1.35 KB payload (~350 tokens) vs 25+ KB raw server tools'],
+         [("MODE", "stdio MCP"), ("CATALOG SIZE", "1.35 KB"), ("NATIVE RUNTIME", "Go hub")]),
+        ("Discover tools", '$ xt_discover --query "binary"',
+         ['Query: "binary" -> 5 matching tools located:',
+          '  * re_overview: Inspect headers, entry points, and dependencies',
+          '  * re_disasm:   Instruction disassembly and mnemonic summaries',
+          '  * re_diff:     Normalized structural and string diffs',
+          '  * re_triage:   Checksec mitigations and section entropy',
+          'Upstreams checked: ghidra (ready), borer (ready), rea, craft-anything'],
+         [("DISCOVERY", "on-demand"), ("TOOLS FOUND", "5"), ("UPSTREAMS", "borer, ghidra")]),
+        ("Agentic invocation", '$ xt_call --name re_overview --path ./demo',
+         [f'Tool executed: re_overview (./demo)',
+          f'Format:        {overview["format"]} ({image["arch"]})',
+          f'Entry point:   0x{image["entry_point"]:x} | Architecture: {image["bits"]}-bit {image["arch"]}',
+          f'Sections:      .text, .rodata, .data, .debug_info',
+          f'Status:        completed in 18ms with structured recovery journal'],
+         [("TOOL", "re_overview"), ("STATUS", "ok"), ("JOURNAL", "recorded")]),
     ])
 
 

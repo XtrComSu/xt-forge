@@ -8,17 +8,24 @@ $ xt-forge re deps . --json
       "kind": "go",
       "dependency_count": 1,
       "resolved_count": 1
+    },
+    {
+      "path": "requirements.txt",
+      "kind": "pip",
+      "dependency_count": 2,
+      "resolved_count": 2
     }
   ],
-  "manifest_count": 1,
-  "dependency_count": 1,
-  "resolved_count": 1,
+  "manifest_count": 2,
+  "dependency_count": 3,
+  "resolved_count": 3,
   "unresolved_count": 0,
   "ecosystems": {
+    "PyPI": 2,
     "Go": 1
   },
   "scopes": {
-    "runtime": 1
+    "runtime": 3
   },
   "dependencies": [
     {
@@ -34,6 +41,36 @@ $ xt-forge re deps . --json
         {
           "path": "go.mod",
           "kind": "go"
+        }
+      ]
+    },
+    {
+      "name": "requests",
+      "version": "2.25.0",
+      "ecosystem": "PyPI",
+      "raw_version": "==2.25.0",
+      "resolved": true,
+      "source": "requirements",
+      "scope": "runtime",
+      "sources": [
+        {
+          "path": "requirements.txt",
+          "kind": "pip"
+        }
+      ]
+    },
+    {
+      "name": "urllib3",
+      "version": "1.26.4",
+      "ecosystem": "PyPI",
+      "raw_version": "==1.26.4",
+      "resolved": true,
+      "source": "requirements",
+      "scope": "runtime",
+      "sources": [
+        {
+          "path": "requirements.txt",
+          "kind": "pip"
         }
       ]
     }

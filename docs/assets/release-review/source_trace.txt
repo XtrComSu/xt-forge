@@ -1,0 +1,41 @@
+$ xt-forge code trace dispatch_request . --json
+{
+  "ok": true,
+  "entry": "dispatch_request",
+  "found": true,
+  "evidence_complete": true,
+  "next_action": "STOP_AND_ANSWER: evidence_complete=true; cite active_implementation, active_path, config_values, and inactive_candidates directly without re-reading files.",
+  "active_implementation": {
+    "name": "authenticate",
+    "fqname": "service.authenticate",
+    "module": "service",
+    "file": "service.py",
+    "line": 3,
+    "excerpt": "3: def authenticate(token: str) -> bool:\n4:     \"\"\"Verify API bearer credentials.\"\"\"\n5:     return bool(token and token.startswith(\"Bearer xt-\"))"
+  },
+  "active_path": [
+    {
+      "hop": 0,
+      "kind": "entry_definition",
+      "symbol": "dispatch_request",
+      "module": "service",
+      "file": "service.py",
+      "line": 7,
+      "excerpt": "7: def dispatch_request(route: str, token: str):\n8:     \"\"\"Route authorized API requests to handlers.\"\"\"\n9:     if not authenticate(token):\n10:         raise PermissionError(\"Invalid API token\")\n11:     return {\"status\": \"ok\", \"route\": route}"
+    },
+    {
+      "hop": 1,
+      "kind": "resolved_implementation",
+      "symbol": "authenticate",
+      "fqname": "service.authenticate",
+      "module": "service",
+      "file": "service.py",
+      "line": 3,
+      "excerpt": "3: def authenticate(token: str) -> bool:\n4:     \"\"\"Verify API bearer credentials.\"\"\"\n5:     return bool(token and token.startswith(\"Bearer xt-\"))"
+    }
+  ],
+  "disputed_edges": [],
+  "inactive_candidates": [],
+  "config_values": {},
+  "same_named_symbols": {}
+}

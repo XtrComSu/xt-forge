@@ -1,0 +1,4 @@
+$ xt_call --name re_overview --path ./demo
+usage: xt-forge [-h] [-V] [--json] [--db DB] [--flash-base FLASH_BASE]
+                {search,tool,mem,recall,artifact,knowledge,design,mcp,research,guard,swarm,session,skills,flash,goal,build,route,code,prompt,re,docs,test,intel,hub,scan,taste,plugin,loop,codec,recon,eval,phone,compress,slash,sync,calibrate,tools,ascii,version,doctor} ...
+xt-forge: error: argument noun: invalid choice: 're_overview' (choose from 'search', 'tool', 'mem', 'recall', 'artifact', 'knowledge', 'design', 'mcp', 'research', 'guard', 'swarm', 'session', 'skills', 'flash', 'goal', 'build', 'route', 'code', 'prompt', 're', 'docs', 'test', 'intel', 'hub', 'scan', 'taste', 'plugin', 'loop', 'codec', 'recon', 'eval', 'phone', 'compress', 'slash', 'sync', 'calibrate', 'tools', 'ascii', 'version', 'doctor')

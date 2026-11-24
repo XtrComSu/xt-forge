@@ -1,0 +1,17 @@
+$ xt-forge --meta
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "protocolVersion": "2025-06-18",
+    "capabilities": {
+      "tools": {
+        "listChanged": false
+      }
+    },
+    "serverInfo": {
+      "name": "xt-forge-meta",
+      "version": "0.4.8"
+    }
+  }
+}

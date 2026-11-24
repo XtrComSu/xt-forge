@@ -1,0 +1,101 @@
+$ xt-forge code callers authenticate . --json
+{
+  "ok": true,
+  "symbol": "authenticate",
+  "depth": 2,
+  "ambiguous": false,
+  "production_ambiguous": false,
+  "ambiguity_reason": null,
+  "authoritative_definition": {
+    "file": "./service.py",
+    "name": "authenticate",
+    "kind": "function",
+    "line": 3,
+    "signature": "def authenticate(token: str) -> bool:",
+    "module": "service",
+    "is_test": false,
+    "excerpt": "2: \n3: def authenticate(token: str) -> bool:\n4:     \"\"\"Verify API bearer credentials.\"\"\""
+  },
+  "evidence_complete": false,
+  "next_action": null,
+  "definitions": [
+    {
+      "file": "./service.py",
+      "name": "authenticate",
+      "kind": "function",
+      "line": 3,
+      "signature": "def authenticate(token: str) -> bool:",
+      "module": "service",
+      "is_test": false,
+      "excerpt": "2: \n3: def authenticate(token: str) -> bool:\n4:     \"\"\"Verify API bearer credentials.\"\"\""
+    }
+  ],
+  "production_callers": [],
+  "callers": [
+    {
+      "caller": "dispatch_request",
+      "target": "authenticate",
+      "file": "./service.py",
+      "line": 9,
+      "is_test": false
+    },
+    {
+      "caller": "handle_client_call",
+      "target": "dispatch_request",
+      "file": "./service.py",
+      "line": 14,
+      "is_test": false
+    }
+  ],
+  "unresolved_candidates": [
+    {
+      "caller": "dispatch_request",
+      "target": "authenticate",
+      "rel": "calls",
+      "file": "./service.py",
+      "line": 9,
+      "hop": 1,
+      "is_test": false,
+      "how": "local_same_file_call",
+      "confidence": "medium",
+      "excerpt": "8:     \"\"\"Route authorized API requests to handlers.\"\"\"\n9:     if not authenticate(token):\n10:         raise PermissionError(\"Invalid API token\")",
+      "reason": "shadowed_local_definition"
+    },
+    {
+      "caller": "handle_client_call",
+      "target": "dispatch_request",
+      "rel": "calls",
+      "file": "./service.py",
+      "line": 14,
+      "hop": 2,
+      "is_test": false,
+      "how": "local_same_file_call",
+      "confidence": "medium",
+      "excerpt": "13: def handle_client_call():\n14:     return dispatch_request(\"/v1/scan\", \"Bearer xt-live\")",
+      "reason": "shadowed_local_definition"
+    }
+  ],
+  "callees": [
+    {
+      "caller": "authenticate",
+      "target": "startswith",
+      "rel": "calls",
+      "file": "./service.py",
+      "line": 5,
+      "hop": 1
+    }
+  ],
+  "index_status": {
+    "stale_detected": true,
+    "stale_files": [
+      "./demo.c",
+      "./service.py"
+    ],
+    "files_updated": 2,
+    "files_removed": 0,
+    "refreshed": true
+  },
+  "follow_up": "No import-resolved or text production callers found; consider route_grep if called dynamically.",
+  "ms": 5,
+  "engine": "python"
+}
