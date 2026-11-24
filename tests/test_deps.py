@@ -473,3 +473,305 @@ class RemediationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RangeContainmentTest(unittest.TestCase):
+    """The decision that says "vulnerable" or "clean", enumerated over OSV's event shapes.
+
+    `range_contains` returns a dict, and the dict is always truthy — so `if range_contains(...)`
+    reads as True for every input. Writing these cases against `match` rather than against the
+    returned object is the difference between testing the decision and testing that a function
+    returns something.
+    """
+
+    @staticmethod
+    def _match(events, version) -> bool:
+        return vulns.range_contains(events, version)["match"]
+
+    def test_single_interval_boundaries(self) -> None:
+        interval = [{"introduced": "0"}, {"fixed": "1.9.0"}]
+        self.assertTrue(self._match(interval, "1.6.0"))
+        self.assertTrue(self._match(interval, "0.0.1"))
+        self.assertFalse(self._match(interval, "1.9.0"), "the fixed version is not affected")
+        self.assertFalse(self._match(interval, "2.0.0"))
+
+    def test_two_branches_are_evaluated_independently(self) -> None:
+        """The regression this function was rewritten for.
+
+        A single mutable `inside` flag reset on the second `introduced`, so 1.6.0 — squarely inside
+        the first branch — came back clean. That is a false negative in a vulnerability scanner.
+        """
+        branches = [{"introduced": "0"}, {"fixed": "1.9.0"},
+                    {"introduced": "2.0.0"}, {"fixed": "2.1.0"}]
+        self.assertTrue(self._match(branches, "1.6.0"), "inside the first branch")
+        self.assertFalse(self._match(branches, "1.9.0"))
+        self.assertFalse(self._match(branches, "1.95.0"), "between the branches")
+        self.assertTrue(self._match(branches, "2.0.0"), "inside the second branch")
+        self.assertTrue(self._match(branches, "2.0.5"))
+        self.assertFalse(self._match(branches, "2.1.0"))
+        self.assertFalse(self._match(branches, "3.0.0"))
+
+    def test_every_version_in_an_interval_matches_and_nothing_else_does(self) -> None:
+        branches = [{"introduced": "0"}, {"fixed": "1.9.0"},
+                    {"introduced": "2.0.0"}, {"fixed": "2.1.0"}]
+        versions = [f"{major}.{minor}.{patch}"
+                    for major in (1, 2) for minor in range(3) for patch in (0, 5)] + ["3.0.0"]
+        inside = {v for v in versions if self._match(branches, v)}
+        expected = {"1.0.0", "1.0.5", "1.1.0", "1.1.5", "1.2.0", "1.2.5", "2.0.0", "2.0.5"}
+        self.assertEqual(inside, expected)
+
+    def test_three_branches(self) -> None:
+        events = [{"introduced": "1.0.0"}, {"fixed": "1.1.0"},
+                  {"introduced": "2.0.0"}, {"fixed": "2.1.0"},
+                  {"introduced": "3.0.0"}, {"fixed": "3.1.0"}]
+        for version, expected in [("0.9.0", False), ("1.0.0", True), ("1.1.0", False),
+                                  ("1.5.0", False), ("2.0.0", True), ("2.1.0", False),
+                                  ("2.5.0", False), ("3.0.0", True), ("3.1.0", False)]:
+            with self.subTest(version=version):
+                self.assertEqual(self._match(events, version), expected)
+
+    def test_an_interval_with_no_fixed_event_is_open_ended(self) -> None:
+        self.assertTrue(self._match([{"introduced": "1.0.0"}], "99.0.0"))
+        self.assertFalse(self._match([{"introduced": "1.0.0"}], "0.9.0"))
+
+    def test_last_affected_includes_its_own_version(self) -> None:
+        """`fixed` excludes the named version; `last_affected` includes it. They are not the same."""
+        events = [{"introduced": "1.0.0"}, {"last_affected": "2.0.0"}]
+        self.assertTrue(self._match(events, "2.0.0"))
+        self.assertFalse(self._match(events, "2.0.1"))
+        self.assertFalse(self._match(events, "0.9.0"))
+
+    def test_limit_excludes_its_own_version(self) -> None:
+        events = [{"introduced": "1.0.0"}, {"limit": "2.0.0"}]
+        self.assertTrue(self._match(events, "1.5.0"))
+        self.assertFalse(self._match(events, "2.0.0"))
+        self.assertFalse(self._match(events, "2.5.0"))
+
+    def test_fixed_zero_means_never_fixed(self) -> None:
+        self.assertTrue(self._match([{"introduced": "1.0.0"}, {"fixed": "0"}], "5.0.0"))
+
+    def test_an_empty_event_list_matches_nothing(self) -> None:
+        self.assertFalse(self._match([], "1.0.0"))
+
+    def test_the_reported_boundary_is_the_one_the_interval_has(self) -> None:
+        """`last_affected` must not be reported under the key `fixed`.
+
+        They differ in exactly the way that matters here: the version named by `last_affected` is
+        affected, and the version named by `fixed` is not. The first version of this returned
+        `"fixed": last_affected`, so a caller reading `fixed` as "the version that repairs this"
+        would have been told an affected version was the repair.
+        """
+        last = vulns.range_contains([{"introduced": "1.0.0"}, {"last_affected": "2.0.0"}], "1.5.0")
+        self.assertEqual(last["last_affected"], "2.0.0")
+        self.assertIsNone(last["fixed"])
+        fixed = vulns.range_contains([{"introduced": "1.0.0"}, {"fixed": "1.9.0"}], "1.5.0")
+        self.assertEqual(fixed["fixed"], "1.9.0")
+        self.assertIsNone(fixed["last_affected"])
+
+
+class LockedRewriterBoundaryTest(unittest.TestCase):
+    """Version and name matching must be delimited, not substring.
+
+    `_rewrite_locked` is the fallback for Gemfile.lock, composer.lock, Cargo.lock, pom.xml and
+    pubspec, and its first version tested `if name in line and old in line` and replaced
+    `line.index(old)`. Every one of those three parts was wrong, and wrong silently:
+
+        other (11.0.0)      editing `other` 1.0 -> 1.2    produced `other (11.2.0)`
+        rack-cors (1.0.5)   editing `rack-cors` 1.0 -> 1.2 produced `rack-cors (1.2.5)`
+        gin-gonic (1.6.0)   editing `gin` 1.6.0 -> 1.9.0   produced `gin-gonic (1.9.0)`
+        # NOTE: gin was pinned at 1.6.0                    the comment was rewritten
+
+    A fabricated version and a rewritten comment are both worse than a refusal: the caller gets a
+    file that parses, reports as verified, and contains a dependency version that does not exist.
+    """
+
+    TEXT = ("# NOTE: gin was pinned at 1.6.0 for a reason\n"
+            "GEM\n  specs:\n    rack (1.0)\n    rack-cors (1.0.5)\n"
+            "    rack-test (1.0.0)\n    gin-gonic (1.6.0)\n    other (11.0.0)\n")
+
+    def _changed(self, name, old, new):
+        from xtforge.core.deps.remediate import _rewrite, RemediationError
+        try:
+            updated, _ = _rewrite(self.TEXT, {"path": "/x/Gemfile.lock", "name": name,
+                                              "from": old, "to": new})
+        except RemediationError:
+            return None
+        return [after.strip() for before, after in
+                zip(self.TEXT.splitlines(), updated.splitlines()) if before != after]
+
+    def test_a_version_inside_a_longer_version_is_not_matched(self) -> None:
+        self.assertIsNone(self._changed("other", "1.0", "1.2"),
+                          "1.0 must not be found inside 11.0.0")
+        self.assertIsNone(self._changed("rack-cors", "1.0", "1.2"),
+                          "1.0 must not be found inside 1.0.5")
+
+    def test_a_package_inside_a_longer_package_name_is_not_matched(self) -> None:
+        self.assertIsNone(self._changed("gin", "1.6.0", "1.9.0"),
+                          "`gin` must not be found inside `gin-gonic`")
+
+    def test_a_comment_line_is_never_edited(self) -> None:
+        changed = self._changed("gin-gonic", "1.6.0", "1.9.0")
+        self.assertEqual(changed, ["gin-gonic (1.9.0)"],
+                         "the comment mentioning 1.6.0 must be left alone")
+
+    def test_the_correct_edits_still_land(self) -> None:
+        for name, old, new, expected in [
+            ("rack", "1.0", "1.2", ["rack (1.2)"]),
+            ("rack-cors", "1.0.5", "1.2.5", ["rack-cors (1.2.5)"]),
+            ("rack-test", "1.0.0", "1.2.0", ["rack-test (1.2.0)"]),
+            ("gin-gonic", "1.6.0", "1.9.0", ["gin-gonic (1.9.0)"]),
+            ("other", "11.0.0", "11.2.0", ["other (11.2.0)"]),
+        ]:
+            with self.subTest(name=name):
+                self.assertEqual(self._changed(name, old, new), expected)
+
+
+class VerifyBeforeWriteTest(unittest.TestCase):
+    """A file must not reach disk unless every edit in it confirmed.
+
+    `apply` wrote the file and then re-parsed to confirm. Given a Gemfile.lock with a comment
+    mentioning the pinned version, the rewrite landed on the comment, left the real pin alone, and
+    the file was written anyway — reported `ok: False`, but already modified, with the backup as the
+    only way back. The confirmation had to move ahead of the write.
+    """
+
+    def setUp(self) -> None:
+        import tempfile
+        self.directory = tempfile.mkdtemp(prefix="xtvbw-")
+        self.addCleanup(__import__("shutil").rmtree, self.directory, True)
+
+    def _write(self, body: str) -> str:
+        import os
+        path = os.path.join(self.directory, "Gemfile.lock")
+        with open(path, "w") as handle:
+            handle.write(body)
+        return path
+
+    def test_an_edit_that_does_not_confirm_is_never_written(self) -> None:
+        import os
+        from xtforge.core.deps import remediate
+        body = ("# NOTE: gin was pinned at 1.6.0 for a reason\n"
+                "GEM\n  specs:\n    gin-gonic (1.6.0)\n")
+        path = self._write(body)
+        report = remediate.apply([{"path": path, "name": "gin", "from": "1.6.0",
+                                   "to": "1.9.0", "ecosystem": "RubyGems"}], write=True)
+        self.assertFalse(report["ok"])
+        with open(path) as handle:
+            self.assertEqual(handle.read(), body, "the file was modified by a rejected edit")
+        self.assertEqual(report["files_changed"], [])
+        self.assertFalse(os.path.exists(path + ".xtbak"),
+                         "a backup is only meaningful for a write that happened")
+
+    def test_a_confirmed_edit_is_written_and_backed_up(self) -> None:
+        import os
+        from xtforge.core.deps import remediate
+        body = "GEM\n  specs:\n    rack (1.0)\n"
+        path = self._write(body)
+        report = remediate.apply([{"path": path, "name": "rack", "from": "1.0",
+                                   "to": "1.2", "ecosystem": "RubyGems"}], write=True)
+        self.assertTrue(report["ok"], report.get("failures"))
+        with open(path) as handle:
+            self.assertIn("rack (1.2)", handle.read())
+        self.assertTrue(os.path.exists(path + ".xtbak"))
+        self.assertEqual(report["files_changed"], [path])
+
+    def test_a_dry_run_still_confirms(self) -> None:
+        from xtforge.core.deps import remediate
+        body = "GEM\n  specs:\n    rack (1.0)\n"
+        path = self._write(body)
+        report = remediate.apply([{"path": path, "name": "rack", "from": "1.0",
+                                   "to": "1.2", "ecosystem": "RubyGems"}], write=False)
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["files_changed"], [])
+        with open(path) as handle:
+            self.assertEqual(handle.read(), body)
+
+
+class PlanArgumentOrderTest(unittest.TestCase):
+    """`plan(dependencies, findings)` — both are lists of dicts, so a swap is not a type error.
+
+    Measured: the swapped call matched every key, reached `choose_target` with an empty advisory
+    list, and reported "no advisory in this set names a fixed version newer than the installed one"
+    — a confident statement about advisories for a failure caused entirely by argument order.
+    """
+
+    def test_swapped_arguments_are_refused_with_an_explanation(self) -> None:
+        from xtforge.core.deps import remediate
+        findings_like = [{"ecosystem": "Go", "name": "example.com/m", "version": "1.0.0"}]
+        report = remediate.plan(findings_like, findings_like)
+        self.assertFalse(report["ok"])
+        self.assertIn("dependencies first", report["error"])
+
+    def test_empty_findings_is_not_an_error(self) -> None:
+        from xtforge.core.deps import remediate
+        report = remediate.plan([{"name": "x", "version": "1.0.0"}], [])
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["edit_count"], 0)
+
+    def test_real_findings_are_accepted(self) -> None:
+        from xtforge.core.deps import remediate
+        dependency = {"ecosystem": "Go", "name": "example.com/m", "version": "1.0.0",
+                      "resolved": True, "sources": [{"path": "go.mod", "kind": "go"}]}
+        finding = {"ecosystem": "Go", "name": "example.com/m", "version": "1.0.0",
+                   "vulnerabilities": [{"id": "GHSA-x", "fixed_in": ["1.2.0"]}]}
+        report = remediate.plan([dependency], [finding])
+        self.assertTrue(report["ok"], report.get("error"))
+        self.assertEqual(report["edit_count"], 1)
+        self.assertEqual(report["edits"][0]["to"], "1.2.0")
+
+
+class XmlCommentRewriteTest(unittest.TestCase):
+    """pom.xml comments are candidates for `_rewrite_locked`, and `_confirm` is what catches them.
+
+    The line guard skips `#`, `//` and `;` comments; XML uses `<!-- -->`, which it does not skip. So
+    a pom.xml carrying `<!-- we pin com.example:core 1.0.0 deliberately -->` rewrites the comment,
+    leaves the real `<version>1.0.0</version>` alone, and `_rewrite` reports success. `_confirm`
+    then re-parses and finds the version unchanged, which is the only thing standing between this
+    and a written file. That makes it the case that proves the verify-before-write ordering: without
+    the ordering, this file reaches disk modified and the fix does not land.
+    """
+
+    BODY = ("<project>\n"
+            "  <!-- we pin com.example:core 1.0.0 deliberately -->\n"
+            "  <dependencies>\n    <dependency>\n"
+            "      <groupId>com.example</groupId>\n"
+            "      <artifactId>core</artifactId>\n"
+            "      <version>1.0.0</version>\n"
+            "    </dependency>\n  </dependencies>\n</project>\n")
+
+    EDIT = {"name": "core", "from": "1.0.0", "to": "2.0.0", "ecosystem": "Maven"}
+
+    def test_the_comment_is_refused_before_the_rewrite_is_composed(self) -> None:
+        """Two layers stop this, and the outer one now stops it first.
+
+        Without the `<!--` guard the rewrite landed on the comment and reported success, leaving
+        the real `<version>` alone; `_confirm` then caught it. Adding the guard means the edit is
+        never composed, which is better — but `_confirm` is still what protects every other format,
+        so the ordering test below stays.
+        """
+        from xtforge.core.deps.remediate import _rewrite, RemediationError
+        with self.assertRaises(RemediationError):
+            _rewrite(self.BODY, dict(self.EDIT, path="/x/pom.xml"))
+
+    def test_confirm_rejects_a_rewrite_that_missed_the_real_line(self) -> None:
+        """The layer that does not depend on knowing every comment syntax in existence."""
+        from xtforge.core.deps.remediate import _confirm
+        # The comment edited, the real pin untouched — what the pre-guard rewrite produced.
+        mangled = self.BODY.replace("core 1.0.0 deliberately", "core 2.0.0 deliberately")
+        self.assertIn("<version>1.0.0</version>", mangled)
+        confirmed = _confirm("/x/pom.xml", mangled, [dict(self.EDIT, path="/x/pom.xml")])
+        self.assertFalse(confirmed[0]["ok"])
+        self.assertEqual(confirmed[0]["versions_now"], [])
+
+    def test_apply_does_not_write_it(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from xtforge.core.deps import remediate
+        directory = tempfile.mkdtemp(prefix="xtpom-")
+        self.addCleanup(__import__("shutil").rmtree, directory, True)
+        path = Path(directory) / "pom.xml"
+        path.write_text(self.BODY)
+        report = remediate.apply([dict(self.EDIT, path=str(path))], write=True)
+        self.assertFalse(report["ok"])
+        self.assertEqual(path.read_text(), self.BODY, "the file was modified anyway")
+        self.assertEqual(report["files_changed"], [])

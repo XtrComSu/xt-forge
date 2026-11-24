@@ -354,7 +354,14 @@ def range_contains(events: list[dict[str, Any]], version: str) -> dict[str, Any]
         limit = interval.get("limit")
         if limit and compare(version, limit) >= 0:
             continue
-        return {"match": True, "introduced": introduced, "fixed": last_affected}
+        # Report the boundary the interval actually has. The first version of this returned
+        # `"fixed": last_affected`, which is a different event with different semantics — the
+        # version is still affected by `last_affected`, and is not affected by `fixed`. Nothing
+        # reads this field today, which is exactly why it was wrong for as long as it was: a caller
+        # that later trusted `fixed` would have treated an affected version as the repair.
+        return {"match": True, "introduced": introduced,
+                "fixed": interval.get("fixed"),
+                "last_affected": last_affected}
     return {"match": False, "introduced": None, "fixed": None,
             "intervals_checked": len(intervals)}
 

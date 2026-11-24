@@ -43,6 +43,18 @@ def plan(dependencies: list[dict[str, Any]], findings: list[dict[str, Any]], *,
     security tool breaks a build. Minor and patch bumps are proposed freely because they are
     contract-compatible within the ecosystem's own rules.
     """
+    # `dependencies` and `findings` are both lists of dicts carrying name/version/ecosystem, so
+    # swapping them is not a type error: every key still matches and the call proceeds to
+    # `choose_target` with an empty advisory list, which reports "no advisory in this set names a
+    # fixed version newer than the installed one" — a confident statement about advisories for a
+    # failure caused entirely by argument order. Measured, not imagined. A finding is the only one
+    # of the two that carries a `vulnerabilities` key, so that is what distinguishes them.
+    if findings and not any("vulnerabilities" in entry for entry in findings if isinstance(entry, dict)):
+        return {"ok": False, "edits": [], "edit_count": 0, "skipped": [], "skipped_count": 0,
+                "error": ("the second argument must be scan findings, but none of these entries "
+                          "carries a `vulnerabilities` key; plan() takes dependencies first and "
+                          "findings second, and these look like dependencies")}
+
     by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
     for finding in findings:
         key = (str(finding.get("ecosystem") or ""), str(finding.get("name") or ""),
@@ -186,11 +198,27 @@ def apply(edits: list[dict[str, Any]], *, write: bool = False,
                             for edit in file_edits)
             continue
         text = original
+        rewrite_failed = False
         for edit in file_edits:
             try:
                 text, _detail = _rewrite(text, edit)
             except RemediationError as exc:
+                rewrite_failed = True
                 verified.append({**_identity(edit), "ok": False, "error": str(exc)})
+        # Confirm BEFORE writing. This used to run after `path.write_text`, which meant an edit that
+        # did not land the intended version had already been written to disk by the time anything
+        # checked it — and `_rewrite_locked`'s substring matching produced exactly that: on a
+        # Gemfile.lock with a `# NOTE: gin was pinned at 1.6.0` comment, the comment was rewritten,
+        # the real `gin (1.6.0)` line was untouched, and the file was modified anyway. The backup
+        # made it recoverable, but a tool that edits source has no business writing an edit it has
+        # not checked.
+        confirmed = _confirm(path_text, text, file_edits)
+        verified.extend(confirmed)
+        if any(not entry.get("ok") for entry in confirmed) or rewrite_failed:
+            # Nothing is written for a file where any edit failed to confirm: the edits in
+            # `file_edits` were composed on top of each other, so writing the ones that did
+            # confirm would commit a partial version of a change set the caller reviewed whole.
+            continue
         if write:
             if backup:
                 try:
@@ -205,10 +233,6 @@ def apply(edits: list[dict[str, Any]], *, write: bool = False,
             except OSError as exc:
                 verified.append({"path": path_text, "ok": False, "error": f"write failed: {exc}"})
                 continue
-        # Re-parse the *result* and confirm the intended version is present. A fixer that reports
-        # success without checking has no way to distinguish an applied edit from a lost one.
-        confirmed = _confirm(path_text, text, file_edits)
-        verified.extend(confirmed)
 
     # Every rejection counts, from either pass. `ok` was computed from `verified` alone, so an
     # edit rejected in the first pass (file gone, version not found, rewrite refused) left
@@ -357,18 +381,48 @@ def _rewrite_requirements(text: str, name: str, old: str,
 
 
 def _rewrite_locked(text: str, name: str, old: str, new: str) -> tuple[str, dict[str, Any]]:
-    """Generic lockfile/manifest rewriter, anchored on the name appearing with the old version.
+    """Generic lockfile/manifest rewriter for formats with no positional parser.
 
-    Used for formats whose layout varies too much to parse positionally here (Gemfile.lock,
-    composer.lock, pubspec, pom). The name and version must appear on the same line, which is true
-    of every one of those formats and false of prose.
+    Used for Gemfile.lock, composer.lock, Cargo.lock, pom.xml and pubspec. The name and the version
+    must appear on the same line; both must also be *delimited*, which is the whole of the
+    difficulty and the reason this function was rewritten twice.
+
+    The first version tested `if name in line and old in line` and replaced `line.index(old)`. Every
+    part of that is wrong, and wrong in a way that silently edits the wrong thing:
+
+        other (11.0.0)          editing `other` 1.0 -> 1.2   produced `other (11.2.0)`
+        rack-cors (1.0.5)       editing `rack`  1.0 -> 1.2   produced `rack-cors (1.2.5)`
+        gin-gonic (1.6.0)       editing `gin`   1.6 -> 1.9   produced `gin-gonic (1.9.0)`
+        # NOTE: gin was pinned at 1.6.0                       the comment was rewritten
+
+    so a version was matched inside a longer version, a package was matched inside a longer package
+    name, and a comment was a candidate. Anchoring the name on a boundary and requiring the version
+    to be followed by a non-version character fixes all three. A line that is a comment is skipped
+    outright, because no lockfile records a dependency on a commented line.
     """
+    # A name is delimited when it is not followed by more name characters. `rack` must not match
+    # `rack-cors`, and `gin` must not match `gin-gonic`.
+    name_pattern = re.compile(r"(?<![\w.\-/])" + re.escape(name) + r"(?![\w.\-/])")
+    # A version is delimited when the character after it cannot continue a version. `1.0` must not
+    # match inside `11.0.0` or `1.0.5`.
+    version_pattern = re.compile(re.escape(old) + r"(?![\w.\-+])")
     for match in re.finditer(r"^.*$", text, re.MULTILINE):
         line = match.group(0)
-        if name in line and old in line:
-            start = match.start() + line.index(old)
-            updated = text[:start] + new + text[start + len(old):]
-            return updated, {"line": _line_of(text, start), "rewriter": "line-anchored"}
+        stripped = line.lstrip()
+        # `<!--` matters because pom.xml has no positional rewriter and reaches this function: an
+        # XML comment naming a dependency and its version was a rewrite candidate, and only the
+        # post-rewrite confirmation stopped it. Refusing comments here means the edit is not even
+        # composed, which is the right place to stop.
+        if stripped.startswith(("#", "//", ";", "<!--")):
+            continue
+        if not name_pattern.search(line):
+            continue
+        located = version_pattern.search(line)
+        if not located:
+            continue
+        start = match.start() + located.start()
+        updated = text[:start] + new + text[start + len(old):]
+        return updated, {"line": _line_of(text, start), "rewriter": "line-anchored"}
     raise RemediationError(f"{name} {old} does not appear on any single line")
 
 
