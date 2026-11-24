@@ -260,6 +260,28 @@ class HonestyTest(unittest.TestCase):
         for value in (0, -1, 70000):
             self.assertFalse(cdp.inspect_endpoint(value)["ok"])
 
+    def test_a_non_numeric_port_is_refused_not_raised(self) -> None:
+        """Found by fuzzing: the range check compared a str against ints and raised TypeError.
+
+        A verb must answer a bad argument, not crash on it. `None`, a string and a float all
+        reached `0 < port < 65536` and took the caller down with them.
+        """
+        for value in (None, "abc", 0.5, "0.5", [], {}):
+            report = cdp.inspect_endpoint(value)
+            self.assertIsInstance(report, dict)
+            self.assertFalse(report["ok"])
+        self.assertIn("not an integer", cdp.inspect_endpoint("abc")["error"])
+
+    def test_a_numeric_string_port_is_normalised(self) -> None:
+        import socket
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        free_port = probe.getsockname()[1]
+        probe.close()
+        report = cdp.inspect_endpoint(str(free_port))
+        self.assertIn(str(free_port), report["endpoint"],
+                      "a numeric string must be coerced, not rejected")
+
     def test_a_non_endpoint_target_is_refused(self) -> None:
         report = cdp.inspect("/etc/passwd")
         self.assertFalse(report["ok"])

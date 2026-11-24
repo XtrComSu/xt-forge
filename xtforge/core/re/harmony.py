@@ -102,7 +102,12 @@ def inspect_hap(path: str | Path) -> dict[str, Any]:
                 })
 
         requested: list[dict[str, Any]] = []
-        for entry in (module or {}).get("requestPermissions") or []:
+        declared_permissions = (module or {}).get("requestPermissions")
+        # A manifest can carry any JSON here. Iterating an int raises, and the earlier code
+        # trusted the field to be a list because the format says so.
+        if not isinstance(declared_permissions, list):
+            declared_permissions = []
+        for entry in declared_permissions:
             if isinstance(entry, dict):
                 requested.append({"name": entry.get("name"),
                                   "reason": entry.get("reason"),

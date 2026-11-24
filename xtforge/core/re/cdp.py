@@ -179,6 +179,12 @@ def inspect_endpoint(port: int = 9222, *, host: str = "127.0.0.1",
                      expressions: list[str] | None = None,
                      timeout: float = DEFAULT_TIMEOUT) -> dict[str, Any]:
     """Attach to a running Chromium's DevTools endpoint and observe its pages."""
+    # `port` can arrive as a string or a float from a caller, and comparing those against ints
+    # raises TypeError rather than refusing. Coerce, then range-check.
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": f"port is not an integer: {port!r}"}
     if not (0 < port < 65536):
         return {"ok": False, "error": f"port out of range: {port}"}
     base = f"http://{host}:{port}"
