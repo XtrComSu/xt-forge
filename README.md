@@ -3,21 +3,23 @@
     <img src="docs/assets/xtforge-icon.png" alt="XT-Forge Logo" width="96" />
   </a>
   <h1>xt-forge</h1>
-  <p><strong>Supreme local agent workbench for call-graph context, AST correctness auditing, normalized binary diffing, keyless CVE intel, and sub-1KB MCP routing.</strong></p>
-  <p>Engineered in <strong>Rust</strong>, <strong>Go</strong>, and zero-dependency <strong>Python 3.11+</strong> under <strong>XT-OSS</strong> by <a href="https://xtrcom.xyz">XtrComSu</a>.</p>
+  <p>Supreme local agent workbench for call-graph context, AST correctness auditing, normalized binary diffing, keyless CVE intel, and sub-1KB MCP routing.</p>
+  <p>Engineered in <strong>Rust, Go</strong>, and zero-dependency <strong>Python 3.11+</strong> under <strong>XT-OSS</strong> by <a href="https://xtrcom.xyz">XtrComSu</a>.</p>
   <p>
-    <a href="https://github.com/XtrComSu/xt-forge-dev/releases">
-      <img src="docs/assets/header-badges.svg" alt="XT-Forge v0.4.8-Damascus" />
-    </a>
+    <a href="https://github.com/XtrComSu/xt-forge-dev/releases"><img src="docs/assets/badges/badge-release.svg" alt="Release v0.4.8-Damascus" /></a>
+    <a href="#xt-forge-vs-raw-rea"><img src="docs/assets/badges/badge-rea.svg" alt="93.3% Standalone Pass Rate vs 22.2% Raw REA" /></a>
+    <img src="docs/assets/badges/badge-engines.svg" alt="Rust + Go + Python 3.11+" />
+    <br/>
+    <a href="#lean-mcp-setup--ghidra-borer--craft-anything-full-rea-replacement"><img src="docs/assets/badges/badge-schema.svg" alt="1.35 KB MCP Schema" /></a>
+    <a href="docs/SKILLS.md"><img src="docs/assets/badges/badge-skills.svg" alt="24 XTF-* Skills" /></a>
+    <a href="LICENSE"><img src="docs/assets/badges/badge-license.svg" alt="MIT License" /></a>
   </p>
   <p>
     <a href="#install-on-linux-macos-and-windows">Quickstart &amp; Install</a> ·
     <a href="#xt-forge-vs-raw-rea">9-Tier Benchmarks</a> ·
-    <a href="#why-use-xt-forge">Why Use xt-forge</a> ·
-    <a href="#workflow-navigator">Workflow Navigator</a> ·
+    <a href="docs/GUIDE.md">CLI &amp; Skills Guide</a> ·
     <a href="#lean-mcp-setup--ghidra-borer--craft-anything-full-rea-replacement">MCP Gateway</a> ·
-    <a href="docs/GUIDE.md">CLI Guide</a> ·
-    <a href="CHANGELOG.md">Changelog</a>
+    <a href="https://github.com/XtrComSu/xt-forge-dev/releases">Latest Release</a>
   </p>
 </div>
 

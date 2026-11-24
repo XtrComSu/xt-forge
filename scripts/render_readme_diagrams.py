@@ -22,52 +22,23 @@ def svg(title: str, width: int, height: int, body: str) -> str:
 
 
 def header_badges_svg() -> str:
-    """Renders vector badges matching shields.io flat-square with zero network dependency."""
-    badges = [
-        ("XT-OSS", "v0.4.8-Damascus", "#ff2e2e"),
-        ("vs Raw REA (5 reps median)", "93.3% Standalone Win (42/45)", "#34d399"),
-        ("engines", "Rust + Go + Python 3.11+", "#0c0d12"),
-        ("MCP schema", "1.35 KB (--meta)", "#60a5fa"),
-        ("skills", "24 XTF-* Workflows", "#f59e0b"),
-        ("license", "MIT", "#3b82f6"),
-    ]
+    """Renders the 2-row centered flat-square vector badges matching the release showcase."""
+    b_dir = ROOT / "docs" / "assets" / "badges"
+    if (b_dir / "badge-release.svg").is_file():
+        def inner(filename):
+            txt = (b_dir / filename).read_text(encoding="utf-8")
+            return txt[txt.find(">") + 1 : txt.rfind("</svg>")]
 
-    # Calculate total width dynamically so no badge is clipped
-    calculated_width = 0
-    for label, val, _ in badges:
-        lbl_w = int(len(label) * 6.8) + 14
-        val_w = int(len(val) * 6.8) + 16
-        calculated_width += lbl_w + val_w + 8
-
-    total_width = max(1360, calculated_width + 16)
-    height = 24
-    body = [
-        '<rect width="100%" height="100%" fill="none"/>',
-        '<g font-family="Verdana, Geneva, DejaVu Sans, sans-serif" font-size="11">',
-    ]
-
-    curr_x = 0
-    for label, val, color in badges:
-        lbl_w = int(len(label) * 6.8) + 14
-        val_w = int(len(val) * 6.8) + 16
-        badge_w = lbl_w + val_w
-        badge_h = 20
-
-        body.append(f'<g transform="translate({curr_x}, 2)">')
-        # Left label
-        body.append(f'<rect width="{lbl_w}" height="{badge_h}" fill="#555555"/>')
-        # Right value
-        body.append(f'<rect x="{lbl_w}" width="{val_w}" height="{badge_h}" fill="{color}"/>')
-        # Text
-        text_color = "#000000" if color in ("#34d399", "#60a5fa", "#f59e0b") else "#ffffff"
-        body.append(f'<text x="{lbl_w / 2}" y="14" fill="#ffffff" text-anchor="middle" font-weight="500">{escape(label)}</text>')
-        body.append(f'<text x="{lbl_w + val_w / 2}" y="14" fill="{text_color}" text-anchor="middle" font-weight="700">{escape(val)}</text>')
-        body.append('</g>')
-
-        curr_x += badge_w + 8
-
-    body.append('</g>')
-    return svg("XT-Forge Badges", total_width, height, "\n".join(body))
+        w, h = 760, 48
+        body = [
+            '<g transform="translate(2, 0)">' + inner("badge-release.svg") + "</g>",
+            '<g transform="translate(185, 0)">' + inner("badge-rea.svg") + "</g>",
+            '<g transform="translate(545, 0)">' + inner("badge-engines.svg") + "</g>",
+            '<g transform="translate(166, 26)">' + inner("badge-schema.svg") + "</g>",
+            '<g transform="translate(352, 26)">' + inner("badge-skills.svg") + "</g>",
+            '<g transform="translate(516, 26)">' + inner("badge-license.svg") + "</g>",
+        ]
+        return svg("XT-Forge Badges", w, h, "\n".join(body))
 
 
 def workflow() -> str:
