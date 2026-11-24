@@ -1,97 +1,44 @@
-## 0.4.7 - 2026-11-21
+# Changelog
+
+## 0.4.8 (private preview)
 
 ### Added
-- **XT-Forge-SYS Indirect Dispatch Recovery (`native/xtforge-go/internal/sysimage/dispatch.go`, `re dispatch-native`, `re_dispatch_native`)**:
-  - Added jump-table recovery that rewinds from an indirect branch, classifies the registers feeding it by following their definitions, and decodes the table it finds. Recovered switch tables on x86-64 ELF, PE, and Mach-O, and both arm64 forms: a byte table scaled by the instruction stride (`adr`/`ldrb`/`add ..., lsl #2`) and a signed-word table (`adrp`/`add`/`ldrsw`). Every recovered target was cross-checked against the reference disassembly's instruction boundaries on all four formats.
-  - Table entries stay in index order rather than being sorted or de-duplicated, so the result is a case-to-address map and cases that share a body still report one entry each.
-  - Exposed as `xtforge re dispatch-native <path> --target <function>` and the `re_dispatch_native` MCP tool on both the Go `--meta` hub and the Python MCP surface.
-- **Structured Loop Recovery (`internal/sysimage/structured_loops.go`)**:
-  - Functions whose loop has a single-block body and one exit test are now recovered as imperative C: a declaration per value the loop changes, a `for (;;)`, and the loop's exit test emitted as a `break` where the compiler put it. Emitting the test in place, instead of rotating it into a `while (cond)` head, keeps the translation faithful without having to prove the rotation preserves the trip count.
-  - Loops are found by a cycle check on the block graph — a back edge whose target can reach its source again — so a forward `jmp` to an already-numbered block is no longer miscounted as a loop.
-  - Verified by compiling the recovered function next to the original and comparing output for 4096 inputs.
-  - A function that cannot be summarised now reports why in `structured_declined`, on the CLI and both MCP surfaces, instead of returning nothing.
-- **Recursion Is No Longer Mistaken for a Loop (`internal/sysimage/structured.go`, `internal/sysimage/structured_loops.go`)**:
-  - `recoverFlow` records a `call` edge for every direct call, including a call back to the block being analysed, so a recursive function looked like a loop and was sent down the loop path. Call edges are now excluded from both loop discovery and the cycle check. A recursive function is still not summarised, but it is now declined as an uncomposable call rather than as an unsummarisable loop.
-- **Analyst Annotations in Native Analysis (`xtforge/core/re/sysimage.py`)**:
-  - Overlay renames and comments are merged into XT-Forge-SYS results, and an annotated name is accepted as a `--target`. Renamed functions report the analyst name in `name` while keeping the image's own symbol as `symbol_name`, so a caller can always map back to the raw binary.
+
+- Inventory dependencies from package manifests and Go binaries with `re deps`. Check resolved versions against OSV with `re vulns`, look up a single advisory with `re cve-info`, and preview or apply supported version updates with `re remediate`.
+- Inspect PE resources, load configuration and Authenticode certificate records. Read .NET metadata and CIL method headers, DEX classes and methods, Unity IL2CPP type and method records, Dart snapshots, and Swift type metadata.
+- Inspect UEFI volumes and variables, NTFS transaction logs, Apple asset catalogs and Interface Builder archives, and metadata from desktop app bundles. Read V8 code cache headers, Playwright trace archives, packet captures, SQLite files, and supported model headers.
+- Read Electron fuse settings, Android binary manifests, and JNI binding candidates. Chromium inspection can collect page data, screenshots, and network observations, and enumerate WebMCP tools where the page exposes them.
+- Export and verify evidence bundles against their input files. Compare app bundles, function structure, API or ABI surfaces, and recorded captures. Save bookmarks and resume a project at an analysis location.
+
+### Changed
+
+- Dependency advisory queries run concurrently within a fixed limit. Findings retain their input order.
+- Analysis output reports gaps in evidence and coverage for supported workflows. Guided workflows refer to existing CLI verbs.
 
 ### Fixed
-- **Register Width Aliases in Structured Recovery (`internal/sysimage/structured_state.go`)**: Register aliases are normalized before tracking definitions, so arm64 `w11`/`x11` and x86 `edi`/`rdi` refer to the same physical register. The x86 16-bit `sp` alias is deliberately left distinct from the stack pointer, which previously broke structured output for arm64 `-O0` frames.
-- **arm64 Loader Coverage (`internal/sysimage/lift_aarch64.go`)**: Byte, half-word, and sign-extending load/store forms, register-offset addressing (`[Xn, Xm, LSL #n]`), and shifted-register arithmetic are now lifted instead of falling back to opaque operations, and the access width comes from the encoding rather than the register width.
-- **Decompilation Function Identity (`internal/sysimage/lift.go`, `internal/sysimage/disasm.go`)**: Native disassembly and decompilation results carry `name` and `name_source`, so a caller that targeted an address still learns which function it got.
-- **Installer Rebuild Skip (`install.sh`)**: Warm runs skip the Rust and Go builds when their artifacts are newer than their sources, and `XT_FORCE_REBUILD=1` forces a rebuild. The release cache was also repaired after build artifacts had been bound to a throwaway `CARGO_HOME`.
-- **Installer Test Timeout (`tests/test_shipped_packages.py`)**: The installer test allows a cold build to finish instead of failing at 120 seconds, and passes `CARGO_HOME`/`RUSTUP_HOME`/`GOPATH` through to the child process.
 
-### Added (2026-11-23 — native workbench hardening)
+- PE section listings use the correct section addresses and sizes.
+- Dependency remediation matches complete package names and versions and verifies candidate edits before writing. Advisory matching distinguishes inclusive `last_affected` bounds from exclusive `fixed` bounds.
+- Chromium inspection waits for navigation before evaluating the page. Electron fuse summaries retain unknown states and report unsupported wire versions explicitly.
+- Native xref lookups distinguish an explicit address from an omitted target. Initializer inspection returns results without crashing.
 
-- **PE breadth campaign against 1 600 real Windows binaries (`internal/sysimage`)** — Wine's
-  own PE builds and prefixes were used as a corpus: `x86_64-windows` (400 files, 0 failures),
-  `i386-windows` (400, 0), `system32` (400, 0) and `syswow64` (400, 0). It found two defects:
-  twelve 16-bit **NE** executables (`krnl386.exe`, `avifile.dll`, …) were reported as
-  `invalid PE file signature`, and `kernelbase.dll` failed outright on a truncated COFF string
-  table. `re overview` now reports `format: "ne"` with the DOS/NE header, and export decoding
-  is RVA-based and bounds-safe — `kernelbase.dll`'s 1 435 export names match
-  `llvm-readobj --coff-exports` exactly.
-- **32-bit ARM (A32) and Thumb decoding (`internal/sysimage/arm32.go`, `thumb.go`)** — a 32-bit
-  ARM image could be mapped but not disassembled. A32 is verified 33/33 against
-  `llvm-objdump`; Thumb-1 plus the Thumb-2 branch, load/store, MOVW/MOVT, ADD.W/SUB.W,
-  LDM/STM.W and PUSH/POP forms reach **96/97 (0.990)** on a fixture that forces those
-  encodings, up from 0.485 when the fixture finally contained one. Thumb mode is detected from
-  the entry point's low bit and from symbol values, never guessed per instruction.
-- **Function discovery without metadata (`pe_descent.go`, `pe_gapscan.go`) and its wiring for
-  PE and ELF** — recursive descent from exports, entry and `.pdata` seeds, plus a gap scan
-  gated by five precision rules (strict prologue, padding predecessor, six clean instructions
-  to a terminator, 8-byte spacing, region bounds). Indexed functions on i386 `kernel32.dll`
-  went 1 411 → **3 465** at 56.7 bytes of `.text` per function against Ghidra's 56;
-  `advapi32.dll` 95.4 against 96. On ELF, `libgfortran` 2 529 → 7 610 and `open…code`
-  50 670 → 70 680 with every symbol name preserved.
-- **ELF imports, string literals and RTTI for Mach-O** — `GLB_DAT`/`JUMP_SLOT` relocations
-  resolve GOT slots to symbol names (406 on an 81 MB binary), so an indirect call site reports
-  `memcpy` instead of nothing; references into read-only data report the string literal they
-  point at; `re rtti` now covers Mach-O and no longer counts the C++ ABI's own vtables, its
-  versioned aliases or mangled duplicates of the same class.
-- **Mach-O `checksec`** — PIE, NX stack and heap, two-level namespace, code signature,
-  encryption, stack canary, ARC and `_chk` fortification, read from the header flags and the
-  undefined symbols, with slice selection for universal binaries.
-- **PDB type fidelity** — simple types across the signed, unsigned and real families, pointer
-  modes (`0x0611` renders `short*`), array dimensions in C order with recursive element width
-  and forward-reference resolution, parameter **names** from `S_LOCAL` records joined on the
-  procedure's type index, and unions and bitfields rendered with the right keyword and widths.
-- **`scripts/build_release.py`** — per-platform release bundles, cross-compiling the Go hub for
-  every target; `dist/` now carries 0.4.7 bundles whose darwin archive contains a verified
-  Mach-O arm64 binary rather than a Python-only payload.
-- **Verification tooling** — `scripts/check_handoff_numbers.py` re-measures every number the
-  handoff states, `scripts/update_handoff_toc.py` keeps its contents block honest,
-  `scripts/bench_re_tiers.py` runs a 15-tier benchmark across ELF/PE/Mach-O/PDB, and
-  `scripts/bench_rea_compare.py` compares this engine against REA through Ghidra.
+## 0.4.7 - 2026-11-23
 
-### Fixed (2026-11-23)
+### Added
 
-- **`endbr64` broke every hardened x86-64 binary** (`disasm.go`) — the vendored `x86asm`
-  reports CET landing pads as `Op(0)`, which the decoder rejected as invalid. Debian and Ubuntu
-  build with `-fcf-protection` by default, so the first instruction of most functions failed
-  and disassembly stopped immediately. `endbr64`/`endbr32` are recognised and lifted as no-ops;
-  `RDSSPQ`/`INCSSPQ` are decoded and lifted as opaque rather than as a false no-op.
-- **Every backwards RIP-relative reference was wrong by 2^32** (`disasm.go`) — the vendored
-  decoder reports `Mem.Disp` unsigned, so `leaq -0x3f(%rip)` produced `0x100001070` instead of
-  `0x1070`. Sign-extended for RIP-relative operands only; branch targets were unaffected
-  because `x86asm.Rel` is already signed.
-- **`.bss` was mapped as file-backed** (`overview.go`) — `SHT_NOBITS` sections report a size
-  but have no bytes in the file, so an address inside `.bss` resolved to unrelated data
-  (measured: a `.bss` reference rendered a compiler banner from `.comment`).
-- **A decoder panic aborted the whole run** (`thirdparty/xarch/x86asm/avx.go`) — a truncated
-  EVEX prefix indexed past the buffer. Fixed at source, with a recover guard kept around the
-  vendored decoder.
-- **Thumb bit leaked from ELF symbols** (`functions.go`) — symbol values carry bit 0 for Thumb
-  code, producing odd function addresses and a duplicate `function` for the entry point.
-- **The function-output cap was 2000 applied with `min()`** (`functions.go`) — a binary
-  reporting `total: 50 670` could never deliver more than 2 000 of them.
-- **`--target`, `--grep` and `--confirm` were accepted and ignored** (`cli/scan_cmd.py`) —
-  an annotation could be stored at `0x0`, a filtered string search returned everything, and
-  `re patch` ignored a flag that could never apply because patching is copy-only.
-- **Listing verbs covered two formats out of six** (`core/re/sources.py`) — `sections`,
-  `needed`, `symbols` and `info` answered for ELF and PE only. One dispatcher now decides
-  which layer answers, so adding a format is one change instead of four.
+- Native analysis can map and disassemble supported ELF, PE, and Mach-O images. It indexes function starts, follows cross-references, recovers supported switch tables and loops, and reports why structured pseudocode was declined.
+- Added native decoding for 32-bit x86 and selected ARM and Thumb forms. Stripped PE and ELF analysis can recover additional function candidates from code and keeps their discovery source visible.
+- Browse IPA and DMG members, dyld cache images, IMG4 kernelcache payloads, and static archives. Unknown files return a hash and bounded previews.
+- Recover names from PE exports, DWARF, Objective-C metadata, and matching PDBs. PDB inspection also reads supported procedure signatures, arrays, structures, unions, and parameter names. Analyst renames and comments appear in native output alongside the original symbol.
+- Report ELF import names, string references, Mach-O hardening flags, and Mach-O C++ RTTI. Added function search, bookmarks, bulk renaming, and additional ELF, WASM, and UEFI inspection.
+- Added a platform archive builder for Linux x86-64 and arm64, macOS x86-64 and arm64, and Windows x64.
+
+### Fixed
+
+- Corrected x86 CET landing-pad decoding, signed RIP-relative displacements, and Thumb address normalization. Truncated instruction prefixes no longer stop the entire scan.
+- Stopped mapping ELF zero-fill sections to unrelated file bytes and removed the fixed limit that prevented callers from retrieving larger function listings.
+- Corrected argument handling for annotations and string filters. Listing commands now use a shared format dispatcher.
+- Source updates now check for local changes before resetting the managed checkout and surface fetch failures by default. The POSIX launcher follows symlinks without requiring `readlink -f`. Windows setup checks Python and verifies the launcher before updating user PATH.
 
 ## 0.4.6 - 2026-11-20
 
@@ -267,12 +214,6 @@
 - A `pass` recorded without an executed check no longer promotes a record to
   `verified`; it is recorded as an assertion with a caveat.
 - A contradicted record now loses confidence (to ≤0.05) instead of keeping it.
-
-# Changelog
-
-Version scheme: `MAJOR.MINOR.PATCH-<codename>`; the root `VERSION` file is the
-single source of truth. This repository holds the unified `xt-forge` toolkit
-(`xtforge/`, `native/xtforge-rs`, and `native/xtforge-go`).
 
 ## 0.3.2-Damascus — 2026-10-21
 

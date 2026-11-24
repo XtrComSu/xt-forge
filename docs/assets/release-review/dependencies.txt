@@ -1,0 +1,6 @@
+$ xt-forge re deps .
+Dependencies in .
+  1 dependenc(ies) from 1 manifest(s)  resolved 1  unresolved 0
+  ecosystems  Go=1
+  go           go.mod  (1 deps, 1 resolved)
+    Go        example.com/library                          1.2.3

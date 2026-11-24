@@ -1,0 +1,80 @@
+$ xt-forge re disasm-native ./demo --target main --flow
+{
+  "ok": true,
+  "engine": "xt-forge-sys",
+  "path": "/tmp/xtforge-private-visuals.IvRan3/demo",
+  "format": "elf",
+  "arch": "x86_64",
+  "address": 4392,
+  "name": "main",
+  "name_source": "elf_symtab",
+  "file_offset": 4392,
+  "window_bytes": 16,
+  "mode": "flow",
+  "instructions": [
+    {
+      "address": 4392,
+      "size": 1,
+      "bytes": "55",
+      "text": "push rbp",
+      "mnemonic": "push",
+      "operands": "rbp"
+    },
+    {
+      "address": 4393,
+      "size": 3,
+      "bytes": "4889e5",
+      "text": "mov rbp, rsp",
+      "mnemonic": "mov",
+      "operands": "rbp, rsp"
+    },
+    {
+      "address": 4396,
+      "size": 5,
+      "bytes": "bf04000000",
+      "text": "mov edi, 0x4",
+      "mnemonic": "mov",
+      "operands": "edi, 0x4"
+    },
+    {
+      "address": 4401,
+      "size": 5,
+      "bytes": "e8e3ffffff",
+      "text": "call 0x1119",
+      "mnemonic": "call",
+      "operands": "0x1119",
+      "kind": "call",
+      "target": 4377
+    },
+    {
+      "address": 4406,
+      "size": 1,
+      "bytes": "5d",
+      "text": "pop rbp",
+      "mnemonic": "pop",
+      "operands": "rbp"
+    },
+    {
+      "address": 4407,
+      "size": 1,
+      "bytes": "c3",
+      "text": "ret",
+      "mnemonic": "ret",
+      "kind": "return"
+    }
+  ],
+  "blocks": [
+    {
+      "address": 4392,
+      "end": 4408,
+      "edges": [
+        {
+          "from": 4401,
+          "target": 4377,
+          "kind": "call",
+          "internal": false
+        }
+      ]
+    }
+  ]
+}

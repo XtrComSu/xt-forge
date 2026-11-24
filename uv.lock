@@ -59,7 +59,7 @@ wheels = [
 
 [[package]]
 name = "xt-forge"
-version = "0.4.7"
+version = "0.4.8"
 source = { editable = "." }
 
 [package.optional-dependencies]

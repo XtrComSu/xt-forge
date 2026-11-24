@@ -113,6 +113,18 @@ class TestShippedPackages(unittest.TestCase):
         self.assertEqual(q.returncode, 0, q.stderr)
         self.assertIn("BASE_DELAY", json.loads(q.stdout)["data"]["context"])
 
+        dependency_project = self.fake_home / "dependency-demo"
+        dependency_project.mkdir()
+        inventory = dependency_project / "go.mod"
+        inventory.write_text("module example.com/demo\n\ngo 1.21\n\n"
+                             "require example.com/library v1.2.3\n", encoding="utf-8")
+        deps = subprocess.run(
+            [str(xtforge_bin), "re", "deps", str(dependency_project), "--json"],
+            env=self.env, text=True, capture_output=True, timeout=15,
+        )
+        self.assertEqual(deps.returncode, 0, deps.stderr)
+        self.assertEqual(json.loads(deps.stdout)["dependencies"][0]["version"], "1.2.3")
+
         # Upgrade/reinstall idempotency check.
         subprocess.run(
             ["uv", "pip", "install", "--reinstall", "--python", str(py_bin), str(ROOT)],

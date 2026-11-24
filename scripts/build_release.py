@@ -39,8 +39,8 @@ GO_TARGETS = {
 }
 
 # Directories and files every bundle carries.
-PAYLOAD = ("xtforge", "adapters", "bin", "docs", "README.md", "LICENSE", "VERSION",
-           "pyproject.toml", "uv.lock")
+PAYLOAD = ("xtforge", "adapters", "bin", "docs", "skills", "integrations",
+           "README.md", "CHANGELOG.md", "LICENSE", "VERSION", "pyproject.toml", "uv.lock")
 WINDOWS_LAUNCHER = "bin/xtforge.cmd"
 POSIX_LAUNCHER = "bin/xtforge"
 
@@ -120,7 +120,8 @@ def stage(platform: str, version: str, work: Path) -> tuple[Path, list[str]]:
         target = staging / entry
         if source.is_dir():
             shutil.copytree(source, target,
-                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"))
+                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache",
+                                                          "superpowers"))
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
