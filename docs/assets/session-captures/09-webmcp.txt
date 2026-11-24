@@ -1,0 +1,10 @@
+$ xt-forge re cdp http://localhost:8799 --symbol=webmcp
+
+webmcp  WebMCP demo  http://127.0.0.1:8799/index.html
+  2 registered tool(s)
+    filter-templates
+      Filters templates based on a natural language visual description.
+      args: description
+    edit-design
+      Apply a design edit.
+      args: instructions

@@ -1,0 +1,13 @@
+$ xt-forge re fuses app.bin
+
+Electron fuses (43 bytes, wire version 1, 9 fuses)
+  [ok  ] RunAsNode                                  disabled  '0'
+  [ok  ] EnableCookieEncryption                     enabled   '1'
+  [ok  ] EnableNodeOptionsEnvironmentVariable       disabled  '0'
+  [ok  ] EnableNodeCliInspectArguments              disabled  '0'
+  [ok  ] EnableEmbeddedAsarIntegrityValidation      enabled   '1'
+  [ok  ] OnlyLoadAppFromAsar                        enabled   '1'
+  [ok  ] LoadBrowserProcessSpecificV8Snapshot       disabled  '0'
+  [ok  ] GrantFileProtocolExtraPrivileges           disabled  '0'
+  [ok  ] WasmTrapHandlers                           enabled   '1'
+  no exposure found on this wire

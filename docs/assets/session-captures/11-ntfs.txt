@@ -1,0 +1,6 @@
+NTFS $LogFile record decode
+  pages 1  records 5  transactions 3  orphans 0
+    txn 0x11  records=2  lsn 0x64..0x68
+    txn 0x22  records=2  lsn 0x6c..0x70
+    txn 0x33  records=1  lsn 0x74..0x74
+  (padding skipped: LSNs are 100,104,108,112,116 — not the 0xAA payload read as a header)

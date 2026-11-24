@@ -1,0 +1,19 @@
+$ xt-forge re vulns /tmp/demo   # after the fix
+
+Vulnerability scan of /tmp/demo
+  queried 3 dependenc(ies)  clean 1  affected packages 2
+  6 distinct vulnerabilit(ies)  HIGH=2  MODERATE=2  UNKNOWN=2
+  HIGH     golang.org/x/text 0.3.3  (4 vuln(s))
+      CVE-2022-32149     HIGH     fixed in 0.3.8
+          golang.org/x/text/language Denial of service via crafted Accept-Language header
+      CVE-2021-38561     HIGH     fixed in 0.3.7
+          golang.org/x/text/language Out-of-bounds Read vulnerability
+      CVE-2026-56852     UNKNOWN  fixed in 0.39.0
+          Infinite loop on invalid input in golang.org/x/text
+      CVE-2026-56851     UNKNOWN  fixed in 0.41.0
+          Panic parsing crafted input in x/text/secure/precis in golang.org/x/text
+  MODERATE github.com/gin-gonic/gin 1.7.7  (2 vuln(s))
+      CVE-2023-29401     MODERATE fixed in 1.9.1
+          Gin Web Framework does not properly sanitize filename parameter of Context.FileAttachmen
+      CVE-2023-26125     MODERATE fixed in 1.9.0
+          Improper input validation in github.com/gin-gonic/gin

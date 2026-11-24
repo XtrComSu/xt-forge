@@ -1,0 +1,8 @@
+$ diff go.mod.orig go.mod
+
+6,7c6,7
+< 	github.com/gin-gonic/gin v1.6.0
+< 	golang.org/x/text v0.3.0
+---
+> 	github.com/gin-gonic/gin v1.7.7
+> 	golang.org/x/text v0.3.3

@@ -1,0 +1,12 @@
+$ xt-forge re nib Main.nib
+
+Interface Builder document (binary, 3 objects, 2 classes)
+  archiver    NSKeyedArchiver
+  roots       root
+  connections 2 object(s) with outlets or actions
+    [1] ViewController
+        outlet IBOutlet_tableView -> {'$classname': 'NSTableView'}
+        label  IBIdentifier = LoginScene
+    [2] NSTableView
+        outlet IBOutlet_delegate -> {'$classname': 'ViewController'}
+  classes     ViewController, NSTableView
