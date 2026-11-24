@@ -18,6 +18,7 @@ covers text frames, which is all CDP uses, and rejects anything else rather than
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 import socket
@@ -281,6 +282,34 @@ def _command(ws: WebSocket, method: str, params: dict[str, Any] | None,
     return {"ok": False, "error": "no response before the event budget ran out"}
 
 
+def _command_collect(ws: WebSocket, method: str, params: dict[str, Any] | None,
+                     message_id: int) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Send one command, returning its reply *and* the events that arrived before it.
+
+    `_command` discards interleaved events while waiting for its own reply, which is correct for
+    a command whose answer is the point and fatal for network capture: measured against a real
+    navigation, `Network.requestWillBeSent` arrives *before* the `Page.navigate` reply, so
+    navigating with `_command` collected zero requests for a page that made two. The events are
+    not late — they were thrown away.
+    """
+    ws.send(json.dumps({"id": message_id, "method": method, "params": params or {}}))
+    events: list[dict[str, Any]] = []
+    for _ in range(400):
+        message = ws.recv()
+        try:
+            parsed = json.loads(message)
+        except json.JSONDecodeError:
+            continue
+        if parsed.get("id") == message_id:
+            if "error" in parsed:
+                return ({"ok": False, "error": parsed["error"].get("message", "protocol error")},
+                        events)
+            return ({"ok": True, "result": parsed.get("result") or {}}, events)
+        if parsed.get("method"):
+            events.append(parsed)
+    return ({"ok": False, "error": "no response before the event budget ran out"}, events)
+
+
 # Expressions that answer the observation questions the REA tool list is really asking.
 _OBSERVATIONS = {
     "runtime": [
@@ -312,6 +341,279 @@ _OBSERVATIONS = {
 }
 
 
+def capture_screenshot(port: int, *, host: str = "127.0.0.1", index: int = 0,
+                       image_format: str = "png", quality: int | None = None,
+                       timeout: float = DEFAULT_TIMEOUT) -> dict[str, Any]:
+    """Capture a PNG/JPEG of one page's viewport over the DevTools socket.
+
+    `Page.captureScreenshot` returns base64 in the protocol's JSON, which needs no binary
+    transport, no browser-automation dependency and no display — it works against a headless
+    instance over the same socket the other observations already use. The row describing this as
+    unimplemented was accurate about the code and wrong about the obstacle: the call works
+    unmodified, returning a 1922-byte PNG for `about:blank`.
+
+    The image is written to `out` when given and summarised otherwise; the base64 body is
+    never echoed back, because a full-page capture of a real site is megabytes and would make
+    the report unreadable.
+    """
+    if image_format not in ("png", "jpeg", "webp"):
+        return {"ok": False, "error": f"unsupported image format {image_format!r}",
+                "formats": ["png", "jpeg", "webp"]}
+    pages = _page_targets(port, host=host, timeout=timeout)
+    if isinstance(pages, dict):
+        return pages
+    if not pages:
+        return {"ok": False, "endpoint": f"http://{host}:{port}",
+                "error": "no page targets to capture"}
+    chosen = pages[index] if 0 <= index < len(pages) else pages[0]
+    ws_url = chosen.get("webSocketDebuggerUrl")
+    if not ws_url:
+        return {"ok": False, "error": "target exposes no webSocketDebuggerUrl",
+                "target": chosen.get("id")}
+    params: dict[str, Any] = {"format": image_format}
+    if quality is not None and image_format in ("jpeg", "webp"):
+        params["quality"] = max(0, min(100, int(quality)))
+
+    try:
+        ws = WebSocket(ws_url, timeout=timeout)
+    except (RuntimeError, OSError, ValueError) as exc:
+        return {"ok": False, "error": f"could not attach: {exc}"}
+    try:
+        reply = _command(ws, "Page.captureScreenshot", params, 1)
+    finally:
+        try:
+            ws.close()
+        except Exception:  # noqa: BLE001 - closing must never mask the capture result
+            pass
+    if not reply.get("ok"):
+        return {"ok": False, "error": reply.get("error", "capture failed"),
+                "endpoint": f"http://{host}:{port}"}
+
+    import base64
+    import hashlib
+    encoded = (reply.get("result") or {}).get("data") or ""
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (ValueError, base64.binascii.Error) as exc:
+        return {"ok": False, "error": f"the screenshot body is not valid base64: {exc}"}
+    # A protocol success with an empty body happens when the surface is not compositing; calling
+    # that a capture would be a silent lie, so it is reported as a failure.
+    if not raw:
+        return {"ok": False, "error": "the browser returned an empty image"}
+    magic = {b"\x89PNG": "png", b"\xff\xd8\xff": "jpeg"}
+    detected = next((name for prefix, name in magic.items() if raw.startswith(prefix)), None)
+    report: dict[str, Any] = {
+        "ok": True,
+        "endpoint": f"http://{host}:{port}",
+        "target": {"id": chosen.get("id"), "url": chosen.get("url"),
+                   "title": chosen.get("title"), "type": chosen.get("type")},
+        "format": detected or image_format,
+        "declared_format": image_format,
+        "bytes": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "head": raw[:16].hex(),
+    }
+    if detected and detected != image_format:
+        # The protocol accepts a format and may still answer with another; say so rather than
+        # letting the caller believe the bytes are what it asked for.
+        report["format_mismatch"] = True
+    return report
+
+
+def _page_targets(port: int, *, host: str = "127.0.0.1",
+                  timeout: float = DEFAULT_TIMEOUT) -> Any:
+    """Fetch the target list and return every target, with its `type` preserved.
+
+    The endpoint reports `page`, `iframe`, `service_worker`, `background_page` and — for an
+    Electron app — `webview` and friends. Filtering to `page` before reporting is how a
+    service worker executing the app's logic became invisible: it is not a page, but it is
+    observing the runtime all the same. Callers that only want pages filter afterwards.
+    """
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": f"port is not an integer: {port!r}"}
+    if not (0 < port < 65536):
+        return {"ok": False, "error": f"port out of range: {port}"}
+    base = f"http://{host}:{port}"
+    try:
+        targets = _http_json(f"{base}/json/list", timeout=timeout)
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
+        return {"ok": False, "endpoint": base,
+                "error": f"no DevTools endpoint at {base}: {exc}"}
+    return [target for target in targets or [] if isinstance(target, dict)]
+
+
+def capture_network(port: int, *, host: str = "127.0.0.1", url: str | None = None,
+                    wait: float = 5.0, limit: int = 200,
+                    timeout: float = DEFAULT_TIMEOUT) -> dict[str, Any]:
+    """Collect CDP `Network` events from a page, optionally navigating first.
+
+    This is the half page-script evaluation fundamentally cannot cover: a response the page has
+    already consumed is gone by the time `fetch` is patched, so the request list has to come from
+    the protocol's own event stream. `Network.enable` succeeds over the same socket and delivered
+    three events for a trivial data-URL page, so the transport was never the obstacle.
+
+    Events are folded into one record per request, because the protocol emits several per
+    exchange (`requestWillBeSent`, `responseReceived`, `loadingFinished`) and a raw dump answers
+    "what happened" only after the reader does the joining.
+
+    Navigation events arrive *before* the navigation command's own reply, so replies are collected
+    with `_command_collect` rather than `_command` — the latter discards exactly the events this
+    function exists to gather, which made it report zero requests for a page that made two.
+    """
+    pages = _page_targets(port, host=host, timeout=timeout)
+    if isinstance(pages, dict):
+        return pages
+    if not pages:
+        return {"ok": False, "endpoint": f"http://{host}:{port}",
+                "error": "no targets to observe"}
+    chosen = next((page for page in pages if page.get("type") == "page"), pages[0])
+    ws_url = chosen.get("webSocketDebuggerUrl")
+    if not ws_url:
+        return {"ok": False, "error": "target exposes no webSocketDebuggerUrl"}
+
+    try:
+        ws = WebSocket(ws_url, timeout=timeout)
+    except (RuntimeError, OSError, ValueError) as exc:
+        return {"ok": False, "error": f"could not attach: {exc}"}
+
+    requests: dict[str, dict[str, Any]] = {}
+    pending: list[dict[str, Any]] = []
+    others: list[str] = []
+
+    def absorb(event: dict[str, Any]) -> None:
+        method = event.get("method") or ""
+        params = event.get("params") or {}
+        if not method.startswith("Network."):
+            return
+        request_id = params.get("requestId")
+        if method == "Network.requestWillBeSent":
+            request = params.get("request") or {}
+            requests[request_id] = {
+                "request_id": request_id,
+                "url": request.get("url"),
+                "method": request.get("method"),
+                "type": params.get("type"),
+                "request_headers": request.get("headers") or {},
+                "status": None,
+                "mime": None,
+                "encoded_bytes": None,
+            }
+            return
+        record = requests.get(request_id)
+        if record is None:
+            if len(others) < 40:
+                others.append(method)
+            return
+        if method == "Network.responseReceived":
+            response = params.get("response") or {}
+            record["status"] = response.get("status")
+            record["mime"] = response.get("mimeType")
+            record["remote_ip"] = response.get("remoteIPAddress")
+        elif method == "Network.loadingFinished":
+            record["encoded_bytes"] = params.get("encodedDataLength")
+        elif method == "Network.loadingFailed":
+            record["failed"] = params.get("errorText") or True
+        elif method == "Network.requestWillBeSentExtraInfo":
+            record["actual_request_headers"] = params.get("headers") or {}
+        elif method == "Network.responseReceivedExtraInfo":
+            record["actual_response_headers"] = params.get("headers") or {}
+        elif method == "Network.dataReceived" and record.get("encoded_bytes") is None:
+            record["data_received"] = (record.get("data_received") or 0) + (
+                params.get("encodedDataLength") or 0)
+
+    try:
+        enabled, first = _command_collect(ws, "Network.enable", {}, 1)
+        if not enabled.get("ok"):
+            return {"ok": False, "error": enabled.get("error", "Network.enable refused")}
+        for event in first:
+            absorb(event)
+        _reply, more = _command_collect(ws, "Page.enable", {}, 2)
+        for event in more:
+            absorb(event)
+        if url:
+            _reply, during = _command_collect(ws, "Page.navigate", {"url": url}, 3)
+            for event in during:
+                absorb(event)
+
+        import time as _time
+        deadline = _time.time() + max(0.0, float(wait))
+        while _time.time() < deadline and len(requests) < limit:
+            try:
+                raw = ws.recv()
+            except Exception:  # noqa: BLE001 - a closed socket ends collection, not the report
+                break
+            try:
+                message = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            absorb(message)
+    finally:
+        try:
+            ws.close()
+        except Exception:  # noqa: BLE001 - closing must not mask the collection result
+            pass
+
+    collected = list(requests.values())[:limit]
+    statuses = [entry.get("status") for entry in collected if entry.get("status")]
+    return {
+        "ok": True,
+        "endpoint": f"http://{host}:{port}",
+        "target": {"id": chosen.get("id"), "url": chosen.get("url"),
+                   "title": chosen.get("title"), "type": chosen.get("type")},
+        "navigated_to": url,
+        "waited_seconds": wait,
+        "request_count": len(collected),
+        "statuses": sorted({str(status) for status in statuses}),
+        "requests": collected,
+        # Hosts seen in the request list are the ones the page actually talked to, which is the
+        # question a network observation exists to answer.
+        "hosts": sorted({_host_of(entry.get("url") or "") for entry in collected} - {""}),
+        "unattributed_events": others,
+    }
+
+
+def _host_of(url: str) -> str:
+    from urllib.parse import urlsplit
+    try:
+        return urlsplit(url).netloc or ""
+    except ValueError:
+        return ""
+
+
+def enumerate_targets(port: int, *, host: str = "127.0.0.1",
+                      timeout: float = DEFAULT_TIMEOUT) -> dict[str, Any]:
+    """List every DevTools target with its type, including non-page execution contexts.
+
+    An Electron app's renderer is a `page`, its preload work often a `service_worker`, and a
+    `webview` is a separate target again. The previous report kept only `type == "page"`, so a
+    service worker running the application's own logic was not merely unattributed — it was
+    absent, and a reader had no way to tell.
+    """
+    targets = _page_targets(port, host=host, timeout=timeout)
+    if isinstance(targets, dict):
+        return targets
+    by_type: dict[str, int] = {}
+    for target in targets:
+        kind = target.get("type") or "unknown"
+        by_type[kind] = by_type.get(kind, 0) + 1
+    electron_markers = ("webview", "background_page", "service_worker")
+    return {
+        "ok": True,
+        "endpoint": f"http://{host}:{port}",
+        "target_count": len(targets),
+        "types": by_type,
+        # Presence of a non-page execution context is the observable trace of an Electron-style
+        # embedder, and it is the only part of that question answerable without the app's own
+        # ASAR: the fuses live inside the Electron binary, not in the target list.
+        "electron_shaped": any(by_type.get(marker) for marker in electron_markers),
+        "targets": [{"id": target.get("id"), "type": target.get("type"),
+                     "title": target.get("title"), "url": target.get("url")}
+                    for target in targets],
+    }
+
+
 def observe(port: int, *, aspect: str = "runtime", host: str = "127.0.0.1",
             timeout: float = DEFAULT_TIMEOUT) -> dict[str, Any]:
     """Run one aspect of observation against a live endpoint.
@@ -327,6 +629,90 @@ def observe(port: int, *, aspect: str = "runtime", host: str = "127.0.0.1",
     report = inspect_endpoint(port, host=host, expressions=questions, timeout=timeout)
     report["aspect"] = aspect
     return report
+
+
+@contextlib.contextmanager
+def launched_browser(url: str = "about:blank", *, timeout: float = DEFAULT_TIMEOUT):
+    """Yield the DevTools port of a freshly started headless browser, then tear it down.
+
+    `launch_and_inspect` bundled launch, observation and shutdown into one call, which meant a
+    capability that is not an expression list — a screenshot, a network trace — had no way to
+    borrow a browser. Every one of them would have had to reimplement startup and, more to the
+    point, reimplement the teardown. That teardown is not incidental: a leaked profile is
+    hundreds of megabytes, and a stale profile stops the *next* launch from opening a port, which
+    is how eleven browsers and nine profiles once survived a single session.
+
+    Yields a dict `{"port": int, "binary": str, "profile": str}`, or raises `RuntimeError` with
+    the reason when no browser can be arranged.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+    import time
+
+    binary = find_browser()
+    if not binary:
+        raise RuntimeError(f"no Chromium or Chrome build found; searched {list(_CHROME_GLOBS)}")
+    profile = tempfile.mkdtemp(prefix="xtcdp-")
+    process = subprocess.Popen(
+        [binary, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+         "--remote-debugging-port=0", f"--user-data-dir={profile}", url],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        port_file = Path(profile) / "DevToolsActivePort"
+        port = None
+        for _ in range(120):
+            if port_file.is_file():
+                try:
+                    port = int(port_file.read_text().splitlines()[0])
+                    break
+                except (ValueError, IndexError):
+                    pass
+            if process.poll() is not None:
+                raise RuntimeError(f"the browser exited before opening a port "
+                                   f"(exit {process.returncode})")
+            time.sleep(0.1)
+        if port is None:
+            raise RuntimeError("the browser never reported a DevTools port")
+        yield {"port": port, "binary": binary, "profile": profile}
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+def capture_screenshot_of(url: str = "about:blank", **kwargs: Any) -> dict[str, Any]:
+    """Launch a browser, capture a screenshot of `url`, and shut down."""
+    try:
+        with launched_browser(url) as session:
+            report = capture_screenshot(session["port"], **kwargs)
+            report["launched"] = {"binary": session["binary"], "port": session["port"]}
+            return report
+    except RuntimeError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def capture_network_of(url: str = "about:blank", **kwargs: Any) -> dict[str, Any]:
+    """Launch a browser, record the network activity of loading `url`, and shut down.
+
+    The browser is started on `about:blank` and then navigated, rather than being started on
+    `url` directly. Starting on the URL meant the document request — the one that matters most —
+    had already completed before `Network.enable` could be sent, so it was absent from the
+    report while its subresources were there. Measured on `https://example.com`: launching on the
+    URL reported one request (`s.js`) and no document; launching on `about:blank` and navigating
+    reports the document too.
+    """
+    try:
+        with launched_browser("about:blank") as session:
+            report = capture_network(session["port"], url=url, **kwargs)
+            report["launched"] = {"binary": session["binary"], "port": session["port"]}
+            return report
+    except RuntimeError as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def launch_and_inspect(url: str = "about:blank", *,

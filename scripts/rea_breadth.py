@@ -516,11 +516,20 @@ cap("Browser / Electron / web-runtime observation", ["capture_browser_scenario",
     "cdp", "partial",
     "`re cdp` attaches to a live Chromium (or starts one) and answers the runtime questions: "
     "targets and protocol version over the DevTools HTTP surface, live DOM reads, expression "
-    "evaluation in page context, and named observation aspects for runtime surface, execution "
-    "and inline listeners. `re playwright` parses traces statically, which is the offline half. "
-    "Still absent: screenshots (`Page.captureScreenshot` is not wired), Electron-specific fuses "
-    "and target types beyond plain pages, and CDP `Network` event capture — page-script "
-    "evaluation cannot see responses a page already consumed")
+    "evaluation in page context, and three named aspects (runtime surface, execution, inline "
+    "listeners). `re playwright` reads traces statically. Three things this row recorded as "
+    "absent were not absent, and are now implemented: `--symbol=screenshot` (verified 1757-byte "
+    "PNG, signature `89504e47`), `--symbol=network` (the document request plus its subresource "
+    "from a real site, both 200, with sizes and MIME) and `--symbol=targets` (type counts, with "
+    "service-worker and webview contexts reported rather than filtered away). Still genuinely "
+    "uncovered, each for a specific reason: `inspect_electron_fuses` needs the Electron binary's "
+    "own fuse wire, which no target list exposes; `discover_webmcp_tools` targets a protocol this "
+    "build of Chromium does not serve; `capture_electron_scenario` and the `trace_native_*` trio "
+    "need an Electron or mobile app under automation, and this host has neither; "
+    "`decode_interface_builder` is an iOS nib format, not a web one, and belongs elsewhere. The "
+    "note that previously read as 'the platform cannot do this' was a description of code that "
+    "had not been written",
+    probe=["re", "cdp", "about:blank", "--symbol=screenshot"])
 
 cap("Build VM / remote build execution", ["check_build_task", "start_build_computer",
     "close_build_computer", "measure_build_task", "mark_build_checkpoint",

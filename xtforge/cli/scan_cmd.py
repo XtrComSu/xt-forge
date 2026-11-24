@@ -341,6 +341,50 @@ def _render_cdp(res):
         if res.get("hint"):
             lines.append("  hint: " + str(res["hint"]))
         return chr(10).join(lines)
+    # The new aspects are not the `inspect` shape at all: a screenshot has no pages and no
+    # protocol version, and a network record has requests. Rendering them through the inspect
+    # layout printed "None protocol None" over an otherwise correct result.
+    aspect = res.get("aspect")
+    if aspect == "screenshot":
+        target = res.get("target") or {}
+        lines = [f"screenshot  {res.get('format')}  {res.get('bytes')} bytes",
+                 f"  sha256      {res.get('sha256')}",
+                 f"  page        {str(target.get('title'))[:40]!r}  "
+                 f"{str(target.get('url'))[:50]}"]
+        if res.get("format_mismatch"):
+            lines.append(f"  NOTE        asked for {res.get('declared_format')}, "
+                         f"browser returned {res.get('format')}")
+        if res.get("launched"):
+            lines.append(f"  launched    port {res['launched']['port']}")
+        return chr(10).join(lines)
+    if aspect == "network":
+        lines = [f"network  {res.get('request_count')} request(s)"
+                 f"  statuses {', '.join(res.get('statuses') or []) or 'none'}",
+                 f"  hosts       {', '.join((res.get('hosts') or [])[:6]) or 'none'}"]
+        if res.get("navigated_to"):
+            lines.append(f"  navigated   {str(res['navigated_to'])[:70]}")
+        for request in (res.get("requests") or [])[:15]:
+            status = request.get("status")
+            size = request.get("encoded_bytes")
+            lines.append(f"    {str(request.get('method'))[:6]:<6} "
+                         f"{str(request.get('url'))[:52]:<52} "
+                         f"{status if status is not None else '-'}"
+                         f"{f'  {size}B' if size is not None else ''}"
+                         f"{'  FAILED' if request.get('failed') else ''}")
+        if res.get("unattributed_events"):
+            lines.append(f"  other       {', '.join(res['unattributed_events'][:5])}")
+        return chr(10).join(lines)
+    if aspect == "targets":
+        types = res.get("types") or {}
+        lines = [f"targets  {res.get('target_count')}  "
+                 + "  ".join(f"{name}={count}" for name, count in sorted(types.items())),
+                 f"  electron-shaped  {res.get('electron_shaped')}"]
+        for target in (res.get("targets") or [])[:12]:
+            lines.append(f"    {str(target.get('type')):<16} "
+                         f"{str(target.get('title'))[:30]!r} "
+                         f"{str(target.get('url'))[:40]}")
+        return chr(10).join(lines)
+
     lines = [f"{res.get('browser')}  protocol {res.get('protocol_version')}"
              f"  V8 {res.get('v8_version')}",
              f"  endpoint    {res.get('endpoint')}"
@@ -530,6 +574,30 @@ def cmd_re(args):
         from ..core.re import cdp as _cdp
         target = (getattr(args, "value", None) or "").strip()
         aspect = getattr(args, "symbol", None)
+        # Three capabilities that are not expression lists, so they cannot live in
+        # `_OBSERVATIONS`: each issues its own protocol commands and returns structured data.
+        wait = float(getattr(args, "timeout", None) or 5)
+        if aspect == "screenshot":
+            # A port attaches to a browser already running; anything else is treated as a URL to
+            # launch against, so the capability works with no prior setup.
+            res = (_cdp.capture_screenshot(int(target)) if target.isdigit()
+                   else _cdp.capture_screenshot_of(target or "about:blank"))
+            res["aspect"] = "screenshot"
+            return _out(args, res, _render_cdp(res), code=0 if res.get("ok") else 2)
+        if aspect == "network":
+            res = (_cdp.capture_network(int(target), wait=wait) if target.isdigit()
+                   else _cdp.capture_network_of(target or "about:blank", wait=wait))
+            res["aspect"] = "network"
+            return _out(args, res, _render_cdp(res), code=0 if res.get("ok") else 2)
+        if aspect in ("targets", "electrontargets"):
+            if not target.isdigit():
+                res = {"ok": False,
+                       "error": "targets needs the port of a running DevTools endpoint",
+                       "hint": "start a browser with --remote-debugging-port=<port>, then pass it"}
+            else:
+                res = _cdp.enumerate_targets(int(target))
+            res["aspect"] = "targets"
+            return _out(args, res, _render_cdp(res), code=0 if res.get("ok") else 2)
         if aspect and aspect in _cdp._OBSERVATIONS:
             # `re cdp <port> --symbol=runtime` narrows to one observation aspect.
             if target.isdigit():
