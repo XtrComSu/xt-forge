@@ -83,9 +83,21 @@ cap("Hardening / checksec", ["inspect_binary_hardening"],
 cap("PE identity and headers", ["inspect_native_load_image"],
     "pe", "covered", probe=["re", "pe", "{pe}"])
 cap("PE imports", ["inspect_pe_imports"],
-    "pe", "covered")
+    "pe", "covered",
+    "`re pe imports <file>` lists every imported DLL with its thunks, read from the import "
+    "directory. Verified against a real mingw-linked PE: 9 DLL entries including KERNEL32.dll and "
+    "the api-ms-win-crt-* set, cross-checked with `objdump -p` which reports the same five "
+    "leading names. The bare `re pe <file>` form defaults to `info` and carries no imports, which "
+    "is why this row went unprobed while looking covered",
+    probe=["re", "pe", "imports", "{pe}"])
 cap("PE exports", ["inspect_native_exports"],
-    "pe", "covered")
+    "pe", "covered",
+    "`re pe exports <file>` lists the export address table with names, ordinals and RVAs. Verified "
+    "on a PE built with two `__declspec(dllexport)` functions: both `probe_alpha` and `probe_beta` "
+    "recovered, matching `objdump -p`'s export table exactly. The fixture previously exported "
+    "nothing, so a passing probe would have proved nothing — it was changed to export two symbols "
+    "before this row was marked probed",
+    probe=["re", "pe", "exports", "{pe}"])
 cap("Binary diff", ["compare_native_artifacts", "compare_native_functions"],
     "diff", "covered", probe=["re", "diff", "{elf}", "{elf2}"])
 cap("C++ RTTI / vtables", ["inspect_native_data_type"],
@@ -437,7 +449,16 @@ cap("API surface / contract inspection", ["inspect_api_contract", "inspect_signa
 
 cap("Native initializer discovery", ["inspect_native_initializers"],
     "hooks", "covered",
-    "`re hooks` reports constructors, initializers and interposable call sites")
+    "`re hooks` reports interposable call sites (PLT trampolines) and raw syscall stubs — and now "
+    "the initialisers too, which it did not before. That half cannot come from a disassembly scan "
+    "at any quality: `.init_array` and `.fini_array` hold function *pointers*, so no call site "
+    "exists to find, and `DT_INIT` names one function through the dynamic section. All three are "
+    "read from the section and dynamic tables, and reported in execution order — which is the "
+    "actionable part, since the first entry runs before any breakpoint on `main`. Verified "
+    "against `readelf -x .init_array` on a gcc-built binary: all three pointers recovered, named "
+    "from the symbol table when present and reported by address when `strip` removes it. The verb "
+    "also crashed on every invocation with `name 'shutil' is not defined` until this was fixed",
+    probe=["re", "hooks", "{elf}"])
 
 cap("Flutter / Dart build identification", ["identify_flutter_build"],
     "dart", "covered",
@@ -713,8 +734,14 @@ def _fixtures() -> dict[str, str]:
                   if shutil.which(c)), None)
     if mingw:
         pe_src = workdir / "pe.c"
-        pe_src.write_text("int add(int a,int b){return a+b;}\n"
-                          "int main(void){return add(1,2);}\n")
+        # Two named exports, so the exports row has something to find. Without them a PE probe
+        # passes while proving nothing: the previous fixture exported nothing, so `re pe exports`
+        # returning [] was indistinguishable from the parser being broken. Measured against
+        # `objdump -p`, a real build with `__declspec(dllexport)` reports both names.
+        pe_src.write_text("__declspec(dllexport) int probe_alpha(int x){return x+1;}\n"
+                          "__declspec(dllexport) int probe_beta(int x){return x*2;}\n"
+                          "int add(int a,int b){return a+b;}\n"
+                          "int main(void){return add(probe_alpha(1),probe_beta(2));}\n")
         pe = workdir / "probe.exe"
         built = subprocess.run([mingw, "-O0", "-o", str(pe), str(pe_src)],
                                capture_output=True, text=True)

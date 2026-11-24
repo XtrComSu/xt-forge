@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 from .common import _out
@@ -1361,6 +1362,19 @@ def cmd_re(args):
             tool = shutil.which("objdump")
             out_txt, _ = renative._run([tool, "-d", str(path)], timeout=45) if tool else ("", False)
             res = {"ok": True, "path": str(path), **renative.scan_hooks_and_syscalls(out_txt)}
+            # Constructors do not appear as calls in disassembly, so the scan above cannot see
+            # them however thorough it is. They are read from the section table instead: an ELF
+            # runs everything in `.init_array` before `main`, which is exactly where code that
+            # wants to execute first hides.
+            try:
+                from ..core.re import elf as _elf
+                ctors = _elf.constructors(path)
+                if ctors.get("ok"):
+                    res["constructors"] = ctors.get("constructors") or []
+                    res["constructor_count"] = ctors.get("constructor_count", 0)
+                    res["destructor_count"] = ctors.get("destructor_count", 0)
+            except (OSError, ValueError, ImportError) as exc:
+                res["constructors_error"] = str(exc)
         elif verb == "patch":
             from ..core.re.patch import apply_patch
             off_str = getattr(args, "offset", None)
@@ -2673,11 +2687,21 @@ def cmd_re(args):
     elif verb == "hooks":
         syscalls = res.get("syscalls", [])
         hooks = res.get("hooks", [])
-        lines = [f"Hooks & Syscalls for {res.get('path')}: {len(hooks)} hooks, {len(syscalls)} syscall stubs"]
+        constructors = res.get("constructors") or []
+        lines = [f"Hooks & Syscalls for {res.get('path')}: {len(hooks)} hooks, "
+                 f"{len(syscalls)} syscall stubs, {len(constructors)} initializer(s)"]
         for h in hooks[:10]:
             lines.append(f"  [HOOK]    {h['function']} @ {h['address']}: {h['type']} -> {h['target']}")
         for sc in syscalls[:10]:
             lines.append(f"  [SYSCALL] {sc['function']} @ {sc['address']}: SSN {sc.get('hex_ssn')} ({sc.get('ssn')})")
+        # Listed in the order the loader runs them, which is what makes this actionable: the
+        # first entry is the first code to run, and it runs before any breakpoint set on main().
+        for entry in constructors[:12]:
+            label = entry.get("function") or "(unnamed)"
+            kind = entry.get('kind', 'constructor').upper().ljust(11)
+            lines.append(f"  [{kind}] {label:<24} {entry.get('address')}  {entry.get('section')}")
+        if res.get("constructors_error"):
+            lines.append(f"  constructors unavailable: {res['constructors_error']}")
         human = "\n".join(lines)
     elif verb == "patch":
         human = f"Patched {res.get('bytes_patched')} bytes at {res.get('offset')} -> {res.get('out_path')}"

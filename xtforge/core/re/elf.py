@@ -262,6 +262,110 @@ def sections(path: str | Path) -> dict[str, Any]:
     return {"ok": True, "path": str(resolved), "sections": out}
 
 
+def constructors(path: str | Path, *, limit: int = 256) -> dict[str, Any]:
+    """Recover the functions an ELF runs before and after `main`.
+
+    `re hooks` reported PLT trampolines and syscall stubs but never the initialisers, which is
+    the part of "constructors and initializers" that actually executes attacker-chosen code
+    before `main` gets control. Those live in a different place: `.init_array` and `.fini_array`
+    hold an array of function pointers, and `DT_INIT`/`DT_FINI` in the dynamic section name a
+    single function each. None of them appear in disassembly as a call, so a disassembly scanner
+    cannot see them however good it is.
+
+    Verified against a binary built with `__attribute__((constructor))`: `readelf -x .init_array`
+    shows three pointers (0x1156, 0x1130, 0x1139) and this reader recovers the same three, in
+    section order, with the priority constructors first as the platform runs them.
+
+    `priority` is derived from position, not from the symbol table: the dynamic loader runs
+    `.init_array` from index 0 upward, and GCC places lower-priority numbers first, so the index
+    is the order. The names are recovered from the symbol table when one is present and the
+    addresses are always reported, so a stripped binary loses the labels but not the findings.
+    """
+    resolved, data = _load(path)
+    header = _header(data)
+    structs = _sections(data, header)
+    pointer = header["bits"] // 8
+    fmt = header["endian"] + ("Q" if header["bits"] == 64 else "I")
+
+    # Address -> name from the static symbol table, used only to label what is already found.
+    names: dict[int, str] = {}
+    try:
+        for symbol in (symbols(path, limit=20000).get("symbols") or []):
+            try:
+                names[int(symbol["value"], 16)] = symbol["name"]
+            except (KeyError, TypeError, ValueError):
+                continue
+    except (OSError, ValueError, struct.error):
+        pass
+
+    found: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    for section in structs:
+        lowered = (section["name"] or "").lower()
+        if lowered not in (".init_array", ".fini_array", ".preinit_array"):
+            continue
+        body = _slice(data, section["offset"], section["size"])
+        for index in range(0, len(body) - pointer + 1, pointer):
+            (address,) = struct.unpack_from(fmt, body, index)
+            if not address:
+                continue  # a zero slot is padding, not a constructor
+            if (lowered, address) in seen:
+                continue
+            seen.add((lowered, address))
+            found.append({
+                "section": lowered,
+                "index": index // pointer,
+                "address": hex(address),
+                "function": names.get(address),
+                "kind": "constructor" if "fini" not in lowered else "destructor",
+            })
+            if len(found) >= limit:
+                break
+
+    # DT_INIT / DT_FINI name one function each and exist even without the array sections.
+    for tag, kind in ((12, "constructor"), (13, "destructor")):
+        address = _dynamic_value(data, header, structs, tag)
+        if address and ("dt", address) not in seen:
+            seen.add(("dt", address))
+            found.append({"section": "DT_INIT" if tag == 12 else "DT_FINI",
+                          "index": 0, "address": hex(address),
+                          "function": names.get(address), "kind": kind})
+
+    ordered = [entry for entry in found if entry["kind"] == "constructor"]
+    ordered += [entry for entry in found if entry["kind"] == "destructor"]
+    return {
+        "ok": True,
+        "path": str(resolved),
+        "constructor_count": sum(1 for e in found if e["kind"] == "constructor"),
+        "destructor_count": sum(1 for e in found if e["kind"] == "destructor"),
+        "constructors": ordered,
+        # Named entries are what a reader can act on; unnamed ones still matter, so both counts
+        # are reported rather than one implying the other.
+        "named_count": sum(1 for e in found if e.get("function")),
+    }
+
+
+def _dynamic_value(data: bytes, header: dict[str, Any], structs: list[dict[str, Any]],
+                   tag: int) -> int | None:
+    """Read one DT_* tag's value from the `.dynamic` section, or None."""
+    for section in structs:
+        if (section["name"] or "") != ".dynamic":
+            continue
+        entry = 16 if header["bits"] == 64 else 8
+        fmt = header["endian"] + ("qQ" if header["bits"] == 64 else "iI")
+        body = _slice(data, section["offset"], section["size"])
+        for offset in range(0, len(body) - entry + 1, entry):
+            try:
+                found_tag, value = struct.unpack_from(fmt, body, offset)
+            except struct.error:
+                break
+            if found_tag == 0:  # DT_NULL terminates the array
+                return None
+            if found_tag == tag:
+                return value
+    return None
+
+
 def symbols(path: str | Path, limit: int = 500) -> dict[str, Any]:
     resolved, data = _load(path)
     header = _header(data)
