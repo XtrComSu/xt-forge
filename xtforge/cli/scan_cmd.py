@@ -958,6 +958,14 @@ def cmd_re(args):
         elif verb in ("v8cache", "codecache"):
             from ..core.re import v8cache
             res = v8cache.inspect_v8_code_cache(path)
+        elif verb in ("dex-classes", "dex-search"):
+            from ..core.re import dex as _dex
+            res = _dex.search_classes(path, getattr(args, "symbol", None) or "",
+                                      limit=args.limit or 60)
+        elif verb in ("dex-refs", "dex-trace"):
+            from ..core.re import dex as _dex
+            res = _dex.trace_references(path, getattr(args, "symbol", None) or "",
+                                        limit=args.limit or 60)
         elif verb in ("hap", "harmony"):
             from ..core.re import harmony as _harmony
             res = _harmony.inspect_hap(path)
@@ -1962,6 +1970,31 @@ def cmd_re(args):
             if res.get("truncated"):
                 lines.append(f"  WARNING     {res.get('warning')}")
             human = "\n".join(lines)
+    elif verb in ("dex-classes", "dex-search"):
+        if not res.get("ok"):
+            human = "dex-search: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"{res.get('path')}  pattern {res.get('pattern')!r}",
+                     f"  {res.get('match_count')} match(es) across {res.get('dex_entries')} "
+                     f".dex entr(ies), {res.get('classes_scanned')} classes scanned"]
+            for item in (res.get("matches") or [])[:24]:
+                if item.get("error"):
+                    lines.append(f"    ! {item.get('entry')}: {item['error']}")
+                else:
+                    lines.append(f"    {str(item.get('name'))[:56]:<56} "
+                                 f"{item.get('superclass') or ''}")
+            human = chr(10).join(lines)
+    elif verb in ("dex-refs", "dex-trace"):
+        if not res.get("ok"):
+            human = "dex-refs: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"{res.get('path')}  symbol {res.get('symbol')!r}",
+                     f"  {res.get('reference_count')} reference(s) in "
+                     f"{res.get('dex_entries')} .dex entr(ies)"]
+            for item in (res.get("references") or [])[:24]:
+                lines.append(f"    {item.get('kind'):<7} {str(item.get('class'))[:40]:<40}"
+                             f" {item.get('name')}")
+            human = chr(10).join(lines)
     elif verb in ("hap", "harmony"):
         human = _render_hap(res)
     elif verb in ("model", "model-artifact", "gguf", "safetensors"):

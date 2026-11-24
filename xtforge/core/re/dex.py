@@ -33,6 +33,8 @@ from ..route import guard
 from ..route.guard import Denied
 
 MAX_BYTES = 512 * 1024 * 1024
+# Per-entry cap when scanning inside an archive: a single .dex over this is not scannable.
+MAX_CLASS_SCAN_BYTES = 256 * 1024 * 1024
 MAX_ITEMS = 200000
 MAX_CLASSES_LISTED = 5000
 
@@ -431,3 +433,147 @@ def inspect_entry(path: str | Path, entry_name: str = "classes.dex") -> dict[str
             "counts": {"strings": dex.string_ids_size, "types": dex.type_ids_size,
                        "methods": dex.method_ids_size, "classes": dex.class_defs_size},
             "verification": dex.verify()}
+
+
+def _classes_matching(dex: "Dex", pattern: str, limit: int) -> tuple[list[dict], int]:
+    """Walk the class-def table, returning matching records and the total scanned."""
+    import re as _re
+    try:
+        matcher = _re.compile(pattern, _re.IGNORECASE)
+    except _re.error:
+        matcher = None
+    matches: list[dict[str, Any]] = []
+    scanned = 0
+    for index in range(dex.class_defs_size):
+        entry = dex.class_defs_off + index * 32
+        if entry + 32 > len(dex.data):
+            break
+        (class_idx, access, superclass_idx, _interfaces, _source,
+         _annotations, _class_data, _static) = struct.unpack_from(
+            "<IIIIIIII", dex.data, entry)
+        scanned += 1
+        name = dex.type_name(class_idx)
+        if matcher is None or not matcher.search(name):
+            continue
+        matches.append({
+            "name": name,
+            "access": _flags(access, _CLASS_FLAGS),
+            "superclass": (dex.type_name(superclass_idx)
+                           if superclass_idx != 0xFFFFFFFF else None),
+        })
+        if len(matches) > limit:
+            break
+    return matches, scanned
+
+
+def search_classes(path: str | Path, pattern: str, *, limit: int = 60,
+                   entry_name: str = "classes.dex") -> dict[str, Any]:
+    """Find classes whose name matches a pattern, inside a .dex file or an APK.
+
+    The breadth matrix filed this under ADB device management, which is wrong: listing classes
+    needs the file, not a device. The class-def walk mirrors `inspect`'s, so the two report the
+    same contents rather than two independently-drifting views.
+    """
+    import re as _re
+    import zipfile
+    if not pattern:
+        return {"ok": False, "error": "a class name pattern is required"}
+    try:
+        _re.compile(pattern)
+    except _re.error as exc:
+        return {"ok": False, "error": f"invalid pattern: {exc}"}
+    target = Path(str(path))
+    if not target.is_file():
+        return {"ok": False, "error": f"not a file: {path}"}
+
+    matches: list[dict[str, Any]] = []
+    scanned = 0
+    entries = 0
+    try:
+        if zipfile.is_zipfile(target):
+            with zipfile.ZipFile(target) as archive:
+                for name in archive.namelist():
+                    if not name.endswith(".dex"):
+                        continue
+                    entries += 1
+                    with archive.open(name) as handle:
+                        raw = handle.read(MAX_CLASS_SCAN_BYTES)
+                    try:
+                        found, seen = _classes_matching(Dex(raw), pattern, limit)
+                    except (ValueError, IndexError, struct.error) as exc:
+                        matches.append({"entry": name, "error": str(exc)})
+                        continue
+                    scanned += seen
+                    matches.extend({"entry": name, **record} for record in found)
+                    if len(matches) >= limit:
+                        break
+        else:
+            entries = 1
+            found, scanned = _classes_matching(Dex(_read(target)), pattern, limit)
+            matches.extend({"entry": entry_name, **record} for record in found)
+    except (zipfile.BadZipFile, OSError, ValueError, struct.error) as exc:
+        return {"ok": False, "error": str(exc)}
+
+    # `truncated` must be set when the walk stopped early, not when matches exceeded the limit:
+    # the loop breaks *at* the limit, so `len(matches) > limit` is never true and a capped
+    # result looked complete. One extra match is collected to make the distinction detectable.
+    truncated = len(matches) > limit
+    return {"ok": True, "path": str(target), "pattern": pattern,
+            "dex_entries": entries, "classes_scanned": scanned,
+            "match_count": min(len(matches), limit), "matches": matches[:limit],
+            "truncated": truncated}
+
+
+def trace_references(path: str | Path, symbol: str, *, limit: int = 60,
+                     entry_name: str = "classes.dex") -> dict[str, Any]:
+    """Find where a method or field name is declared across the archive's .dex files.
+
+    This answers "who declares or references this", the question behind the REA
+    `trace_android_references` tool, and it is answerable from the file rather than a device.
+    """
+    import zipfile
+    if not symbol:
+        return {"ok": False, "error": "a symbol name is required"}
+    target = Path(str(path))
+    if not target.is_file():
+        return {"ok": False, "error": f"not a file: {path}"}
+
+    blobs: list[tuple[str, bytes]] = []
+    try:
+        if zipfile.is_zipfile(target):
+            with zipfile.ZipFile(target) as archive:
+                for name in archive.namelist():
+                    if name.endswith(".dex"):
+                        with archive.open(name) as handle:
+                            blobs.append((name, handle.read(MAX_CLASS_SCAN_BYTES)))
+        else:
+            blobs.append((entry_name, _read(target)))
+    except (zipfile.BadZipFile, OSError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+    hits: list[dict[str, Any]] = []
+    needle = symbol.lower()
+    for name, data in blobs:
+        try:
+            parsed = Dex(data)
+        except (ValueError, IndexError, struct.error):
+            continue
+        for kind, lookup, count in (("method", parsed.method_id, parsed.method_ids_size),
+                                    ("field", parsed.field_id, parsed.field_ids_size)):
+            for index in range(count):
+                try:
+                    entry = lookup(index)
+                except (ValueError, IndexError, struct.error, KeyError):
+                    continue
+                if entry and needle in (entry.get("name") or "").lower():
+                    hits.append({"entry": name, "kind": kind, "name": entry.get("name"),
+                                 "class": entry.get("class"), "type": entry.get("type")})
+                    if len(hits) >= limit:
+                        break
+            if len(hits) >= limit:
+                break
+        if len(hits) >= limit:
+            break
+    return {"ok": True, "path": str(target), "symbol": symbol, "dex_entries": len(blobs),
+            "reference_count": len(hits), "references": hits[:limit],
+            "truncated": len(hits) >= limit}

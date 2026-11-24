@@ -474,11 +474,24 @@ cap("ADB device and package management", ["list_adb_packages",
     "read_adb_setting", "resolve_adb_packages", "collect_adb_bugreport",
     "pull_adb_package",
     "inspect_adb_display", "inspect_adb_window", "start_adb_activity",
-    "search_android_classes", "trace_android_references", "decode_android_resources",
-    "inspect_android_jni_bindings"],
+    ],
     None, "out-of-lane",
     "requires an Android device or emulator over ADB; a host-only engine cannot answer "
     "these, and pretending otherwise would be a false claim")
+
+cap("Android class and reference queries", ["search_android_classes",
+    "trace_android_references", "decode_android_resources",
+    "inspect_android_jni_bindings"],
+    "dex-search", "partial",
+    "These four were filed under device management and excluded for it, but none of them needs a "
+    "device — they are reads of the DEX tables `re dex` already parses. `re dex-search <apk> "
+    "--symbol=<pattern>` lists matching classes with their resolved superclasses, and `re "
+    "dex-refs <apk> --symbol=<name>` finds where a method or field is declared across every "
+    "`.dex` entry in the archive. Verified against a real APK: 36 classes scanned with framework "
+    "superclasses resolved (`Landroid/service/quicksettings/TileService` for a real TileService "
+    "subclass), and 25 references to `onCreate`. Partial because resource decoding "
+    "(`decode_android_resources`) and JNI binding recovery are still not implemented here — "
+    "those need `resources.arsc` parsing and native-method-to-symbol matching")
 
 cap("Browser / Electron / web-runtime observation", ["capture_browser_scenario",
     "capture_electron_scenario", "capture_web_screenshot", "observe_web_execution",
