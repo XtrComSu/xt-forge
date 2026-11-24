@@ -307,7 +307,7 @@ def _add_re(sub) -> None:
                                        "uefi", "nvram",
                                        "dex",
                                        "guidance", "workflows", "guide", "goto", "nav", "resume", "bookmark", "step", "capture-diff", "capture-compare", "correlate", "coverage", "recon-coverage", "evaluate-coverage", "api", "api-contract", "abi", "bundle-diff", "compare-bundles", "bundle-compare", "fn-match", "fnmatch", "match-functions", "firmware-carve", "carve", "extract-firmware", "evidence-export", "evidence-import", "app", "appgraph", "application-graph", "il2cpp", "il2cpp-metadata", "global-metadata", "dart", "dart-aot", "snapshot", "swift", "swift-types", "ntfs", "ntfs-journal", "firmware", "fv", "uefi-firmware", "assetcatalog", "car", "unknowns", "obligations", "v8cache", "codecache", "cdp", "dex-search", "dex-refs", "hap", "model", "gdb", "ptrace", "playwright",
-                                       "objc", "objc-classes", "objc-protocols",
+                                       "objc", "objc-classes", "objc-protocols", "nib", "interface-builder", "fuses", "electron-fuses",
                                        "deps", "vulns", "cve-scan", "remediate", "cve-info",
                                        "keyed", "keyed-archive", "jvm", "maven",
                                        "nuget", "appbundle", "bundle",

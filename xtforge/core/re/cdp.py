@@ -329,6 +329,31 @@ _OBSERVATIONS = {
         "document.querySelectorAll('script').length",
         "(document.currentScript && document.currentScript.src) || ''",
     ],
+    # WebMCP tools. The API is `document.modelContext`, specified at
+    # github.com/webmachinelearning/webmcp, and the registry is not a CDP domain — Chromium 141
+    # (the build shipped with Playwright on this host) has no `WebMCP` domain at all, checked
+    # against `/json/protocol`. It is ordinary page state, so `Runtime.evaluate` reaches it and a
+    # polyfilled page answers the same way a native one would.
+    #
+    # Two shapes are tried because the spec has moved: `document.modelContext.getTools()` and an
+    # array-shaped `document.modelContext.tools`. A page that registered nothing reports an empty
+    # list rather than an error, which is why `available` is reported separately from `tool_count`.
+    "webmcp": [
+        "(function(){try{"
+        "var mc=document.modelContext;"
+        "if(!mc)return {available:false,reason:'document.modelContext is not defined'};"
+        "var tools=null;"
+        "if(typeof mc.getTools==='function'){tools=mc.getTools();}"
+        "else if(Array.isArray(mc.tools)){tools=mc.tools;}"
+        "else if(typeof mc.tools==='object'&&mc.tools!==null){tools=Object.values(mc.tools);}"
+        "if(!tools)return {available:true,tool_count:0,"
+        "reason:'modelContext exists but exposes no tool list'};"
+        "return {available:true,tool_count:tools.length,"
+        "tools:tools.map(function(t){return {name:t&&t.name,"
+        "description:(t&&t.description||'').slice(0,200),"
+        "input_schema:t&&t.inputSchema?Object.keys(t.inputSchema.properties||{}):[]}})};"
+        "}catch(e){return {available:false,reason:String(e&&e.message||e)};}})()",
+    ],
     "listeners": [
         # Inline handlers only — `addEventListener` registrations are not enumerable from page
         # script at all, which is a CDP/DOM limitation rather than something to paper over. The
@@ -656,7 +681,7 @@ def launched_browser(url: str = "about:blank", *, timeout: float = DEFAULT_TIMEO
     profile = tempfile.mkdtemp(prefix="xtcdp-")
     process = subprocess.Popen(
         [binary, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
-         "--remote-debugging-port=0", f"--user-data-dir={profile}", url],
+         "--remote-debugging-port=0", f"--user-data-dir={profile}", "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         port_file = Path(profile) / "DevToolsActivePort"
@@ -674,6 +699,8 @@ def launched_browser(url: str = "about:blank", *, timeout: float = DEFAULT_TIMEO
             time.sleep(0.1)
         if port is None:
             raise RuntimeError("the browser never reported a DevTools port")
+        if url and url != "about:blank":
+            _navigate_and_wait(port, url, timeout=timeout)
         yield {"port": port, "binary": binary, "profile": profile}
     finally:
         process.terminate()
@@ -715,6 +742,47 @@ def capture_network_of(url: str = "about:blank", **kwargs: Any) -> dict[str, Any
         return {"ok": False, "error": str(exc)}
 
 
+def _navigate_and_wait(port: int, url: str, *, timeout: float = DEFAULT_TIMEOUT) -> bool:
+    """Navigate the first page target to `url` and wait until its document is parsed.
+
+    Returns True when the page reached `interactive` or `complete`, False on timeout. False is
+    deliberately not an error: a slow page is still worth observing, and the caller gets whatever
+    state it reached.
+
+    This exists because handing the URL to the browser at launch and attaching immediately races the
+    load. The first `Runtime.evaluate` then runs against the blank document, so `document.title`
+    comes back empty and anything the page installs at parse time reads as absent — a page with two
+    WebMCP tools registered reported `document.modelContext is not defined`. The same race had
+    already been found for network capture, which lost the document request; it was fixed there and
+    not here, which is why it recurred.
+    """
+    import time
+    targets = _page_targets(port)
+    if not isinstance(targets, list) or not targets:
+        return False
+    try:
+        ws = WebSocket(targets[0]["webSocketDebuggerUrl"], timeout=timeout)
+    except (OSError, ValueError, KeyError):
+        return False
+    try:
+        _command(ws, "Page.enable", {}, 1)
+        _command(ws, "Page.navigate", {"url": url}, 2)
+        deadline = time.monotonic() + timeout
+        message_id = 10
+        while time.monotonic() < deadline:
+            reply = _evaluate(ws, "document.readyState", message_id)
+            message_id += 1
+            if reply.get("ok") and reply.get("value") in ("interactive", "complete"):
+                return True
+            time.sleep(0.1)
+        return False
+    finally:
+        try:
+            ws.close()
+        except OSError:
+            pass
+
+
 def launch_and_inspect(url: str = "about:blank", *,
                        expressions: list[str] | None = None,
                        timeout: float = DEFAULT_TIMEOUT) -> dict[str, Any]:
@@ -736,7 +804,7 @@ def launch_and_inspect(url: str = "about:blank", *,
     # DevToolsActivePort inside the profile directory, which is the documented way to find it.
     process = subprocess.Popen(
         [binary, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
-         "--remote-debugging-port=0", f"--user-data-dir={profile}", url],
+         "--remote-debugging-port=0", f"--user-data-dir={profile}", "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     port_file = Path(profile) / "DevToolsActivePort"
     port = None
@@ -755,6 +823,8 @@ def launch_and_inspect(url: str = "about:blank", *,
         if port is None:
             return {"ok": False, "error": "the browser never reported a DevTools port",
                     "binary": binary}
+        if url and url != "about:blank":
+            _navigate_and_wait(port, url, timeout=timeout)
         report = inspect_endpoint(port, expressions=expressions, timeout=timeout)
         report["launched"] = {"binary": binary, "port": port, "profile": profile}
         return report

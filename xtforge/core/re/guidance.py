@@ -41,7 +41,7 @@ KNOWN_VERBS = frozenset({
     "bundle-compare", "fn-match", "fnmatch", "match-functions", "firmware-carve", "carve",
     "extract-firmware", "evidence-export", "evidence-import", "app", "appgraph",
     "application-graph", "il2cpp", "il2cpp-metadata", "global-metadata", "dart", "dart-aot",
-    "snapshot", "swift", "swift-types", "ntfs", "ntfs-journal", "fv", "uefi-firmware",
+    "snapshot", "swift", "swift-types", "ntfs", "ntfs-journal", "fuses", "electron-fuses", "nib", "interface-builder", "fv", "uefi-firmware",
     "assetcatalog", "car", "unknowns", "obligations", "v8cache", "codecache", "ptrace",
     "playwright", "objc", "objc-classes", "objc-protocols", "keyed", "keyed-archive", "jvm",
     "maven", "nuget", "appbundle", "bundle", "bookmarks", "bulk",

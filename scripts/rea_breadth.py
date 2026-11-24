@@ -548,15 +548,25 @@ cap("Browser / Electron / web-runtime observation", ["capture_browser_scenario",
     "absent were not absent, and are now implemented: `--symbol=screenshot` (verified 1757-byte "
     "PNG, signature `89504e47`), `--symbol=network` (the document request plus its subresource "
     "from a real site, both 200, with sizes and MIME) and `--symbol=targets` (type counts, with "
-    "service-worker and webview contexts reported rather than filtered away). Still genuinely "
-    "uncovered, each for a specific reason: `inspect_electron_fuses` needs the Electron binary's "
-    "own fuse wire, which no target list exposes; `discover_webmcp_tools` targets a protocol this "
-    "build of Chromium does not serve; `capture_electron_scenario` and the `trace_native_*` trio "
-    "need an Electron or mobile app under automation, and this host has neither; "
-    "`decode_interface_builder` is an iOS nib format, not a web one, and belongs elsewhere. The "
-    "note that previously read as 'the platform cannot do this' was a description of code that "
-    "had not been written",
-    probe=["re", "cdp", "about:blank", "--symbol=screenshot"])
+    "service-worker and webview contexts reported rather than filtered away). Three tools "
+    "this row had recorded as platform absences were nothing of the kind: "
+    "`inspect_electron_fuses` needs no binary-specific wire — the sentinel string and the 9-byte "
+    "fuse encoding are documented in @electron/fuses, and `re fuses` now reports each switch with "
+    "its direction (`RunAsNode` enabled is a risk; `OnlyLoadAppFromAsar` disabled is a risk; "
+    "`removed` is neither; `inherit` is unknown, and scoring it as exposure once produced four "
+    "phantom findings). `discover_webmcp_tools` is not a CDP domain — Chromium 141 has none, "
+    "checked against /json/protocol — but the registry is `document.modelContext`, ordinary page "
+    "state, so `re cdp <url> --symbol=webmcp` reads it through Runtime.evaluate and works on a "
+    "polyfilled page: verified with 2 registered tools, names, descriptions and argument lists. "
+    "`decode_interface_builder` is implemented too, since a compiled nib is an NSKeyedArchiver "
+    "plist the repo already decodes; `re nib` now derives outlets and actions from the IB keys "
+    "(verified: 2 connected objects across 4 class instances). Fixing webmcp exposed a real bug in "
+    "shared code — `launch_and_inspect` launched on the target URL and attached immediately, so "
+    "every aspect read the blank pre-navigation document; `document.title` came back empty and "
+    "parse-time state read as absent. `capture_electron_scenario` and the `trace_native_*` trio "
+    "genuinely need an Electron or mobile app under automation, and this host has neither: no "
+    "Electron binary exists anywhere on it (a sentinel search of the filesystem finds none)",
+    probe=["re", "fuses", "{electronfuse}"])
 
 cap("Build VM / remote build execution", ["check_build_task", "start_build_computer",
     "close_build_computer", "measure_build_task", "mark_build_checkpoint",
@@ -695,6 +705,18 @@ def _fixtures() -> dict[str, str]:
         + bytes.fromhex("4d3c2b1a") + (1).to_bytes(2, "little") + (0).to_bytes(2, "little")
         + (0xFFFFFFFFFFFFFFFF).to_bytes(8, "little") + (28).to_bytes(4, "little"))
     out["pcapng"] = str(pcapng)
+
+    # An Electron fuse wire. The sentinel and the byte encoding are from @electron/fuses
+    # (src/constants.ts, src/config.ts): 'dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX', then version, then
+    # length, then one byte per fuse. A probe that finds no sentinel proves nothing about the
+    # parser, so the fixture is a real wire with a known mixture of states.
+    electronfuse = workdir / "f.electron"
+    sentinel = b"dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX"
+    # enabled, disabled, disabled, disabled, enabled, enabled, disabled, disabled, enabled
+    wire = bytes([0x31, 0x30, 0x30, 0x30, 0x31, 0x31, 0x30, 0x30, 0x31])
+    electronfuse.write_bytes(b"\x7fELF" + b"\x00" * 60 + sentinel
+                             + bytes([1, len(wire)]) + wire + b"\x00" * 60)
+    out["electronfuse"] = str(electronfuse)
 
     crash = workdir / "f.crash"
     crash.write_text(_json.dumps({"crash_info": {"type": "EXC_BAD_ACCESS"},

@@ -488,6 +488,35 @@ def _render_cdp(res):
         if res.get("unattributed_events"):
             lines.append(f"  other       {', '.join(res['unattributed_events'][:5])}")
         return chr(10).join(lines)
+    if aspect == "webmcp":
+        pages = res.get("pages") or []
+        lines = []
+        if not pages:
+            lines.append("webmcp  no page targets to read tools from")
+        for page in pages[:4]:
+            values = page.get("values") or {}
+            payload = None
+            for key, entry in values.items():
+                if "modelContext" in key:
+                    payload = entry.get("value")
+                    break
+            lines.append(f"webmcp  {page.get('title') or '(untitled)'}  {page.get('url')}")
+            if not isinstance(payload, dict):
+                lines.append("  no result for the webmcp expression")
+                continue
+            if not payload.get("available"):
+                lines.append(f"  not present: {payload.get('reason')}")
+                continue
+            lines.append(f"  {payload.get('tool_count', 0)} registered tool(s)")
+            for tool in (payload.get("tools") or [])[:20]:
+                lines.append(f"    {tool.get('name')}")
+                if tool.get("description"):
+                    lines.append(f"      {tool['description'][:88]}")
+                if tool.get("input_schema"):
+                    lines.append(f"      args: {', '.join(tool['input_schema'])}")
+            if payload.get("reason"):
+                lines.append(f"  note: {payload['reason']}")
+        return chr(10).join(lines)
     if aspect == "targets":
         types = res.get("types") or {}
         lines = [f"targets  {res.get('target_count')}  "
@@ -767,6 +796,17 @@ def cmd_re(args):
             res = (_cdp.capture_network(int(target), wait=wait) if target.isdigit()
                    else _cdp.capture_network_of(target or "about:blank", wait=wait))
             res["aspect"] = "network"
+            return _out(args, res, _render_cdp(res), code=0 if res.get("ok") else 2)
+        if aspect == "webmcp":
+            # The WebMCP registry is ordinary page state, not a CDP domain — Chromium 141 has no
+            # `WebMCP` domain at all, checked against /json/protocol. Reading it through
+            # `Runtime.evaluate` means a polyfilled page answers the same way a native one would.
+            if target.isdigit():
+                res = _cdp.observe(int(target), aspect="webmcp")
+            else:
+                res = _cdp.launch_and_inspect(target or "about:blank",
+                                              expressions=_cdp._OBSERVATIONS["webmcp"])
+            res["aspect"] = "webmcp"
             return _out(args, res, _render_cdp(res), code=0 if res.get("ok") else 2)
         if aspect in ("targets", "electrontargets"):
             if not target.isdigit():
@@ -1181,6 +1221,12 @@ def cmd_re(args):
         elif verb in ("swift", "swift-types"):
             from ..core.re import swiftmeta
             res = swiftmeta.inspect_swift_metadata(path, limit=args.limit or 500)
+        elif verb in ("nib", "interface-builder"):
+            from ..core.re import packaging
+            res = packaging.decode_interface_builder(path)
+        elif verb in ("fuses", "electron-fuses"):
+            from ..core.re import electron
+            res = electron.inspect_electron_fuses(path)
         elif verb in ("ntfs", "ntfs-journal"):
             from ..core.re import ntfs
             res = ntfs.inspect_ntfs_journal(path, limit=args.limit or 500)
@@ -2133,6 +2179,65 @@ def cmd_re(args):
             if res.get("symbol_roles"):
                 lines.append("  roles       " + ", ".join(
                     f"{k} x{v}" for k, v in list(res["symbol_roles"].items())[:8]))
+            human = "\n".join(lines)
+    elif verb in ("nib", "interface-builder"):
+        if not res.get("ok"):
+            human = "interface builder: " + str(res.get("error", "unknown"))
+        else:
+            lines = [f"Interface Builder document ({res.get('format')}, "
+                     f"{res.get('object_count')} objects, "
+                     f"{res.get('class_count')} classes)"]
+            if res.get("archiver"):
+                lines.append(f"  archiver    {res['archiver']}")
+            lines.append(f"  roots       {', '.join(res.get('root_names') or []) or '-'}")
+            lines.append(f"  connections {res.get('connection_count')} object(s) with outlets "
+                         f"or actions")
+            for entry in (res.get("connections") or [])[:30]:
+                lines.append(f"    [{entry.get('index')}] {entry['classname']}")
+                for key, value in (entry.get("connections") or {}).items():
+                    lines.append(f"        outlet {key} -> {value}")
+                for key, value in (entry.get("actions") or {}).items():
+                    lines.append(f"        action {key} -> {value}")
+                for key, value in (entry.get("labels") or {}).items():
+                    lines.append(f"        label  {key} = {value}")
+            lines.append("  classes     " + ", ".join((res.get("classes") or [])[:14]))
+            human = "\n".join(lines)
+    elif verb in ("fuses", "electron-fuses"):
+        if not res.get("ok"):
+            human = "electron fuses: " + str(res.get("error", "unknown"))
+            if res.get("sentinel_count"):
+                human += f"\n  sentinels   {res.get('sentinel_count')} found"
+        else:
+            lines = [f"Electron fuses ({res.get('file_size')} bytes, "
+                     f"wire version {res.get('version')}, "
+                     f"{res.get('fuse_count')} fuses)"]
+            if res.get("warning"):
+                lines.append(f"  WARNING     {res['warning']}")
+            if res.get("truncated"):
+                lines.append(f"  TRUNCATED   {res['truncated']}")
+            for fuse in res.get("fuses") or []:
+                mark = {True: "ok  ", False: "RISK", None: "    "}[fuse.get("hardening")]
+                lines.append(f"  [{mark}] {fuse['name']:<42} {fuse['state']:<9} "
+                             f"'{fuse['symbol']}'")
+                if fuse.get("hardening") is False:
+                    lines.append(f"          {fuse['meaning']}")
+                elif fuse.get("note"):
+                    lines.append(f"          {fuse['note']}")
+            if res.get("exposed"):
+                lines.append(f"  {len(res['exposed'])} exposed: "
+                             + ", ".join(res["exposed"]))
+            else:
+                lines.append("  no exposure found on this wire")
+            if res.get("undetermined"):
+                lines.append(f"  {len(res['undetermined'])} undetermined (not set by the wire): "
+                             + ", ".join(res["undetermined"]))
+            if res.get("removed"):
+                lines.append(f"  {len(res['removed'])} removed from Electron: "
+                             + ", ".join(res["removed"]))
+            if res.get("sentinel_count", 1) > 1:
+                agreement = ("the slices agree" if res.get("slices_agree")
+                             else "THE SLICES DIFFER")
+                lines.append(f"  universal   {res['sentinel_count']} sentinels, {agreement}")
             human = "\n".join(lines)
     elif verb in ("ntfs", "ntfs-journal"):
         if not res.get("ok"):

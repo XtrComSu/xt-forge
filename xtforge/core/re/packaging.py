@@ -55,6 +55,110 @@ def _read(path: str | Path, limit: int = MAX_BYTES) -> bytes:
 
 
 # --------------------------------------------------------------- keyed archive
+def _ib_scalar(value: Any) -> Any:
+    """A connection's value, flattened to something a report can print.
+
+    An outlet points at another archived object, so the raw value is a resolved dict several
+    levels deep. Printing that whole subtree into a connection line produces a wall of text where
+    the class name is the only part that answers the question, so the class is what is kept.
+    """
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        if value.get("$classname"):
+            return {"$classname": value["$classname"]}
+        return {"_type": "dict", "_keys": len(value)}
+    if isinstance(value, (list, tuple)):
+        return {"_type": "array", "_count": len(value)}
+    return str(type(value).__name__)
+
+
+def decode_interface_builder(path: str | Path, *, max_depth: int = 12) -> dict[str, Any]:
+    """Decode an Interface Builder document (`.nib`, or a `.storyboard`/`.xib` compiled to one).
+
+    A compiled nib *is* an `NSKeyedArchiver` plist, so the object graph is the same decode this
+    module already performs; what a nib adds is the meaning of the graph. Interface Builder stores
+    its UI as a tree of `IB*` / `NS*` class instances whose keys name the connection being made — a
+    window template, its content view, an outlet ("this controller's `tableView` property points at
+    that view") and an action ("this button sends `save:` to that object"). That is the thing worth
+    reporting: for an analyst looking at a packaged iOS or macOS app, the connections say which
+    code touches which control, and an outlet named `adminPanel` on a hidden view is a finding.
+
+    The archive is decoded first and the connections are derived from it rather than from a
+    separate parse, because a second parser for the same container is a second thing to be wrong.
+    """
+    archive = inspect_keyed_archive(path, max_depth=max_depth)
+    if not archive.get("ok"):
+        # Report the archive's own diagnosis; a nib that will not decode is a plist problem, not a
+        # separate one, and inventing a nib-specific error message would hide that.
+        archive["kind"] = "interface-builder"
+        archive["note"] = ("a compiled nib is an NSKeyedArchiver plist, so a decode failure here is "
+                           "the same failure the keyed-archive reader reports")
+        return archive
+
+    entries = archive.get("objects")
+    if not isinstance(entries, list):
+        entries = [{"index": 0, "object": archive.get("roots")}]
+    # Each slot in `$objects` IS one object, and the table is already flat.
+    #
+    # The obvious implementation recursed into each resolved object to find nested class
+    # instances, which double-counts: `resolve` inlines a referenced object at the referrer, so
+    # ViewController's outlet arrived as a full NSTableView copy *and* again at its own slot. The
+    # connection count came out 3 for a nib with 2 connections. Reading one slot per object avoids
+    # the problem entirely, and it is also what the format actually says: references are UIDs into
+    # the same flat table, so there is nothing nested to descend into.
+    objects: list[dict[str, Any]] = []
+    for slot in entries:
+        if not isinstance(slot, dict) or "index" not in slot:
+            continue
+        node = slot.get("object")
+        if not isinstance(node, dict):
+            continue
+        classname = node.get("$classname")
+        if not classname:
+            continue
+        entry: dict[str, Any] = {"index": slot["index"], "classname": classname}
+        for key, value in node.items():
+            if not isinstance(key, str) or key.startswith("$"):
+                continue
+            lowered = key.lower()
+            if "outlet" in lowered or "connection" in lowered:
+                entry.setdefault("connections", {})[key] = _ib_scalar(value)
+            elif "action" in lowered or "selector" in lowered:
+                entry.setdefault("actions", {})[key] = _ib_scalar(value)
+            elif "name" in lowered or "identifier" in lowered or "title" in lowered:
+                entry.setdefault("labels", {})[key] = _ib_scalar(value)
+        objects.append(entry)
+
+    classes, seen = [], set()
+    for entry in objects:
+        if entry["classname"] not in seen:
+            seen.add(entry["classname"])
+            classes.append(entry["classname"])
+    connections = []
+    for entry in objects:
+        if entry.get("connections") or entry.get("actions"):
+            public = {key: value for key, value in entry.items() if key != "_source"}
+            connections.append(public)
+    return {
+        "ok": True,
+        "path": archive.get("path"),
+        "kind": "interface-builder",
+        "format": archive.get("format"),
+        "archiver": archive.get("archiver"),
+        "object_count": archive.get("object_count"),
+        "class_count": len(classes),
+        "classes": classes,
+        "root_names": archive.get("root_names"),
+        # The part that makes this a nib decoder rather than a plist decoder.
+        "connection_count": len(connections),
+        "connections": connections[:100],
+        "note": ("outlets and actions are derived from Interface Builder's connection keys; a "
+                 "connection on a control that is never shown is still reported, because presence "
+                 "in the graph is the finding"),
+    }
+
+
 def inspect_keyed_archive(path: str | Path, *, max_depth: int = 12) -> dict[str, Any]:
     """Decode an NSKeyedArchiver plist into a plain object graph.
 
@@ -157,6 +261,11 @@ def inspect_keyed_archive(path: str | Path, *, max_depth: int = 12) -> dict[str,
         "class_count": len(classes),
         "classes": used_classes,
         "roots": roots,
+        # The flat table, with each entry resolved. Interface Builder stores the whole document
+        # here and names only the entry points in `$top`, so a caller that needs every object
+        # (a nib decoder does) cannot get it from `roots`.
+        "objects": [{"index": index, "object": resolve(entry, 0)}
+                    for index, entry in enumerate(objects)],
         "root_names": sorted(roots),
     }
 
