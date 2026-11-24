@@ -81,7 +81,7 @@ cap("Byte entropy / packing", ["inspect_byte_entropy"],
 cap("Hardening / checksec", ["inspect_binary_hardening"],
     "checksec", "covered", probe=["re", "checksec", "{elf}"])
 cap("PE identity and headers", ["inspect_native_load_image"],
-    "pe", "covered")
+    "pe", "covered", probe=["re", "pe", "{pe}"])
 cap("PE imports", ["inspect_pe_imports"],
     "pe", "covered")
 cap("PE exports", ["inspect_native_exports"],
@@ -119,21 +119,21 @@ cap("UEFI firmware extraction", ["extract_uefi_firmware"],
     "firmware", "covered",
     "FV/FFS extraction across stacked volumes, LARGE_FILE headers, and GUID_DEFINED "
     "sections decompressed with LZMA to reach the DXE phase. Verified on EDK2 OVMF: "
-    "168 files, 115 drivers, 87 UI names, cross-checked with strings -el")
+    "168 files, 115 drivers, 87 UI names, cross-checked with strings -el", probe=["re", "firmware", "{ovmf}"])
 cap("UEFI NVRAM variables", ["inspect_uefi_nvram"],
     "uefi", "covered",
     "efivarfs inventory, EFI_LOAD_OPTION boot entries with decoded device paths, "
-    "boot order, and a Secure Boot assessment")
+    "boot order, and a Secure Boot assessment", probe=["re", "uefi", "{ovmf}"])
 cap("Mach-O", ["inspect_macho", "get_objc_classes", "get_objc_protocols"],
     "objc", "covered",
     "Mach-O via the native hub, plus re objc: class hierarchy, instance and class "
     "methods with type encodings, protocol definitions and conformance, categories "
-    "(verified against llvm-objdump --objc-meta-data)")
+    "(verified against llvm-objdump --objc-meta-data)", probe=["re", "objc", "{pe}"])
 cap("Swift types", ["analyze_swift_types"],
     "swift", "covered",
     "mangled-symbol demangling into module/type/member/kind, swift5_* section map, "
     "reflection field and case names. Verified against swiftc 6.0.3 with "
-    "swift-demangle as oracle: 26/26 symbols agree on module and type")
+    "swift-demangle as oracle: 26/26 symbols agree on module and type", probe=["re", "swift", "{pe}"])
 cap("Kernel cache", ["inspect_kernel_module"],
     "kernelcache", "covered")
 cap("Apple IPS crash reports", ["inspect_apple_ips"],
@@ -145,44 +145,44 @@ cap("Asset catalog", ["inspect_asset_catalog"],
     "car", "covered",
     "BOMStore container: block table as (addr,size) pairs, per-block type tags, "
     "CARHEADER decoded (CoreUI version, catalog format, renderer string); rendition "
-    "keys reported as not decoded rather than guessed. Verified on a real Assets.car")
+    "keys reported as not decoded rather than guessed. Verified on a real Assets.car", probe=["re", "car", "{apk}"])
 cap("devicetree", ["inspect_devicetree"],
     "devicetree", "covered",
-    "nodes, properties, memory reservations; finds an FDT embedded in a container")
+    "nodes, properties, memory reservations; finds an FDT embedded in a container", probe=["re", "devicetree", "{devicetree}"])
 cap("Kernel build config", ["inspect_kernel_build_config"],
     "kconfig", "covered",
     "IKCONFIG gzip blob, /proc/config.gz and plaintext .config", probe=["re", "kconfig", "{kconfig}"])
 cap("PE certificates", ["inspect_pe_certificates"],
     "pe certificates", "covered",
-    "the table is located and described; the signature is not chained to a trust root")
+    "the table is located and described; the signature is not chained to a trust root", probe=["re", "pe", "certificates", "{pe}"])
 cap("PE resources", ["inspect_pe_resources"],
-    "pe resources", "covered")
+    "pe resources", "covered", probe=["re", "pe", "resources", "{pe}"])
 cap("PE load config", ["inspect_pe_load_config"],
-    "pe load-config", "covered")
+    "pe load-config", "covered", probe=["re", "pe", "load-config", "{pe}"])
 cap("Windows shortcut (.lnk)", ["inspect_windows_shortcut"],
-    "lnk", "covered")
+    "lnk", "covered", probe=["re", "lnk", "{pe}"])
 cap("Keyed archive / NSKeyedArchiver", ["inspect_keyed_archive"],
     "keyed", "covered",
     "object graph resolved through UIDs, class chains reported, cycles and shared "
-    "references distinguished")
+    "references distinguished", probe=["re", "keyed", "{plist}"])
 cap("Go binary metadata", ["inspect_go_binary"],
     "formats go", "covered",
-    "version, module, dependencies and VCS revision, checked against `go version -m`")
+    "version, module, dependencies and VCS revision, checked against `go version -m`", probe=["re", "formats", "go", "{go}"])
 cap("Rust binary metadata", ["inspect_rust_binary"],
     "formats rust", "covered",
     "rustc version, commit hash, commit date and distributor read from .comment, "
     "verified against `rustc --version`; crate candidates inferred and labelled as "
-    "inferences rather than presented as identity")
+    "inferences rather than presented as identity", probe=["re", "formats", "rust", "{rust}"])
 cap("Python .pyc", ["inspect_python_pyc"],
     "formats pyc", "covered", probe=["re", "formats", "pyc", "{pyc}"])
 cap("Erlang BEAM", ["inspect_erlang_beam"],
     "beam", "covered",
-    "chunk inventory, module name, exports, compiler version and source paths")
+    "chunk inventory, module name, exports, compiler version and source paths", probe=["re", "beam", "{beam}"])
 cap("V8 code cache", ["inspect_v8_code_cache"],
     "v8cache", "covered",
     "header fields (V8 build fingerprint, source size and hash, flags, payload) read "
     "from caches written by Node's createCachedData, plus directory surveys across "
-    "builds and flag sets; 32-byte header pinned against real file sizes")
+    "builds and flag sets; 32-byte header pinned against real file sizes", probe=["re", "v8cache", "{v8cache}"])
 cap("SQLite database", ["inspect_sqlite_database"],
     "sqlite", "covered",
     "header parsed directly so truncated/hot-journalled files are described, "
@@ -227,7 +227,7 @@ cap("GDB session control", ["gdb_command", "start_debug_session",
     "\"xt-forge does live probing rather than driving a debugger\", which described a "
     "preference as a limit — gdb 18.1 is installed, and live probing cannot answer what is "
     "executing or what a breakpoint sees. Verified against nm and objdump as independent "
-    "oracles. What is absent is an interactive stepping console, deliberately")
+    "oracles. What is absent is an interactive stepping console, deliberately", probe=["re", "gdb", "{elf}"])
 cap("Frida instrumentation", ["list_frida_devices", "start_frida_session",
                               "instrument_frida_target"],
     None, "out-of-lane", "requires an attached Frida server on a device")
@@ -244,12 +244,13 @@ cap("Browser / Electron / CDP", ["inspect_web_page", "inspect_electron_page",
     "up. The previous note claimed this 'requires a running browser and DevTools endpoint' — "
     "Chromium ships in this host's Playwright cache and the protocol is about forty lines to "
     "speak, so the exclusion was wrong. Verified against HeadlessChrome 141: page title, "
-    "element count and evaluated results all checked against the real DOM")
+    "element count and evaluated results all checked against the real DOM",
+    probe=["re", "cdp", "data:text/html,<title>probe</title>", "--symbol=runtime"])
 cap("APK / Android package", ["inspect_android_package", "inspect_apk_signature",
                               "inspect_android_class", "inspect_android_method"],
     "apk", "covered",
     "zip inventory, manifest permissions/components, and DEX class/method "
-    "enumeration with access flags, prototypes and native methods")
+    "enumeration with access flags, prototypes and native methods", probe=["re", "apk", "{apk}"])
 cap("JADX / apktool / JEB providers", ["inspect_jeb_client", "open_jeb_project",
                                        "inspect_apktool_client"],
     None, "out-of-lane", "provider clients for third-party tools")
@@ -266,27 +267,27 @@ cap("Build VM / build artifacts", ["inspect_build_vm", "build_artifact"],
 cap("Evidence bundle", ["export_evidence", "import_evidence"],
     "evidence", "covered", probe=["re", "evidence", "{elf}"])
 cap("Bookmarks / navigation", ["list_bookmarks", "set_bookmark", "unset_bookmark"],
-    "bookmarks", "covered")
+    "bookmarks", "covered", probe=["re", "bookmarks", "list", "{elf}"])
 cap("Comments and annotation", ["comment", "inline_comment", "annotate_native_function"],
-    "annotate", "covered")
+    "annotate", "covered", probe=["re", "annotate", "list", "{elf}"])
 cap("Unknown tracking / ledger", ["list_unknowns", "record_unknown"],
     "unknowns", "covered",
     "per-binary obligation ledger: open/waived/resolved states, waivers require a "
     "reason, re-recording a resolved item reopens it, and `clean` gates a conclusion "
     "on nothing being open", probe=["re", "unknowns", "{elf}"])
 cap("Managed PE/CLI artifact", ["inspect_managed_artifact"],
-    "managed artifact", "covered")
+    "managed artifact", "covered", probe=["re", "managed", "{pe}"])
 cap("Managed members (types/methods/CIL)", ["inspect_managed_members"],
     "managed members", "covered",
     "types, methods, fields, MethodAttributes, plus CIL method body headers: "
-    "tiny/fat format, code size, max stack, locals and exception-handler presence")
+    "tiny/fat format, code size, max stack, locals and exception-handler presence", probe=["re", "managed", "members", "{pe}"])
 cap("Managed native boundaries", ["inspect_managed_native_boundaries"],
-    "managed boundaries", "covered")
+    "managed boundaries", "covered", probe=["re", "managed", "boundaries", "{pe}"])
 cap("Dart AOT", ["inspect_dart_aot"],
     "dart", "covered",
     "snapshot header (magic, length, kind), aligned data image, and ELF recovery from "
     "PNG IDAT for iOS App.framework. Verified against dart 3.14.1 AOT output; header "
-    "fields recomputed independently from the raw bytes")
+    "fields recomputed independently from the raw bytes", probe=["re", "dart", "{apk}"])
 cap("Model / GPU artifacts", ["inspect_model_artifact", "inspect_gpu_code_objects"],
     "model", "covered",
     "`re model <file>` parses GGUF v2/v3 headers and safetensors JSON declarations without a "
@@ -298,21 +299,21 @@ cap("Model / GPU artifacts", ["inspect_model_artifact", "inspect_gpu_code_object
     "unknown quantisation types are named rather than given an invented element size, and "
     "tensors pointing past EOF are flagged. GPU code objects are marker-scan only and say so. "
     "The exclusion called this \"different product surface (ML artifacts)\", but reading a "
-    "length-prefixed string table is container parsing, which is what this engine does")
+    "length-prefixed string table is container parsing, which is what this engine does", probe=["re", "model", "{gguf}"])
 cap("Maven/Gradle, NuGet metadata", ["inspect_maven_gradle_metadata",
                                     "inspect_nuget_nupkg"],
     "maven", "covered",
     "pom.xml, Gradle module JSON and nuspec: coordinates, dependencies with scopes, "
-    "plugins, and non-Central repositories surfaced; XML namespaces handled")
+    "plugins, and non-Central repositories surfaced; XML namespaces handled", probe=["re", "maven", "{apk}"])
 cap("Playwright trace", ["inspect_playwright_trace"],
     "ptrace", "covered",
     "actions paired with durations, failures with their messages, console output, "
     "network requests with status, DOM snapshots and screenshots (verified against "
-    "traces generated by Playwright's own tracing.start)")
+    "traces generated by Playwright's own tracing.start)", probe=["re", "ptrace", "{pid}"])
 cap("Desktop application bundle", ["inspect_desktop_application"],
     "bundle", "covered",
     "freedesktop .desktop entries, macOS .app bundles (Info.plist, Contents/MacOS "
-    "executable, URL schemes, document types) and Windows .lnk shortcuts")
+    "executable, URL schemes, document types) and Windows .lnk shortcuts", probe=["re", "bundle", "{apk}"])
 cap("Byte read and search", ["search_native_bytes", "read_bytes", "search_bytes"],
     "search", "covered", probe=["re", "search", "{elf}", "--pattern", "7f 45", "--hex"])
 
@@ -329,7 +330,7 @@ cap("String extraction and search", ["list_strings", "search_strings"],
 
 cap("Symbol name demangling", ["demangle_swift"],
     "demangle", "covered",
-    "Itanium, MSVC and Swift demangling; `re demangle` accepts a mangled symbol list")
+    "Itanium, MSVC and Swift demangling; `re demangle` accepts a mangled symbol list", probe=["re", "demangle", "{elf}"])
 
 cap("Procedure listing and metadata", ["list_procedures", "procedure_info",
     "procedure_address", "list_architectures", "binary_overview"],
@@ -347,7 +348,7 @@ cap("Procedure disassembly and instruction listing", ["procedure_assembly",
     "`re disasm --target` gives instructions; `re callgraph` gives callees/callers", probe=["re", "disasm", "{elf}"])
 
 cap("Cross-references", ["find_xrefs_to_name", "procedure_references"],
-    "xrefs", "covered", "`re xrefs --target` resolves references to a named symbol")
+    "xrefs", "covered", "`re xrefs --target` resolves references to a named symbol", probe=["re", "xrefs", "{elf}", "helper"])
 
 cap("Pseudocode / decompilation", ["procedure_pseudo_code", "decompile_all",
     "batch_decompile", "decompile_jeb_item", "list_jeb_units"],
@@ -361,7 +362,7 @@ cap("Function search and matching", ["compare_functions", "match_native_function
     "histogram, block/edge counts, call-out set — so it works across compilers, optimisation "
     "levels and a full `strip`. Verified against readelf ground truth on gcc -O2 vs clang "
     "-O2 (5/5 matched) and vs an objcopy-stripped -O3 build (4/4 correct addresses). A "
-    "diverged shape is left unmatched and the rejection is reported, not forced")
+    "diverged shape is left unmatched and the rejection is reported, not forced", probe=["re", "fn-match", "{elf}", "helper"])
 
 cap("Call graph and call-path tracing", ["get_call_graph", "build_call_path",
     "trace_call_path", "resolve_native_call_targets"],
@@ -376,7 +377,7 @@ cap("Artifact comparison (binary vs binary)", ["compare_artifacts", "compare_bun
     "by layer — metadata, resources, native code and bytecode together — with added/removed/"
     "modified grouped by category and byte offsets for modified files. Accepts directory, "
     "zip, and directory-vs-zip. Agrees with `diff -rq` on every fixture, verified against a "
-    "real APK")
+    "real APK", probe=["re", "bundle-diff", "{apk}", "{apk}"])
 
 cap("Evidence bundle export/import", ["export_evidence_bundle", "get_evidence_bundle",
     "import_evidence_bundle", "export_environment_bundle"],
@@ -384,7 +385,7 @@ cap("Evidence bundle export/import", ["export_evidence_bundle", "get_evidence_bu
     "`re evidence-export` writes records, findings and open questions to one JSON bundle "
     "with a SHA-256 digest over canonical form; `re evidence-import --verify` proves the "
     "bundle was not edited and re-hashes every recorded input to catch drift. Not a "
-    "signature, and the bundle says so")
+    "signature, and the bundle says so", probe=["re", "evidence-export", "{elf}"])
 
 cap("Reconstruction obligation ledger", ["build_reconstruction_obligation_ledger",
     "update_unknown", "verify_unknown_resolution", "verify_reconstruction",
@@ -395,7 +396,7 @@ cap("Reconstruction obligation ledger", ["build_reconstruction_obligation_ledger
     "starts from the SOURCE instead and scores the reconstruction against it — parsing every "
     "function definition, splitting present-but-unrecorded from genuinely absent, and "
     "excluding `static` functions the optimiser inlined from the denominator. Cross-checked "
-    "against `nm` for presence and a real ledger for record state")
+    "against `nm` for presence and a real ledger for record state", probe=["re", "unknowns", "{elf}"])
 
 cap("Application graph projection", ["project_android_application_graph",
     "project_apple_application_graph", "project_managed_application_graph",
@@ -404,7 +405,7 @@ cap("Application graph projection", ["project_android_application_graph",
     "`re app` reads Android binary XML manifests in place (chunked string pool, resource "
     "map, typed attribute values), so package, SDK range, every component with its "
     "exported/permission state, permissions, ABIs, dex and runtime are recovered; also "
-    "handles Apple Info.plist and managed assemblies")
+    "handles Apple Info.plist and managed assemblies", probe=["re", "app", "{apk}"])
 cap("HarmonyOS application graph", ["project_harmony_application_graph"],
     "hap", "covered",
     "`re hap <file>` reads the `.hap` archive statically — a ZIP with module.json and optional "
@@ -417,7 +418,7 @@ cap("HarmonyOS application graph", ["project_harmony_application_graph"],
     "and device types are surfaced rather than dropped or mapped to a nearest guess, and an "
     "absent `exported` stays null instead of becoming False. ArkTS `.abc` bytecode is listed "
     "with sizes but explicitly not decompiled; native `.so` files extract and go through "
-    "`re disasm-native`")
+    "`re disasm-native`", probe=["re", "hap", "{bundle}"])
 
 cap("API surface / contract inspection", ["inspect_api_contract", "inspect_signature",
     "audit_release_exposure"],
@@ -426,7 +427,7 @@ cap("API surface / contract inspection", ["inspect_api_contract", "inspect_signa
     "per symbol, and diffs against a baseline binary to report added, removed and changed "
     "exports with severity — a removed public symbol is graded `breaking`, a removed leaked "
     "`test_` symbol is graded cleanup. Reads `.dynsym` only, so a relocatable object is "
-    "correctly reported as having no ABI. Export set verified against `nm -D --defined-only`")
+    "correctly reported as having no ABI. Export set verified against `nm -D --defined-only`", probe=["re", "api", "{elf}"])
 
 cap("Native initializer discovery", ["inspect_native_initializers"],
     "hooks", "covered",
@@ -443,7 +444,7 @@ cap("Firmware extraction and region inspection", ["extract_firmware", "extract_a
     "`re firmware` parses UEFI volumes/FFS/LZMA; `re firmware-carve` locates and validates "
     "the payloads inside a vendor blob — squashfs 3/4, cramfs, UBI, TRX v1/v2 (CRC "
     "verified), uImage (header+data CRC), ELF, FDT, gzip/xz/bzip2/lzma with what the stream "
-    "decompresses to. Verified against mksquashfs 4.7.5, mkfs.cramfs and OpenWrt trx.c")
+    "decompresses to. Verified against mksquashfs 4.7.5, mkfs.cramfs and OpenWrt trx.c", probe=["re", "firmware-carve", "{ovmf}"])
 
 cap("Dylib resolution tracing", ["trace_dylib_resolution"],
     "needed", "covered",
@@ -521,7 +522,7 @@ cap("Build VM / remote build execution", ["check_build_task", "start_build_compu
 
 cap("Packet capture inspection", ["inspect_pcap_capture", "inspect_pcap_client"],
     "netcap", "covered",
-    "`re netcap` reads capture files and reports endpoints, protocols and payload flows")
+    "`re netcap` reads capture files and reports endpoints, protocols and payload flows", probe=["re", "netcap", "{pcapng}"])
 
 cap("PCAP / web-capture comparison", ["compare_web_captures", "compare_process_captures",
     "compare_web_screenshots", "compare_static_and_observed_endpoints",
@@ -533,7 +534,7 @@ cap("PCAP / web-capture comparison", ["compare_web_captures", "compare_process_c
     "the endpoints a binary references against those it was observed using, resolving IPs "
     "through the capture's own DNS answers so hostname-vs-IP never silently yields 0%. Reports "
     "dormant static endpoints and runtime-only hosts. Verified against pcaps written from the "
-    "libpcap and DNS wire formats")
+    "libpcap and DNS wire formats", probe=["re", "capture-diff", "{pcapng}", "{pcapng}"])
 
 cap("Analysis session and navigation state", ["binary_session", "close_binary",
     "current_address", "goto_address", "next_address", "prev_address", "address_name",
@@ -548,7 +549,7 @@ cap("Analysis session and navigation state", ["binary_session", "close_binary",
     "inheriting addresses that now mean something else. Navigation is advisory by design and "
     "the report says so. Verified across separate process invocations, which is where a "
     "session store is actually tested, since anything that only persists in memory proves "
-    "nothing")
+    "nothing", probe=["re", "annotate", "list", "{elf}"])
 
 cap("Guided workflows and analysis guidance", ["guided_workflows", "inspect_guidance",
     "search_guidance", "read_guidance_section"],
@@ -639,6 +640,9 @@ def _fixtures() -> dict[str, str]:
     with zipfile.ZipFile(jar, "w") as archive:
         archive.writestr("META-INF/MANIFEST.MF", "Manifest-Version: 1.0\n")
     out["jar"] = str(jar)
+    # The same container serves as the `bundle` fixture; the probes name it separately because
+    # `re bundle` and `re maven` read different parts of a zip.
+    out["bundle"] = str(jar)
 
     pcapng = workdir / "f.pcapng"
     pcapng.write_bytes(
@@ -727,6 +731,28 @@ def _fixtures() -> dict[str, str]:
             ("ovmf", Path("/tmp/ovmf_dec.bin"))):
         if candidate.is_file():
             out[label] = str(candidate)
+
+    # A live pid for `re ptrace`: this process, which is guaranteed to exist while probing.
+    out["pid"] = str(__import__("os").getpid())
+
+    # A BEAM file: FOR1 + size + the BEAM header chunk.
+    import struct as _struct
+    beam = workdir / "f.beam"
+    payload = b"BEAM" + b"ChunkSize" + _struct.pack(">I", 0)
+    beam.write_bytes(b"FOR1" + _struct.pack(">I", len(payload)) + payload)
+    out["beam"] = str(beam)
+
+    # A V8 code cache: the magic is 0xC0DE0000 | build bits, so the literal `c0de0001` used
+    # earlier failed the check by putting the version in the wrong nibble.
+    v8cache = workdir / "f.cache"
+    v8cache.write_bytes(_struct.pack("<I", 0xC0DE0628) + b"\x00" * 60)
+    out["v8cache"] = str(v8cache)
+
+    # A devicetree blob: the declared total size must fit the file or `_find_fdt` rejects it.
+    fdt = workdir / "f.dtb"
+    fdt.write_bytes(_struct.pack(">10I", 0xD00DFEED, 72, 40, 0, 0, 17, 16, 0, 0, 0)
+                    + b"\x00" * 32)
+    out["devicetree"] = str(fdt)
 
     if compiler and "elf" in out:
         src2 = workdir / "probe2.c"
