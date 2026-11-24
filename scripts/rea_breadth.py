@@ -288,7 +288,17 @@ cap("Dart AOT", ["inspect_dart_aot"],
     "PNG IDAT for iOS App.framework. Verified against dart 3.14.1 AOT output; header "
     "fields recomputed independently from the raw bytes")
 cap("Model / GPU artifacts", ["inspect_model_artifact", "inspect_gpu_code_objects"],
-    None, "out-of-lane", "different product surface (ML artifacts)")
+    "model", "covered",
+    "`re model <file>` parses GGUF v2/v3 headers and safetensors JSON declarations without a "
+    "model runtime: architecture, quantisation types, tensor shapes and offsets, parameter "
+    "counts. Verified against the real 787 MB GGUF and 90 MB safetensors on this host, with the "
+    "fixed 24-byte prefix cross-checked by an independent struct read. Header-only is the "
+    "requirement rather than a shortcut — a sparse 512 MB file returns in milliseconds because "
+    "weights are never read. GGUF v1 is refused rather than misparsed with the v2/v3 layout, "
+    "unknown quantisation types are named rather than given an invented element size, and "
+    "tensors pointing past EOF are flagged. GPU code objects are marker-scan only and say so. "
+    "The exclusion called this \"different product surface (ML artifacts)\", but reading a "
+    "length-prefixed string table is container parsing, which is what this engine does")
 cap("Maven/Gradle, NuGet metadata", ["inspect_maven_gradle_metadata",
                                     "inspect_nuget_nupkg"],
     "maven", "covered",

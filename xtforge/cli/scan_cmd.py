@@ -228,6 +228,46 @@ def _render_guidance(res):
     return human
 
 
+def _render_model(res):
+    if not res.get("ok"):
+        return "model: " + str(res.get("error", "unknown"))
+    if "candidates" in res:
+        lines = [f"{res.get('path')}  ({res.get('size_bytes')} bytes)"]
+        for item in res["candidates"]:
+            lines.append(f"  {item['kind']:<10} at offset {item['offset']}")
+        lines.append("  " + str(res.get("note")))
+        return chr(10).join(lines)
+    lines = [f"{res.get('format')} v{res.get('version')}  {res.get('path')}"
+             if res.get("version") else f"{res.get('format')}  {res.get('path')}",
+             f"  size        {res.get('size_bytes')} bytes"
+             + (f"  header {res.get('header_bytes')}" if res.get("header_bytes") else ""),
+             f"  tensors     {res.get('tensor_count')}"
+             + (f"  metadata {res.get('metadata_count')}"
+                if res.get("metadata_count") is not None else "")]
+    if res.get("architecture"):
+        lines.append(f"  arch        {res['architecture']}"
+                     + (f"  name {res['name']}" if res.get("name") else ""))
+    if res.get("parameter_count"):
+        lines.append(f"  parameters  {res['parameter_count']:,}")
+    if res.get("quantisations"):
+        lines.append(f"  quantised   {', '.join(res['quantisations'])}")
+    if res.get("dtypes"):
+        lines.append(f"  dtypes      {', '.join(res['dtypes'])}")
+    for tensor in (res.get("tensors") or [])[:12]:
+        shape = "x".join(str(dim) for dim in (tensor.get("shape") or []))
+        lines.append(f"    {str(tensor['name'])[:44]:<44} {tensor.get('dtype') or tensor.get('type')}"
+                     f"  {shape}")
+    if res.get("tensors_truncated"):
+        lines.append(f"    ... {res['tensor_count'] - 12} more")
+    if res.get("truncated_count"):
+        lines.append(f"  WARNING     {res['truncated_count']} tensor(s) point past EOF")
+    if res.get("problem_count"):
+        lines.append(f"  WARNING     {res['problem_count']} header problem(s)")
+    if res.get("note"):
+        lines.append("  " + str(res["note"]))
+    return chr(10).join(lines)
+
+
 def _render_gdb(res):
     if not res.get("ok"):
         return "gdb: " + str(res.get("error", "unknown"))
@@ -882,6 +922,19 @@ def cmd_re(args):
         elif verb in ("v8cache", "codecache"):
             from ..core.re import v8cache
             res = v8cache.inspect_v8_code_cache(path)
+        elif verb in ("model", "model-artifact", "gguf", "safetensors"):
+            from ..core.re import modelartifact as _model
+            if verb == "gguf":
+                from pathlib import Path as _P
+                res = _model.inspect_gguf(_P(path), full_hash=bool(getattr(args, "deep", False)))
+            elif verb == "safetensors":
+                from pathlib import Path as _P
+                res = _model.inspect_safetensors(_P(path),
+                                                 full_hash=bool(getattr(args, "deep", False)))
+            elif str(getattr(args, "symbol", "") or "").lower() in ("gpu", "gpu-code"):
+                res = _model.inspect_gpu_code(path)
+            else:
+                res = _model.inspect(path, full_hash=bool(getattr(args, "deep", False)))
         elif verb in ("gdb", "gdbmi"):
             from ..core.re import gdbmi as _gdbmi
             sub = (args.value or "inspect").lower()
@@ -1870,6 +1923,8 @@ def cmd_re(args):
             if res.get("truncated"):
                 lines.append(f"  WARNING     {res.get('warning')}")
             human = "\n".join(lines)
+    elif verb in ("model", "model-artifact", "gguf", "safetensors"):
+        human = _render_model(res)
     elif verb in ("gdb", "gdbmi"):
         human = _render_gdb(res)
     elif verb == "ptrace":
