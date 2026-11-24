@@ -2050,6 +2050,34 @@ def cmd_re(args):
                     flag = f"  TRUNCATED by {entry['truncated']} bytes"
                 lines.append(f"    {entry['region']:<28} @{entry['offset']:<9} "
                              f"{entry['size']:<9} {note}{flag}")
+            strings_info = res.get("strings") or {}
+            if strings_info.get("string_count"):
+                lines.append(f"  strings     {strings_info.get('string_count')} in the global "
+                             f"table ({strings_info.get('table_size')} bytes)")
+            types = res.get("type_records") or {}
+            if types.get("type_count"):
+                lines.append(f"  types       {types['type_count']} decoded of "
+                             f"{types.get('records_declared')} records "
+                             f"(stride {types.get('record_stride')} bytes)")
+                for entry in (types.get("types") or [])[:20]:
+                    lines.append(f"    [{entry['index']:>4}] {entry['full_name']}")
+                if types["type_count"] > 20:
+                    lines.append(f"    ... {types['type_count'] - 20} more")
+            elif types.get("note") or types.get("error"):
+                lines.append("  types       " + str(types.get("error") or types.get("note")))
+            methods = res.get("method_records") or {}
+            if methods.get("method_count"):
+                names = [entry["name"] for entry in methods.get("methods") or []]
+                lines.append(f"  methods     {methods['method_count']} decoded of "
+                             f"{methods.get('records_declared')} records "
+                             f"(stride {methods.get('record_stride')} bytes)")
+                for start in range(0, min(len(names), 30), 6):
+                    lines.append("    " + "  ".join(f"{n:<20}" for n in names[start:start + 6]))
+                if len(names) > 30:
+                    lines.append(f"    ... {len(names) - 30} more")
+            for warning in (types.get("warning"), methods.get("note")):
+                if warning:
+                    lines.append(f"  WARNING     {warning}")
             if res.get("warning"):
                 lines.append(f"  WARNING     {res['warning']}")
             human = "\n".join(lines)

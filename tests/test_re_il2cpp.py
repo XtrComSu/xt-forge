@@ -350,3 +350,206 @@ class StringTableTest(unittest.TestCase):
         report = self._inspect(self._metadata(["A" * 500, "RealType"]))
         self.assertNotIn("A" * 500, report["names"])
         self.assertIn("RealType", report["names"])
+
+
+class RecordDecodeTest(unittest.TestCase):
+    """Type and method records, decoded from the leader only.
+
+    Type/method records were correctly left undecoded for a long time, because their layouts change
+    between Unity releases: `customAttributeIndex` disappears at 24.1, `byrefTypeIndex` at 24.5,
+    `ccwFunctionIndex` exists only 21..22. A full decode without a version table returns plausible
+    garbage.
+
+    But the *leader* is stable — `nameIndex` is the first word of both records in every version —
+    and the record stride is derivable from the file itself rather than from a table. So names and
+    namespaces can be reported for any version, which is the part an analyst greps for.
+
+    **`nameIndex` is a byte offset, not an ordinal.** The reference implementation is explicit:
+
+        public string GetStringFromIndex(uint index)
+            => ReadStringToNull(header.stringOffset + index);
+
+    My first version of this test built the fixture with ordinals, and the first version of the
+    decoder read them as ordinals, so the two agreed and both were wrong. It surfaced only because
+    the fixture's name/namespace pairs came back swapped — `Object.UnityEngine` for a type I had
+    written as Object-in-System. A decoder and its test written from the same misunderstanding
+    confirm each other; the fixture here is built from byte offsets so it cannot.
+
+    Layouts are built at three real strides (v24.5 88/52, v27 104/44, v29 120/56) so the
+    derivations are exercised rather than one hard-coded case passing by luck.
+    """
+
+    STRINGS = ["System", "Object", "UnityEngine", "MonoBehaviour", "PlayerController",
+               "Update", "String", "Collections", "List`1", "Start", "Awake"]
+    # (name, namespace) as *strings*, converted to byte offsets when the fixture is built.
+    TYPES = [("Object", "System"), ("MonoBehaviour", "UnityEngine"),
+             ("List`1", "Collections"), ("PlayerController", "UnityEngine")]
+    METHODS = ["Update", "Start", "Awake", "Update", "Start", "Awake"]
+
+    def _blob_and_offsets(self) -> tuple[bytes, dict[str, int]]:
+        """Build the string table the way real metadata lays it out.
+
+        The table begins with a NUL byte, so byte offset 0 resolves to the empty string. That is
+        not a convention I invented: `GetStringFromIndex(index)` is
+        `ReadStringToNull(header.stringOffset + index)` with no sentinel for zero, so offset 0 has
+        to be a real string and the empty one is what sits there. A fixture that put a real name at
+        offset 0 made offset 0 ambiguous and produced a decoder that special-cased it wrongly.
+        """
+        blob = b"\x00"
+        offsets: dict[str, int] = {"": 0}
+        for text in self.STRINGS:
+            offsets[text] = len(blob)
+            blob += text.encode() + b"\x00"
+        return blob, offsets
+
+    def _metadata(self, type_stride: int, method_stride: int, version: int = 24) -> bytes:
+        import struct as _struct
+        blob, offsets = self._blob_and_offsets()
+        type_blob = b"".join(
+            _struct.pack("<II", offsets[name], offsets.get(namespace, 0))
+            + b"\x00" * (type_stride - 8) for name, namespace in self.TYPES)
+        method_blob = b"".join(
+            _struct.pack("<I", offsets[name]) + b"\x00" * (method_stride - 4)
+            for name in self.METHODS)
+        header = 296
+        string_at = header
+        type_at = string_at + len(blob)
+        method_at = type_at + len(type_blob)
+        raw = bytearray(method_at + len(method_blob))
+        _struct.pack_into("<I", raw, 0x000, 0xFAB11BAF)
+        _struct.pack_into("<I", raw, 0x004, version)
+        _struct.pack_into("<I", raw, 0x018, string_at)
+        _struct.pack_into("<I", raw, 0x01C, len(blob))
+        _struct.pack_into("<I", raw, 0x030, method_at)
+        _struct.pack_into("<I", raw, 0x034, len(method_blob))
+        _struct.pack_into("<I", raw, 0x0A0, type_at)
+        _struct.pack_into("<I", raw, 0x0A4, len(type_blob))
+        raw[string_at:string_at + len(blob)] = blob
+        raw[type_at:type_at + len(type_blob)] = type_blob
+        raw[method_at:method_at + len(method_blob)] = method_blob
+        return bytes(raw)
+
+    def _inspect(self, raw: bytes) -> dict:
+        import tempfile
+        from pathlib import Path
+        from xtforge.core.re import il2cpp
+        directory = Path(tempfile.mkdtemp(prefix="xtil2rec-"))
+        try:
+            target = directory / "global-metadata.dat"
+            target.write_bytes(raw)
+            return il2cpp.inspect_il2cpp_metadata(target)
+        finally:
+            import shutil
+            shutil.rmtree(directory, ignore_errors=True)
+
+    def test_the_stride_is_derived_from_the_file_not_assumed(self) -> None:
+        """Three real layouts, three derived strides.
+
+        "First stride that divides the table evenly" picked the 8-byte leader and reported 44
+        records of which 40 were noise; ranking by resolution *rate* picked a multiple of the real
+        stride that sampled one record and scored 100%. Ranking by the *count* of records that land
+        on a real string start is what makes all three land on the truth.
+        """
+        for type_stride, method_stride, version in ((88, 52, 24), (104, 44, 27), (120, 56, 29)):
+            with self.subTest(type_stride=type_stride, method_stride=method_stride):
+                report = self._inspect(self._metadata(type_stride, method_stride, version))
+                self.assertEqual(report["type_records"]["record_stride"], type_stride)
+                self.assertEqual(report["method_records"]["record_stride"], method_stride)
+
+    def test_every_type_record_is_decoded_with_the_right_name(self) -> None:
+        report = self._inspect(self._metadata(88, 52))
+        names = [entry["full_name"] for entry in report["type_records"]["types"]]
+        self.assertEqual(len(names), 4, names)
+        # Namespace before name, as .NET renders a full type name. The record itself is
+        # name-first: `nameIndex` is the leading word and `namespaceIndex` the second one.
+        self.assertEqual(names, ["System.Object", "UnityEngine.MonoBehaviour",
+                                 "Collections.List`1", "UnityEngine.PlayerController"])
+
+    def test_name_and_namespace_are_not_swapped(self) -> None:
+        """The exact symptom of reading a byte offset as an ordinal."""
+        report = self._inspect(self._metadata(88, 52))
+        first = report["type_records"]["types"][0]
+        self.assertEqual(first["name"], "Object")
+        self.assertEqual(first["namespace"], "System")
+
+    def test_a_type_with_no_namespace_is_not_given_one(self) -> None:
+        """Index 0 means 'none'; returning the blob's first string would invent a namespace."""
+        import struct as _struct
+        blob, offsets = self._blob_and_offsets()
+        type_blob = _struct.pack("<II", offsets["Object"], 0) + b"\x00" * 80
+        header = 296
+        raw = bytearray(header + len(blob) + len(type_blob))
+        _struct.pack_into("<I", raw, 0x000, 0xFAB11BAF)
+        _struct.pack_into("<I", raw, 0x018, header)
+        _struct.pack_into("<I", raw, 0x01C, len(blob))
+        _struct.pack_into("<I", raw, 0x0A0, header + len(blob))
+        _struct.pack_into("<I", raw, 0x0A4, len(type_blob))
+        raw[header:header + len(blob)] = blob
+        raw[header + len(blob):] = type_blob
+        report = self._inspect(bytes(raw))
+        types = report["type_records"]["types"]
+        self.assertEqual(types[0]["namespace"], "")
+        self.assertEqual(types[0]["full_name"], "Object",
+                         "a type with no namespace must not gain a leading dot")
+
+    def test_method_names_are_recovered_in_order(self) -> None:
+        report = self._inspect(self._metadata(88, 52))
+        names = [entry["name"] for entry in report["method_records"]["methods"]]
+        self.assertEqual(names, self.METHODS)
+
+    def test_a_garbage_stride_is_flagged_rather_than_reported_as_types(self) -> None:
+        """When nothing lands on a string start, the output must not present it as a type list."""
+        import struct as _struct
+        header = 296
+        junk = bytes((index * 37 + 11) % 251 + 1 for index in range(1024))
+        raw = bytearray(header + 16 + len(junk))
+        _struct.pack_into("<I", raw, 0x000, 0xFAB11BAF)
+        _struct.pack_into("<I", raw, 0x018, header)
+        _struct.pack_into("<I", raw, 0x01C, 16)
+        _struct.pack_into("<I", raw, 0x0A0, header + 16)
+        _struct.pack_into("<I", raw, 0x0A4, len(junk))
+        raw[header:header + 16] = b"aaa\x00bbb\x00ccc\x00ddd\x00"
+        raw[header + 16:] = junk
+        report = self._inspect(bytes(raw))
+        records = report["type_records"]
+        self.assertTrue(records.get("warning") or records["type_count"] <= 1,
+                       f"decoded {records['type_count']} types from noise without warning")
+
+    def test_a_table_past_the_end_is_an_error_not_a_crash(self) -> None:
+        import struct as _struct
+        raw = bytearray(self._metadata(88, 52))
+        _struct.pack_into("<I", raw, 0x0A0, len(raw) + 99999)
+        report = self._inspect(bytes(raw))
+        self.assertTrue(report["ok"])
+        self.assertIn("error", report["type_records"])
+
+    def test_a_file_with_no_type_table_says_so(self) -> None:
+        import struct as _struct
+        raw = bytearray(self._metadata(88, 52))
+        _struct.pack_into("<I", raw, 0x0A0, 0)
+        _struct.pack_into("<I", raw, 0x0A4, 0)
+        report = self._inspect(bytes(raw))
+        self.assertEqual(report["type_records"]["type_count"], 0)
+        self.assertIn("no type definition table", report["type_records"]["note"])
+
+    def test_a_nonzero_ordinal_is_not_treated_as_an_offset(self) -> None:
+        """A record naming the 3rd string must resolve to it by its byte offset, and a bare
+        ordinal of 2 must not silently mean the 3rd string."""
+        import struct as _struct
+        blob, offsets = self._blob_and_offsets()
+        self.assertNotEqual(offsets["UnityEngine"], 2,
+                            "the fixture must have a namespace whose offset is not its ordinal, "
+                            "or this test cannot distinguish the two readings")
+        type_blob = _struct.pack("<II", offsets["Object"], offsets["UnityEngine"]) + b"\x00" * 80
+        header = 296
+        raw = bytearray(header + len(blob) + len(type_blob))
+        _struct.pack_into("<I", raw, 0x000, 0xFAB11BAF)
+        _struct.pack_into("<I", raw, 0x018, header)
+        _struct.pack_into("<I", raw, 0x01C, len(blob))
+        _struct.pack_into("<I", raw, 0x0A0, header + len(blob))
+        _struct.pack_into("<I", raw, 0x0A4, len(type_blob))
+        raw[header:header + len(blob)] = blob
+        raw[header + len(blob):] = type_blob
+        report = self._inspect(bytes(raw))
+        entry = report["type_records"]["types"][0]
+        self.assertEqual(entry["namespace"], "UnityEngine")

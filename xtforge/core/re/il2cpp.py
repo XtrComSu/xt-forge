@@ -261,6 +261,291 @@ def _string_table(raw: bytes, values: dict[str, int], *,
     return report
 
 
+# Il2CppTypeDefinition / Il2CppMethodDefinition record layouts, from Il2CppDumper's
+# MetadataClass.cs (the reference implementation). Only the *leading* fields are used, because the
+# leading fields are the stable part: `nameIndex` is the first word of both records in every Unity
+# version that has ever shipped, and `namespaceIndex` the second word of a type record. Everything
+# after them moves between versions — `customAttributeIndex` disappears at 24.1, `byrefTypeIndex`
+# at 24.5, `ccwFunctionIndex` only exists 21..22 — which is exactly why the earlier version of this
+# module refused to decode records at all.
+#
+# Restricting the decode to the leader means the *names* can be reported for any version without
+# claiming anything about the rest of the record. That is a smaller claim than a full schema, and
+# it is the one the layout actually supports.
+TYPE_RECORD_LEADER = 8      # nameIndex + namespaceIndex
+METHOD_RECORD_LEADER = 4    # nameIndex
+# Sanity bound on record size; the real values sit between 80 and 140 bytes depending on version.
+MIN_TYPE_RECORD = 8
+MAX_TYPE_RECORD = 512
+MAX_METHOD_RECORD = 512
+
+
+class _StringResolver:
+    """Resolve a metadata name index to a string, by **byte offset** into the string blob.
+
+    This is the distinction that matters most in this module. `nameIndex` is not an ordinal into a
+    list of decoded strings; the reference implementation is unambiguous about it:
+
+        public string GetStringFromIndex(uint index)
+            => ReadStringToNull(header.stringOffset + index);
+
+    Reading it as an ordinal happens to produce plausible-looking type names from a synthetic file
+    where the two numberings coincide, which is how a wrong decoder passes its own test. On a real
+    file the ordinals diverge from the offsets as soon as any string is empty or any table region
+    is skipped, so ordinal lookup silently attributes the wrong name to every record — the failure
+    mode that looks like success.
+
+    Lookups are memoised because a real table has tens of thousands of records pointing at a few
+    thousand strings.
+    """
+
+    def __init__(self, blob: bytes) -> None:
+        self._blob = blob
+        self._cache: dict[int, str] = {}
+
+    def __call__(self, index: int) -> str:
+        if index == 0xFFFFFFFF or index < 0:
+            # Some versions store "no string" as 0xFFFFFFFF. That is the only sentinel: offset 0 is
+            # a *real* offset, and real tables begin with a NUL byte, so it resolves to "" on its
+            # own rather than needing a special case. I first special-cased 0 too, which broke a
+            # type whose namespace genuinely lived at offset 0 — the fixture caught it.
+            return ""
+        if index in self._cache:
+            return self._cache[index]
+        if index >= len(self._blob):
+            self._cache[index] = ""
+            return ""
+        end = self._blob.find(b"\x00", index)
+        if end < 0:
+            end = len(self._blob)
+        text = self._blob[index:end].decode("utf-8", "replace")
+        self._cache[index] = text
+        return text
+
+    def resolves(self, index: int) -> bool:
+        """Whether this offset lands on a plausible string start.
+
+        A true name index lands on the first byte of a NUL-terminated run, so the byte before it is
+        a NUL (or it is offset 0). A stride that is a divisor of the real one samples fields that
+        are not name indices at all, and those land mid-string — which is what lets the stride
+        search discriminate without knowing the answer.
+        """
+        if not (0 <= index < len(self._blob)):
+            return False
+        if index > 0 and self._blob[index - 1] != 0:
+            return False
+        if index == 0:
+            return True
+        end = self._blob.find(b"\x00", index)
+        return end > index
+
+
+def _string_blob(raw: bytes, values: dict[str, int]) -> bytes:
+    """The raw bytes of the global string table, or b"" when the header declares none."""
+    offset = values.get("stringOffset", 0)
+    size = values.get("stringSize", 0)
+    if not offset or size <= 0 or offset >= len(raw):
+        return b""
+    return raw[offset:min(offset + size, len(raw))]
+
+
+def _best_stride(blob: bytes, resolver: "_StringResolver", minimum: int, maximum: int, *,
+                 leader: int) -> tuple[int | None, int]:
+    """Pick the record stride whose `nameIndex` words actually land on string starts.
+
+    Returns (stride, record_count), or (None, 0) when no candidate divides the table evenly.
+
+    Stride selection went through two wrong answers before this one, both worth recording:
+
+      * "first stride that divides the table evenly" picked the 8-byte leader, because the leader
+        size divides everything, and reported 44 records of which 40 were noise.
+      * ranking by the *rate* of plausible records picked a multiple of the real stride, which
+        samples only its first record and scores a perfect 100%.
+
+    What works is ranking by the *count* of records that plausibly resolve, with the rate as a
+    tie-break: every multiple of the true stride scores a perfect rate on fewer records, and every
+    divisor resolves fewer. The maximum sits at the true stride.
+
+    "Plausibly resolve" means the offset lands on the first byte of a NUL-terminated run rather
+    than in the middle of one — a property of the byte layout, so it does not depend on the string
+    table being decoded correctly first.
+    """
+    # Two scoring rules, and the reason for each is a failure I measured rather than imagined:
+    #
+    #   1. A zero `nameIndex` is *not* evidence. Record tails are zero-padded, and offset 0 is a
+    #      real string (the empty one), so every zero word looked like a resolving record. That
+    #      made stride 8 — the leader size — resolve 60 of 60 slots and beat the true 120-byte
+    #      stride, which resolved 4 of 4. Zeros are excluded from the numerator but still counted
+    #      in the denominator, so a stride that mostly samples padding scores near zero.
+    #
+    #   2. Among strides that genuinely resolve, prefer the one that resolves the *most records*.
+    #      Every multiple of the true stride also resolves perfectly, because it samples a subset
+    #      of the real record starts; the true stride is the largest such count.
+    best: tuple[tuple[int, int], int, int] | None = None
+    fallback: tuple[tuple[float, int], int, int] | None = None
+    for candidate in range(max(leader, minimum), maximum + 1, 4):
+        if len(blob) % candidate or len(blob) // candidate <= 0:
+            continue
+        records = len(blob) // candidate
+        sample = min(records, 400)
+        good = 0
+        for index in range(sample):
+            base = index * candidate
+            if base + 4 > len(blob):
+                break
+            name_index = struct.unpack_from("<I", blob, base)[0]
+            if name_index == 0:
+                continue
+            if resolver.resolves(name_index):
+                good += 1
+        rate = good / sample if sample else 0.0
+        key = (good, -candidate)
+        if best is None or key > best[0]:
+            best = (key, candidate, records)
+        rate_key = (rate, -candidate)
+        if fallback is None or rate_key > fallback[0]:
+            fallback = (rate_key, candidate, records)
+
+    if best is None:
+        return None, 0
+    # Require that the winner resolves most of what it samples; otherwise the region is not a
+    # record table at all and the caller's implausible-count warning is the honest answer.
+    if best[0][0] == 0:
+        assert fallback is not None
+        return fallback[1], fallback[2]
+    best_rate = best[0][0] / min(best[2], 400)
+    if best_rate < 0.5 and fallback is not None:
+        return fallback[1], fallback[2]
+    return best[1], best[2]
+
+
+def decode_type_records(raw: bytes, values: dict[str, int], strings: "_StringResolver", *,
+                        limit: int = 500) -> dict[str, Any]:
+    """Recover type names and namespaces from the `Il2CppTypeDefinition` table.
+
+    The record size is derived, not assumed: the header declares the table's total byte size and
+    the region is laid out as a flat array, so `size // count` gives the stride for *this* file's
+    Unity version. That is what makes this version-aware without a version table — the file states
+    its own stride, and a stride that is not a whole number of records means the region is not what
+    it claims, which is reported rather than decoded as garbage.
+
+    This is the narrow, honest decode: names and namespaces only. Field offsets, method ranges and
+    flags all sit past the leader and change between versions, so they stay undecoded.
+    """
+    offset = values.get("typeDefinitionsOffset", 0)
+    size = values.get("typeDefinitionsSize", 0)
+    if not offset or size <= 0:
+        return {"types": [], "type_count": 0,
+                "note": "the file declares no type definition table"}
+    if offset >= len(raw):
+        return {"types": [], "type_count": 0,
+                "error": f"type table offset {offset} is past the end of the file"}
+
+    end = min(offset + size, len(raw))
+    blob = raw[offset:end]
+    truncated = offset + size > len(raw)
+
+    # The record stride is derived from the file itself rather than from a version table, because
+    # the record layout moves between Unity releases and a table would have to be right about every
+    # one. The trick is *how* to derive it: taking the first stride that divides the table evenly
+    # picked the 8-byte leader, since 8 divides everything 8 divides, and reported 44 records of
+    # which 40 had unresolvable names. Instead every candidate stride is scored by how many of its
+    # records resolve to real strings, and the best-scoring one wins. A divisor of the true stride
+    # samples only its first word-aligned offsets, so it scores about 1/N as well — the statistic
+    # discriminates without needing to know the answer in advance.
+    stride, count = _best_stride(blob, strings, MIN_TYPE_RECORD, MAX_TYPE_RECORD,
+                                 leader=TYPE_RECORD_LEADER)
+    if stride is None:
+        return {"types": [], "type_count": 0,
+                "error": f"the type table is {len(blob)} bytes, which is not a whole number of "
+                         f"records at any plausible stride; refusing to guess"}
+
+    types: list[dict[str, Any]] = []
+    implausible = 0
+    for index in range(min(count, limit)):
+        base = index * stride
+        if base + TYPE_RECORD_LEADER > len(blob):
+            break
+        name_index = struct.unpack_from("<I", blob, base)[0]
+        namespace_index = struct.unpack_from("<I", blob, base + 4)[0]
+        name = strings(name_index)
+        namespace = strings(namespace_index)
+        if not name:
+            implausible += 1
+            continue
+        types.append({"index": index, "name": name, "namespace": namespace,
+                      "full_name": f"{namespace}.{name}" if namespace else name})
+    report: dict[str, Any] = {
+        "types": types,
+        "type_count": len(types),
+        "table_offset": offset,
+        "table_size": size,
+        "record_stride": stride,
+        "records_declared": count,
+        # A stride chosen by divisibility can be a divisor rather than the real stride; if most
+        # name indices do not resolve, that is what happened, and saying so prevents a confident
+        # list of one-in-four types from being read as the complete set.
+        "implausible_count": implausible,
+    }
+    if implausible > max(1, len(types) // 4):
+        report["warning"] = (f"{implausible} of {count} records had an unresolvable name index, "
+                             f"so the derived stride {stride} is probably not the record size")
+    if truncated:
+        report["truncated"] = True
+    return report
+
+
+def decode_method_records(raw: bytes, values: dict[str, int], strings: "_StringResolver", *,
+                          type_count: int = 0, limit: int = 500) -> dict[str, Any]:
+    """Recover method names from the `Il2CppMethodDefinition` table.
+
+    The method record's leader is a single `nameIndex`, so the same derived-stride approach works
+    and the same caveat applies. `declaringType` is the second word and is *not* decoded here,
+    because its meaning depends on the type table's indexing which moves between versions; the
+    names are reported as a set, which is what an analyst greps.
+    """
+    offset = values.get("methodsOffset", 0)
+    size = values.get("methodsSize", 0)
+    if not offset or size <= 0:
+        return {"methods": [], "method_count": 0,
+                "note": "the file declares no method definition table"}
+    if offset >= len(raw):
+        return {"methods": [], "method_count": 0,
+                "error": f"method table offset {offset} is past the end of the file"}
+    blob = raw[offset:min(offset + size, len(raw))]
+    truncated = offset + size > len(raw)
+
+    stride, count = _best_stride(blob, strings, METHOD_RECORD_LEADER, MAX_METHOD_RECORD,
+                                 leader=METHOD_RECORD_LEADER)
+    if stride is None:
+        return {"methods": [], "method_count": 0,
+                "error": f"the method table is {len(blob)} bytes, not a whole number of records"}
+
+    methods: list[dict[str, Any]] = []
+    implausible = 0
+    for index in range(min(count, limit)):
+        base = index * stride
+        if base + METHOD_RECORD_LEADER > len(blob):
+            break
+        name_index = struct.unpack_from("<I", blob, base)[0]
+        name = strings(name_index)
+        if not name:
+            implausible += 1
+            continue
+        methods.append({"index": index, "name": name})
+    report: dict[str, Any] = {
+        "methods": methods, "method_count": len(methods),
+        "table_offset": offset, "table_size": size, "record_stride": stride,
+        "records_declared": count, "implausible_count": implausible,
+    }
+    if type_count and count and abs(count - type_count) > max(4, type_count // 2):
+        report["note"] = (f"{count} method records against {type_count} type records, which is "
+                          f"an unusual ratio; the stride may be a divisor of the real one")
+    if truncated:
+        report["truncated"] = True
+    return report
+
+
 def type_names(index: dict[str, Any], *, limit: int = 200) -> list[str]:
     """The type-shaped names from a decoded string table.
 
@@ -333,6 +618,13 @@ def inspect_il2cpp_metadata(path: str | Path) -> dict[str, Any]:
     result["strings"] = strings
     if strings.get("string_count"):
         result["names"] = type_names(strings)
+        resolver = _StringResolver(_string_blob(raw, values))
+        decoded_types = decode_type_records(raw, values, resolver)
+        result["type_records"] = decoded_types
+        result["method_records"] = decode_method_records(
+            raw, values, resolver, type_count=decoded_types.get("type_count") or 0)
+        result["type_count"] = decoded_types.get("type_count", 0)
+        result["method_count"] = (result["method_records"] or {}).get("method_count", 0)
     result["schema_note"] = (
         "region records are NOT decoded into names: Il2CppTypeDefinition and "
         "Il2CppMethodDefinition change layout between Unity versions, so decoding without "
