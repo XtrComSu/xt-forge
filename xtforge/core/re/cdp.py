@@ -193,8 +193,9 @@ def inspect_endpoint(port: int = 9222, *, host: str = "127.0.0.1",
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
         return {"ok": False, "endpoint": base,
                 "error": f"no DevTools endpoint at {base}: {exc}",
-                "hint": ("launch a browser with --remote-debugging-port=<port>, or use "
-                         "`re cdp --launch` to have one started for you")}
+                "hint": ("start a browser with --remote-debugging-port=<port>, or pass a URL "
+                         "with an aspect — `re cdp <url> --symbol=runtime` — to have one "
+                         "launched for you")}
     try:
         targets = _http_json(f"{base}/json/list", timeout=timeout)
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
@@ -236,6 +237,13 @@ def inspect_endpoint(port: int = 9222, *, host: str = "127.0.0.1",
                 _time.sleep(0.1)
             for index, expression in enumerate(questions[:_MAX_EVALUATIONS], start=1):
                 entry["values"][expression] = _evaluate(ws, expression, index)
+            # `page["title"]` comes from the /json target list, which Chrome populates from the
+            # document as it was when the target was announced. After a navigation it stays
+            # empty, so a page with a real <title> reported `title ""` while `document.title`
+            # in the same payload said "probe". Ask the document that is actually loaded.
+            live_title = entry["values"].get("document.title") or {}
+            if live_title.get("ok") and isinstance(live_title.get("value"), str):
+                entry["title"] = live_title["value"]
         finally:
             ws.close()
         findings.append(entry)
@@ -276,6 +284,7 @@ def _command(ws: WebSocket, method: str, params: dict[str, Any] | None,
 # Expressions that answer the observation questions the REA tool list is really asking.
 _OBSERVATIONS = {
     "runtime": [
+        "document.title",
         "navigator.userAgent",
         "document.readyState",
         "document.querySelectorAll('*').length",
