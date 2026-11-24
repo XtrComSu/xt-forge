@@ -603,3 +603,215 @@ class RestartAreaParsingTest(unittest.TestCase):
         except Exception as exc:  # noqa: BLE001
             self.fail(f"raised {type(exc).__name__}: {exc}")
         self.assertIsInstance(area, dict)
+
+
+class LogRecordTest(unittest.TestCase):
+    """`$LogFile` log records and the transaction view built from them.
+
+    The restart area only says whether the log is clean. The records say what happened, and a flat
+    list of LSNs is not an answer either — grouping by `transaction_id` is what turns "these
+    sixteen records" into "these four atomic operations".
+
+    **What this proves and what it does not.** The layouts come from ntfs-3g's `logfile.h` and
+    `libntfs-3g/logfile.c`, which is what `ntfsrecover` uses, and every field offset below is
+    written out in that file's comments. But, exactly as with the restart-area tests, this host
+    cannot produce a Windows-written `$LogFile`: no `mkntfs` (the binary is absent), no mount
+    capability, no root. So these tests exercise the *parser* against bytes laid out to the
+    documented structure. They do not prove the layout matches what a real Windows volume writes.
+    The row stays `partial` for that reason, and saying so is more useful than a green tick that
+    means less than it appears to.
+    """
+
+    PAGE_SIZE = 4096
+    DATA_OFFSET = 0x40
+
+    def _record(self, this_lsn: int, *, transaction_id: int = 0, record_type: int = 2,
+                redo=0, redo_offset=0, redo_length=0, undo=0,
+                target_attribute=0, data=b"") -> bytes:
+        """One LOG_RECORD plus its 64-bit-padded client data."""
+        header = bytearray(0x70)
+        struct.pack_into("<Q", header, 0, this_lsn)
+        struct.pack_into("<Q", header, 8, max(this_lsn - 4, 0))
+        struct.pack_into("<Q", header, 16, max(this_lsn - 4, 0))
+        struct.pack_into("<I", header, 24, len(data))          # client_data_length
+        struct.pack_into("<HH", header, 28, 1, 0)              # client_id
+        struct.pack_into("<I", header, 32, record_type)
+        struct.pack_into("<I", header, 36, transaction_id)
+        struct.pack_into("<HH", header, 48, redo, undo)        # redo/undo operation
+        struct.pack_into("<HH", header, 52, redo_offset, redo_length)
+        struct.pack_into("<HH", header, 60, target_attribute, 0)
+        padding = b"\x00" * (((len(data) + 7) & ~7) - len(data))
+        return bytes(header) + data + padding
+
+    def _page(self, records: list[bytes], *, page_position: int = 1,
+              page_count: int = 1) -> bytes:
+        page = bytearray(self.PAGE_SIZE)
+        page[0:4] = b"RCRD"
+        struct.pack_into("<H", page, 4, 0x30)                  # usa_ofs
+        struct.pack_into("<Q", page, 8, 0)                     # copy / last_lsn
+        struct.pack_into("<I", page, 16, 0)                    # flags
+        struct.pack_into("<HH", page, 20, page_count, page_position)
+        struct.pack_into("<H", page, 24, self.DATA_OFFSET)     # next_record_offset
+        body = b"".join(records)
+        page[self.DATA_OFFSET:self.DATA_OFFSET + len(body)] = body
+        return bytes(page)
+
+    def _decode(self, log: bytes) -> dict:
+        return ntfs._decode_log_records(log, page_data_offset=self.DATA_OFFSET)
+
+    def test_records_in_a_page_are_decoded(self) -> None:
+        log = self._page([self._record(100), self._record(104), self._record(108)])
+        report = self._decode(log)
+        self.assertEqual(report["record_count"], 3)
+        self.assertEqual([entry["this_lsn"] for entry in report["records"]], [100, 104, 108])
+
+    def test_client_data_padding_is_skipped(self) -> None:
+        """The bug this catches returned LSN 12297829382473034410 — `0xAAAAAAAAAAAAAAAA`,
+        the previous record's payload read as the next header.
+
+        A LOG_RECORD header is 0x70 bytes and its client data follows, padded to 64 bits. Stepping
+        by the header size alone lands in that payload, and a payload of 0xAA decodes as a perfectly
+        plausible LSN. That is worth a test of its own because the failure is silent: the record
+        count still looks reasonable.
+        """
+        log = self._page([
+            self._record(100, transaction_id=7, data=b"\xAA" * 24),
+            self._record(104, transaction_id=7, data=b"\xBB" * 8),
+            self._record(108, transaction_id=0, data=b""),
+        ])
+        report = self._decode(log)
+        self.assertEqual(len(report["records"]), 3)
+        for entry in report["records"]:
+            self.assertLess(entry["this_lsn"], 1000,
+                            f"a payload byte was decoded as an LSN: {entry['this_lsn']}")
+        self.assertEqual([entry["this_lsn"] for entry in report["records"]], [100, 104, 108])
+
+    def test_records_are_grouped_into_transactions(self) -> None:
+        """Six records in three transactions must not read as six transactions."""
+        log = self._page([
+            self._record(100, transaction_id=7, target_attribute=0x30),
+            self._record(104, transaction_id=7, target_attribute=0x30),
+            self._record(108, transaction_id=7, target_attribute=0x80),
+            self._record(112, transaction_id=8, target_attribute=0x30),
+            self._record(116, transaction_id=9, target_attribute=0x10),
+            self._record(120, transaction_id=9, target_attribute=0x10),
+        ])
+        report = self._decode(log)
+        self.assertEqual(report["record_count"], 6)
+        self.assertEqual(report["transaction_count"], 3)
+        sizes = {entry["transaction_id"]: entry["record_count"]
+                 for entry in report["transactions"]}
+        self.assertEqual(sizes, {7: 3, 8: 1, 9: 2})
+
+    def test_a_transaction_collects_every_attribute_it_touched(self) -> None:
+        log = self._page([
+            self._record(100, transaction_id=7, target_attribute=0x30),
+            self._record(104, transaction_id=7, target_attribute=0x80),
+            self._record(108, transaction_id=7, target_attribute=0x30),
+        ])
+        group = next(entry for entry in self._decode(log)["transactions"]
+                     if entry["transaction_id"] == 7)
+        self.assertEqual(sorted(group["target_attributes"]), [0x30, 0x80])
+        self.assertEqual(group["lsns"], [100, 104, 108])
+        self.assertEqual(group["first_lsn"], 100)
+        self.assertEqual(group["last_lsn"], 108)
+
+    def test_transaction_zero_is_not_counted_as_a_transaction(self) -> None:
+        """NTFS uses transaction id 0 for records that belong to no transaction. Counting each as
+        its own transaction inflates the number with things that are not transactions."""
+        log = self._page([
+            self._record(100, transaction_id=0),
+            self._record(104, transaction_id=0),
+            self._record(108, transaction_id=7),
+        ])
+        report = self._decode(log)
+        self.assertEqual(report["transaction_count"], 1)
+        self.assertEqual(report["orphan_record_count"], 1)
+
+    def test_client_data_bytes_are_summed_per_transaction(self) -> None:
+        log = self._page([
+            self._record(100, transaction_id=7, data=b"\xAA" * 24),
+            self._record(104, transaction_id=7, data=b"\xBB" * 8),
+        ])
+        group = next(entry for entry in self._decode(log)["transactions"]
+                     if entry["transaction_id"] == 7)
+        self.assertEqual(group["client_data_bytes"], 32)
+
+    def test_several_pages_are_all_walked(self) -> None:
+        """The log is a sequence of pages; stopping at the first one reports a fraction of it."""
+        log = (self._page([self._record(100)], page_position=1)
+               + self._page([self._record(104)], page_position=2))
+        report = self._decode(log)
+        self.assertEqual(report["page_count"], 2)
+        self.assertGreaterEqual(report["record_count"], 2)
+
+    def test_a_zero_lsn_is_rejected_rather_than_reported(self) -> None:
+        """A real record always carries an LSN; zero means the walk landed on padding."""
+        log = self._page([self._record(100), b"\x00" * 0x70, self._record(108)])
+        report = self._decode(log)
+        self.assertEqual([entry["this_lsn"] for entry in report["records"]], [100, 108])
+
+    def test_an_absurd_data_length_is_rejected(self) -> None:
+        """`client_data_length` beyond the page means the header is not a header."""
+        bogus = bytearray(self._record(999))
+        struct.pack_into("<I", bogus, 24, 0x7FFFFFFF)
+        log = self._page([self._record(100), bytes(bogus)])
+        report = self._decode(log)
+        self.assertEqual([entry["this_lsn"] for entry in report["records"]], [100])
+
+    def test_a_log_with_no_record_pages_yields_nothing_not_an_error(self) -> None:
+        report = self._decode(b"\xFF" * 4096)
+        self.assertEqual(report["record_count"], 0)
+        self.assertEqual(report["transaction_count"], 0)
+
+    def test_record_page_offsets_come_from_the_restart_area(self) -> None:
+        """`log_page_data_offset` is authoritative; 0x40 is only the header size.
+
+        Using 0x40 when the real data offset is larger decodes the update-sequence array as a
+        record header.
+        """
+        log = self._page([self._record(100)])
+        # A page whose records start later than the plain header, as a real fixup array does.
+        shifted = bytearray(self.PAGE_SIZE)
+        shifted[0:4] = b"RCRD"
+        struct.pack_into("<H", shifted, 24, 0x48)
+        struct.pack_into("<Q", shifted, 0x48, 4242)
+        report = ntfs._decode_log_records(bytes(shifted), page_data_offset=0x48)
+        self.assertIn(4242, [entry["this_lsn"] for entry in report["records"]])
+
+    def test_the_restart_area_fields_are_decoded(self) -> None:
+        """`RESTART_AREA` carries the state a caller needs: current LSN, cleanliness, page size."""
+        page = bytearray(4096)
+        page[0:4] = b"RSTR"
+        struct.pack_into("<H", page, 4, 0x30)
+        struct.pack_into("<I", page, 16, 4096)     # system_page_size
+        struct.pack_into("<I", page, 20, 4096)     # log_page_size
+        struct.pack_into("<H", page, 24, 0x30)     # restart_area_offset
+        struct.pack_into("<H", page, 26, 1)        # minor
+        struct.pack_into("<H", page, 28, 5)        # major
+        base = 0x30
+        struct.pack_into("<Q", page, base + 0, 0xDEAD)   # current_lsn
+        struct.pack_into("<HHHH", page, base + 8, 1, 0xFFFF, 0, 0x0002)
+        struct.pack_into("<IHH", page, base + 16, 64, 0x30, 0x40)
+        struct.pack_into("<q", page, base + 24, 1 << 20)  # file_size
+        struct.pack_into("<IHHI", page, base + 32, 4096, 0x30, 0x48, 17)
+
+        boot = bytearray(512)
+        boot[3:11] = b"NTFS    "
+        struct.pack_into("<H", boot, 11, 512)
+        boot[13] = 8
+        struct.pack_into("<Q", boot, 40, 1024)
+        struct.pack_into("<Q", boot, 48, 4)
+        volume = ntfs._Volume(bytes(boot))
+        cluster = 4
+        start = cluster * 4096
+        raw = bytearray(start + len(page) + 4096)
+        raw[start:start + len(page)] = bytes(page)
+        area = ntfs._logfile_restart(bytes(raw), volume,
+                                     [{"record": 2, "_runs": [(cluster, 1)]}])
+        inner = area["restart_area"]
+        self.assertEqual(inner["current_lsn"], 0xDEAD)
+        self.assertTrue(inner["volume_is_clean"])
+        self.assertEqual(inner["log_page_data_offset"], 0x48)
+        self.assertEqual(inner["log_record_header_length"], 0x30)
+        self.assertEqual(inner["restart_log_open_count"], 17)

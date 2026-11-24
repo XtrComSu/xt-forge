@@ -2164,6 +2164,35 @@ def cmd_re(args):
                                  "(formatted, never written)")
                 else:
                     lines.append("    restart   not decoded")
+                inner = log.get("restart_area") or {}
+                if inner:
+                    clean = "clean" if inner.get("volume_is_clean") else "DIRTY"
+                    lines.append(f"    state     {clean}, current LSN "
+                                 f"{inner.get('current_lsn')}, "
+                                 f"{inner.get('log_clients')} client(s), "
+                                 f"opened {inner.get('restart_log_open_count')} time(s)")
+                    lines.append(f"    page data at +{inner.get('log_page_data_offset')}, "
+                                 f"record header {inner.get('log_record_header_length')} bytes")
+                records = log.get("records") or {}
+                if records:
+                    lines.append(f"    records   {records.get('record_count')} across "
+                                 f"{records.get('page_count')} page(s)")
+                    lines.append(f"    txns      {records.get('transaction_count')} "
+                                 f"transaction(s)"
+                                 + (f", {records.get('orphan_record_count')} "
+                                    f"non-transactional group(s)"
+                                    if records.get("orphan_record_count") else ""))
+                    for group in (records.get("transactions") or [])[:12]:
+                        if not group.get("is_transaction"):
+                            continue
+                        attrs = ", ".join(f"0x{a:02x}" for a in
+                                          (group.get("target_attributes") or []))
+                        lines.append(f"      txn {group['transaction_id']:<6} "
+                                     f"{group['record_count']} record(s)  "
+                                     f"lsn {group['first_lsn']}..{group['last_lsn']}  "
+                                     f"{group['client_data_bytes']}B  attrs {attrs}")
+                elif log.get("present") and not log.get("formatted_only"):
+                    lines.append("    records   none decoded")
             for entry in (res.get("entries") or [])[:30]:
                 kind = "dir " if entry.get("directory") else "file"
                 lines.append(f"    rec {entry['record']:>3} {kind} "

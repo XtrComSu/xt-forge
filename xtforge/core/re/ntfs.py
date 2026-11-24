@@ -342,6 +342,24 @@ def inspect_ntfs_journal(path: str | Path, *, limit: int = 500) -> dict[str, Any
     restart = _logfile_restart(raw, volume, mft)
     if restart:
         logfile.update(restart)
+        # Decode the records themselves. The restart area says whether the log is clean; the
+        # records say what happened, which is the question an analyst actually has.
+        log_start = restart.get("log_offset")
+        log_size = restart.get("log_size")
+        if log_start is not None and log_size:
+            restart_area = restart.get("restart_area") or {}
+            decoded = _decode_log_records(
+                raw[log_start:log_start + log_size],
+                page_data_offset=restart_area.get("log_page_data_offset") or 0,
+                page_size=restart.get("log_page_size") or 0)
+            logfile["records"] = {
+                "record_count": decoded["record_count"],
+                "page_count": decoded["page_count"],
+                "transaction_count": decoded["transaction_count"],
+                "orphan_record_count": decoded["orphan_record_count"],
+                "transactions": decoded["transactions"],
+            }
+            # @@@LOG_RECORDS@@@
 
     entries = [record for record in mft if record.get("name")]
     for record in mft:
@@ -472,6 +490,45 @@ def _logfile_restart(raw: bytes, volume: _Volume,
             # chkdsk_lsn is meaningful: non-zero means chkdsk modified the log, which is a
             # stronger statement than the RSTR/CHKD signature alone.
             area["chkdsk_lsn"] = struct.unpack_from("<Q", log, index + 8)[0]
+
+            # RESTART_AREA follows at `restart_area_offset` from the page header. Its fields are
+            # what the record walk actually needs: `log_page_data_offset` is the authoritative
+            # offset to the first log record in a page, and `file_size` bounds the log. Searching
+            # for "RCRD" and guessing 0x40 instead of reading this is how a reader ends up decoding
+            # a page's fixup array as a record header.
+            #
+            #   +0  u64 current_lsn         +16 u32 seq_number_bits
+            #   +8  u16 log_clients         +20 u16 restart_area_length
+            #   +10 u16 client_free_list    +22 u16 client_array_offset
+            #   +12 u16 client_in_use_list  +24 s64 file_size
+            #   +14 u16 flags               +32 u32 last_lsn_data_length
+            #                               +36 u16 log_record_header_length
+            #                               +38 u16 log_page_data_offset
+            #                               +40 u32 restart_log_open_count
+            restart_at = index + restart_offset
+            if restart_offset and restart_at + 48 <= len(log):
+                (current_lsn,) = struct.unpack_from("<Q", log, restart_at)
+                (log_clients, client_free, client_in_use, rest_flags) = struct.unpack_from(
+                    "<HHHH", log, restart_at + 8)
+                (seq_number_bits, area_length, client_array_offset) = struct.unpack_from(
+                    "<IHH", log, restart_at + 16)
+                (file_size,) = struct.unpack_from("<q", log, restart_at + 24)
+                (last_lsn_data_length, record_header_length, page_data_offset,
+                 open_count) = struct.unpack_from("<IHHI", log, restart_at + 32)
+                area["restart_area"] = {
+                    "current_lsn": current_lsn,
+                    "log_clients": log_clients,
+                    "client_free_list": client_free,
+                    "client_in_use_list": client_in_use,
+                    "volume_is_clean": bool(rest_flags & 0x0002),
+                    "seq_number_bits": seq_number_bits,
+                    "restart_area_length": area_length,
+                    "client_array_offset": client_array_offset,
+                    "file_size": file_size,
+                    "log_record_header_length": record_header_length,
+                    "log_page_data_offset": page_data_offset,
+                    "restart_log_open_count": open_count,
+                }
         return area
 
     # No restart area. Report what the log ACTUALLY contains, because a caller needs to
@@ -487,6 +544,199 @@ def _logfile_restart(raw: bytes, volume: _Volume,
         "erased_bytes": ff,
         "zero_bytes": zero,
         "formatted_only": (ff + zero) == len(log),
+    }
+
+
+# ---------------------------------------------------------------------------
+# $LogFile record pages
+#
+# The restart area says whether the log is clean; it does not say what happened. The records do,
+# and until now this reader stopped at the restart area. The layouts below come from ntfs-3g's
+# `include/ntfs-3g/logfile.h`, which is the reference used by `ntfsrecover`:
+#
+#     RECORD_PAGE_HEADER (0x40 bytes after the fixup array)
+#         +0   "RCRD"          magic
+#         +4   u16 usa_ofs, u16 usa_count
+#         +8   u64 last_lsn / file_offset   (union: copy)
+#         +16  u32 flags
+#         +20  u16 page_count, u16 page_position
+#         +24  u16 next_record_offset, 6 reserved, u64 last_end_lsn
+#
+#     LOG_RECORD (constant 0x70 bytes; the header is padded to a 64-bit boundary so the client
+#     data that follows is 64-bit aligned)
+#         +0    u64 this_lsn
+#         +8    u64 client_previous_lsn
+#         +16   u64 client_undo_next_lsn
+#         +24   u32 client_data_length
+#         +28   u16 client_id.seq_number, u16 client_id.client_index
+#         +32   u32 record_type
+#         +36   u32 transaction_id
+#         +40   u16 flags
+#         +42   u16 reserved[3]
+#         +48   u16 redo_operation, u16 undo_operation
+#         +52   u16 redo_offset, u16 redo_length
+#         +56   u16 undo_offset, u16 undo_length
+#         +60   u16 target_attribute, u16 lcns_to_follow
+#         +64   u16 record_offset, u16 attribute_offset
+#         +68   u32 alignment, u64 target_vcn
+#
+# The deliverable the row was missing is the *transaction* view: a flat list of LSNs says nothing,
+# whereas grouping records by `transaction_id` says "these four log records were one atomic
+# operation". That grouping is what a transaction record is.
+# ---------------------------------------------------------------------------
+
+RECORD_PAGE_MAGIC = b"RCRD"
+LOG_RECORD_SIZE = 0x70
+RECORD_PAGE_HEADER_SIZE = 0x40
+
+
+def _decode_log_records(log: bytes, *, page_data_offset: int = 0,
+                        page_size: int = 0, limit: int = 2000) -> dict[str, Any]:
+    """Walk every "RCRD" page in a log buffer and decode the LOG_RECORD headers in it.
+
+    Beyond the structures, three things about this format shape the code:
+
+      * **Pages are fixed-size but records are not.** Each page is `log_page_size` bytes and holds
+        headers back to back until `next_record_offset` says where the next one starts (0 meaning
+        the end of the page). Records are packed, not aligned to a fixed stride, so the walk
+        follows the length the header states.
+      * **A record's data follows its header**, padded to a 64-bit boundary. Advancing by
+        `LOG_RECORD_SIZE` alone therefore lands mid-data on the next iteration and decodes noise as
+        an LSN — the failure mode that produces confident garbage rather than an error.
+      * **The log is circular.** Records arrive out of LSN order across wrap-around, so they are
+        reported in the order found and sorted by LSN only for the transaction view, which is a
+        property of the ids rather than of the layout.
+    """
+    chunks: list[dict[str, Any]] = []
+    pages: list[dict[str, Any]] = []
+    offset = log.find(RECORD_PAGE_MAGIC)
+    seen_offsets: set[int] = set()
+    while offset != -1 and len(chunks) < limit:
+        if offset in seen_offsets:
+            break
+        seen_offsets.add(offset)
+        page = log[offset:]
+        if len(page) < RECORD_PAGE_HEADER_SIZE:
+            break
+        page_flags = struct.unpack_from("<I", page, 16)[0]
+        page_count, page_position = struct.unpack_from("<HH", page, 20)[0:2]
+        next_record = struct.unpack_from("<H", page, 24)[0]
+        pages.append({"offset": offset, "flags": page_flags, "page_count": page_count,
+                      "page_position": page_position, "next_record_offset": next_record})
+
+        # Records begin at the restart area's `log_page_data_offset`, which accounts for the
+        # page header AND its update-sequence array. `next_record_offset` is where the *next
+        # record starts*, i.e. after the first one — not where the first one is. Using it as the
+        # start skipped the first record of every page; using 0x40 decoded fixup bytes as a header.
+        start = page_data_offset if page_data_offset else RECORD_PAGE_HEADER_SIZE
+        cursor = start if 0 < start < len(page) else RECORD_PAGE_HEADER_SIZE
+        guard_steps = 0
+        while cursor + LOG_RECORD_SIZE <= len(page) and len(chunks) < limit:
+            guard_steps += 1
+            if guard_steps > 4096:
+                break
+            this_lsn = struct.unpack_from("<Q", page, cursor)[0]
+            previous_lsn = struct.unpack_from("<Q", page, cursor + 8)[0]
+            undo_next_lsn = struct.unpack_from("<Q", page, cursor + 16)[0]
+            data_length = struct.unpack_from("<I", page, cursor + 24)[0]
+            client_seq, client_index = struct.unpack_from("<HH", page, cursor + 28)[0:2]
+            record_type = struct.unpack_from("<I", page, cursor + 32)[0]
+            transaction_id = struct.unpack_from("<I", page, cursor + 36)[0]
+            record_flags = struct.unpack_from("<H", page, cursor + 40)[0]
+            redo_op, undo_op = struct.unpack_from("<HH", page, cursor + 48)[0:2]
+            redo_off, redo_len = struct.unpack_from("<HH", page, cursor + 52)[0:2]
+            undo_off, undo_len = struct.unpack_from("<HH", page, cursor + 56)[0:2]
+            target_attribute, lcns_to_follow = struct.unpack_from("<HH", page, cursor + 60)[0:2]
+            record_offset, attribute_offset = struct.unpack_from("<HH", page, cursor + 64)[0:2]
+            target_vcn = struct.unpack_from("<Q", page, cursor + 72)[0]                 if cursor + 80 <= len(page) else None
+
+            # Reject an implausible header rather than reporting it. A real record has a non-zero
+            # LSN and a data length that fits the page; a stride landing mid-data almost never
+            # satisfies both, and reporting the few that do is far better than reporting all of
+            # them as transactions.
+            if not this_lsn:
+                cursor += LOG_RECORD_SIZE
+                continue
+            if data_length > len(page):
+                cursor += LOG_RECORD_SIZE
+                continue
+
+            chunk: dict[str, Any] = {
+                "this_lsn": this_lsn,
+                "client_previous_lsn": previous_lsn,
+                "client_undo_next_lsn": undo_next_lsn,
+                "client_data_length": data_length,
+                "client_id": {"sequence_number": client_seq, "index": client_index},
+                "record_type": record_type,
+                "transaction_id": transaction_id,
+                "flags": record_flags,
+                "redo": {"operation": redo_op, "offset": redo_off, "length": redo_len},
+                "undo": {"operation": undo_op, "offset": undo_off, "length": undo_len},
+                "target_attribute": target_attribute,
+                "lcn_count": lcns_to_follow,
+                "record_offset": record_offset,
+                "attribute_offset": attribute_offset,
+                "target_vcn": target_vcn,
+                "page_offset": offset,
+                "page_cursor": cursor,
+            }
+            chunks.append(chunk)
+            # Advance past the header AND its padded data. Advancing by the header alone decodes
+            # the record's own payload as the next header.
+            advance = LOG_RECORD_SIZE + ((data_length + 7) & ~7)
+            cursor += advance if advance > 0 else LOG_RECORD_SIZE
+
+        following = log.find(RECORD_PAGE_MAGIC, offset + 4)
+        if following == -1 or following <= offset:
+            break
+        offset = following
+
+    transactions: dict[int, dict[str, Any]] = {}
+    for chunk in chunks:
+        identifier = chunk["transaction_id"]
+        group = transactions.setdefault(identifier, {
+            "transaction_id": identifier,
+            "record_count": 0,
+            "lsns": [],
+            "record_types": [],
+            "redo_operations": [],
+            "undo_operations": [],
+            "target_attributes": [],
+            "client_data_bytes": 0,
+        })
+        group["record_count"] += 1
+        group["lsns"].append(chunk["this_lsn"])
+        if chunk["record_type"] not in group["record_types"]:
+            group["record_types"].append(chunk["record_type"])
+        if chunk["redo"]["operation"] not in group["redo_operations"]:
+            group["redo_operations"].append(chunk["redo"]["operation"])
+        if chunk["undo"]["operation"] not in group["undo_operations"]:
+            group["undo_operations"].append(chunk["undo"]["operation"])
+        if chunk["target_attribute"] not in group["target_attributes"]:
+            group["target_attributes"].append(chunk["target_attribute"])
+        group["client_data_bytes"] += chunk["client_data_length"]
+
+    ordered = []
+    for group in transactions.values():
+        group["lsns"].sort()
+        group["first_lsn"] = group["lsns"][0]
+        group["last_lsn"] = group["lsns"][-1]
+        # A transaction whose id is 0 is what NTFS uses for records that belong to no transaction
+        # (client restart records and similar). Calling each of those its own "transaction" would
+        # inflate the count with things that are not transactions.
+        group["is_transaction"] = group["transaction_id"] != 0 and group["record_count"] > 0
+        ordered.append(group)
+    ordered.sort(key=lambda entry: (-entry["record_count"], entry["transaction_id"]))
+
+    return {
+        "record_count": len(chunks),
+        "records": chunks,
+        "page_count": len(pages),
+        "pages": pages[:50],
+        "transaction_count": sum(1 for entry in ordered if entry["is_transaction"]),
+        "transactions": ordered[:200],
+        "orphan_record_count": sum(1 for entry in ordered
+                                   if not entry["is_transaction"]),
     }
 
 
