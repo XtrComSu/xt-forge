@@ -1,0 +1,5 @@
+module example.com/demo
+
+go 1.21
+
+require example.com/library v1.2.3

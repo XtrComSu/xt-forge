@@ -2,7 +2,7 @@ $ xt-forge re disasm-native ./demo --target main --flow
 {
   "ok": true,
   "engine": "xt-forge-sys",
-  "path": "/tmp/xtforge-private-visuals.IvRan3/demo",
+  "path": "./demo",
   "format": "elf",
   "arch": "x86_64",
   "address": 4392,

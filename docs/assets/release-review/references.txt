@@ -1,0 +1,29 @@
+$ xt-forge re xrefs-native ./demo --target increment --json
+{
+  "ok": true,
+  "engine": "xt-forge-sys",
+  "path": "./demo",
+  "format": "elf",
+  "arch": "x86_64",
+  "target": 4377,
+  "seeds": 9,
+  "scanned": 9,
+  "discovered": 0,
+  "discovery_limited": false,
+  "pending": 0,
+  "limited_functions": 2,
+  "indirect_calls": 3,
+  "total_references": 1,
+  "references": [
+    {
+      "function": 4392,
+      "function_name": "main",
+      "site": 4401,
+      "target": 4377,
+      "target_name": "increment",
+      "target_source": "elf_symtab",
+      "target_class": "code",
+      "kind": "call"
+    }
+  ]
+}

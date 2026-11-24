@@ -12,7 +12,7 @@
 
 xt-forge reads ELF, Windows PE, and Mach-O binaries from the command line. Use it to list functions, follow calls and cross-references, inspect symbols, and compare builds. The same CLI inventories software dependencies, checks pinned versions against OSV, and traces callers and runtime dispatch in source trees. Agents can use these tools over stdio MCP.
 
-This is the **0.4.8 private preview**. The [changelog](CHANGELOG.md) records the changes since 0.4.7.
+Version 0.4.8 adds dependency inventory and OSV advisory checks, expands binary and container inspection, and adds evidence export and comparison. [Changelog](CHANGELOG.md)
 
 ![Workflow showing input files, analysis steps, and CLI, MCP, or evidence output](docs/assets/release-review/workflow.svg)
 
@@ -101,9 +101,11 @@ xt-forge re disasm-native ./demo --target main --flow
 xt-forge re xrefs-native ./demo --target increment --json
 ```
 
-![Native decoder listing instructions from a compiled ELF](docs/assets/release-review/disassembly.svg)
+The walkthrough follows one call from the ELF entry summary through the decoded body of `main` to the address and symbol for `increment`.
 
-[Raw CLI output](docs/assets/release-review/disassembly.txt)
+![Animated terminal walkthrough showing ELF metadata, disassembly of main, and the direct call to increment](docs/assets/release-review/binary-walkthrough.gif)
+
+[Static instruction listing](docs/assets/release-review/disassembly.svg) · [Image metadata](docs/assets/release-review/overview.txt) · [Disassembly output](docs/assets/release-review/disassembly.txt) · [Cross-reference output](docs/assets/release-review/references.txt)
 
 The Electron fuse reader reports known settings and leaves unknown states visible. The source tree also includes Interface Builder archive inspection and Chromium-based WebMCP discovery. [Electron fixture](docs/assets/session-captures/07-fuses.txt) · [Interface Builder fixture](docs/assets/session-captures/08-nib.txt) · [WebMCP example](docs/assets/session-captures/09-webmcp.txt) · [NTFS fixture](docs/assets/session-captures/11-ntfs.txt)
 
@@ -119,9 +121,11 @@ xt-forge re remediate .
 
 `re deps` reads dependency manifests and supported compiled metadata, including Go build information. `re vulns` sends resolved package names and versions to OSV and checks the advisory's affected ranges. Unresolved version ranges stay in the inventory without an advisory lookup. `re cve-info` shows a single advisory by ID.
 
-![Dependency inventory showing a resolved version from a generated go.mod](docs/assets/release-review/dependencies.svg)
+The example reads a sample `go.mod` and shows the version recorded in the manifest alongside the resolved package identity used for advisory lookup.
 
-[CLI transcript](docs/assets/release-review/dependencies.txt)
+![Animated terminal walkthrough showing a Go manifest and the resolved dependency inventory](docs/assets/release-review/dependency-walkthrough.gif)
+
+[Static inventory](docs/assets/release-review/dependencies.svg) · [Sample manifest](docs/assets/release-review/manifest.txt) · [Inventory output](docs/assets/release-review/dependencies.txt)
 
 `re remediate` previews proposed version changes. Add `--write` to apply supported edits. The command verifies each candidate file before writing and retains an `.xtbak` copy of a changed file. Review the diff and run your package manager and tests before merging. [Example plan](docs/assets/session-captures/03-remediate-dry.txt)
 
@@ -189,6 +193,8 @@ node --test plugins/xt-native/test/*.test.mjs
 python3 scripts/verify_sys_native.py
 ```
 
-The Go suite includes an HTTP test that needs loopback sockets. The cross-format verifier needs a C compiler, Clang, LLD, MinGW, and LLVM tools. See [runtime architecture](docs/ARCHITECTURE-RUST-GO.md) for build and verifier details. Run `python3 scripts/render_readme_diagrams.py` to regenerate the SVG figures.
+The Go suite includes an HTTP test that needs loopback sockets. The cross-format verifier needs a C compiler, Clang, LLD, MinGW, and LLVM tools. See [runtime architecture](docs/ARCHITECTURE-RUST-GO.md) for build and verifier details.
+
+To recreate the figures, run `python3 scripts/render_readme_diagrams.py` with Pillow installed. To refresh the terminal output first, run `python3 scripts/capture_readme_demo.py` with a C compiler and the Go hub available.
 
 [MIT License](LICENSE) · [XT-OSS](https://xtrcom.xyz)

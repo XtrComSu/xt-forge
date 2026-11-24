@@ -1,6 +1,44 @@
-$ xt-forge re deps .
-Dependencies in .
-  1 dependenc(ies) from 1 manifest(s)  resolved 1  unresolved 0
-  ecosystems  Go=1
-  go           go.mod  (1 deps, 1 resolved)
-    Go        example.com/library                          1.2.3
+$ xt-forge re deps . --json
+{
+  "ok": true,
+  "root": ".",
+  "manifests": [
+    {
+      "path": "go.mod",
+      "kind": "go",
+      "dependency_count": 1,
+      "resolved_count": 1
+    }
+  ],
+  "manifest_count": 1,
+  "dependency_count": 1,
+  "resolved_count": 1,
+  "unresolved_count": 0,
+  "ecosystems": {
+    "Go": 1
+  },
+  "scopes": {
+    "runtime": 1
+  },
+  "dependencies": [
+    {
+      "name": "example.com/library",
+      "version": "1.2.3",
+      "ecosystem": "Go",
+      "raw_version": "v1.2.3",
+      "resolved": true,
+      "indirect": false,
+      "source": "go.mod",
+      "scope": "runtime",
+      "sources": [
+        {
+          "path": "go.mod",
+          "kind": "go"
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "complete": true,
+  "toolchains": []
+}

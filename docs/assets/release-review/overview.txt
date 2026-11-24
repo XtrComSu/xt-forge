@@ -1,0 +1,559 @@
+$ xt-forge re overview ./demo --json
+{
+  "ok": true,
+  "engine": "xt-forge-sys",
+  "path": "./demo",
+  "format": "elf",
+  "images": [
+    {
+      "arch": "x86_64",
+      "bits": 64,
+      "entry_point": 4128,
+      "entry_file_offset": 4128,
+      "sections": [
+        {
+          "name": "",
+          "address": 0,
+          "size": 0,
+          "offset": 0,
+          "file_size": 0
+        },
+        {
+          "name": ".note.gnu.build-id",
+          "address": 904,
+          "size": 36,
+          "offset": 904,
+          "file_size": 36
+        },
+        {
+          "name": ".interp",
+          "address": 940,
+          "size": 28,
+          "offset": 940,
+          "file_size": 28
+        },
+        {
+          "name": ".gnu.hash",
+          "address": 968,
+          "size": 28,
+          "offset": 968,
+          "file_size": 28
+        },
+        {
+          "name": ".dynsym",
+          "address": 1000,
+          "size": 144,
+          "offset": 1000,
+          "file_size": 144
+        },
+        {
+          "name": ".dynstr",
+          "address": 1144,
+          "size": 136,
+          "offset": 1144,
+          "file_size": 136
+        },
+        {
+          "name": ".gnu.version",
+          "address": 1280,
+          "size": 12,
+          "offset": 1280,
+          "file_size": 12
+        },
+        {
+          "name": ".gnu.version_r",
+          "address": 1296,
+          "size": 48,
+          "offset": 1296,
+          "file_size": 48
+        },
+        {
+          "name": ".rela.dyn",
+          "address": 1344,
+          "size": 192,
+          "offset": 1344,
+          "file_size": 192
+        },
+        {
+          "name": ".init",
+          "address": 4096,
+          "size": 27,
+          "offset": 4096,
+          "file_size": 27
+        },
+        {
+          "name": ".text",
+          "address": 4128,
+          "size": 280,
+          "offset": 4128,
+          "file_size": 280
+        },
+        {
+          "name": ".fini",
+          "address": 4408,
+          "size": 13,
+          "offset": 4408,
+          "file_size": 13
+        },
+        {
+          "name": ".rodata",
+          "address": 8192,
+          "size": 4,
+          "offset": 8192,
+          "file_size": 4
+        },
+        {
+          "name": ".eh_frame_hdr",
+          "address": 8196,
+          "size": 36,
+          "offset": 8196,
+          "file_size": 36
+        },
+        {
+          "name": ".eh_frame",
+          "address": 8232,
+          "size": 116,
+          "offset": 8232,
+          "file_size": 116
+        },
+        {
+          "name": ".sframe",
+          "address": 8352,
+          "size": 54,
+          "offset": 8352,
+          "file_size": 54
+        },
+        {
+          "name": ".note.gnu.property",
+          "address": 8408,
+          "size": 64,
+          "offset": 8408,
+          "file_size": 64
+        },
+        {
+          "name": ".note.ABI-tag",
+          "address": 8472,
+          "size": 32,
+          "offset": 8472,
+          "file_size": 32
+        },
+        {
+          "name": ".init_array",
+          "address": 15888,
+          "size": 8,
+          "offset": 11792,
+          "file_size": 8
+        },
+        {
+          "name": ".fini_array",
+          "address": 15896,
+          "size": 8,
+          "offset": 11800,
+          "file_size": 8
+        },
+        {
+          "name": ".dynamic",
+          "address": 15904,
+          "size": 416,
+          "offset": 11808,
+          "file_size": 416
+        },
+        {
+          "name": ".got",
+          "address": 16320,
+          "size": 40,
+          "offset": 12224,
+          "file_size": 40
+        },
+        {
+          "name": ".got.plt",
+          "address": 16360,
+          "size": 24,
+          "offset": 12264,
+          "file_size": 24
+        },
+        {
+          "name": ".data",
+          "address": 16384,
+          "size": 16,
+          "offset": 12288,
+          "file_size": 16
+        },
+        {
+          "name": ".bss",
+          "address": 16400,
+          "size": 8,
+          "offset": 12304,
+          "file_size": 0
+        },
+        {
+          "name": ".comment",
+          "address": 0,
+          "size": 27,
+          "offset": 12304,
+          "file_size": 27
+        },
+        {
+          "name": ".debug_aranges",
+          "address": 0,
+          "size": 48,
+          "offset": 12331,
+          "file_size": 48
+        },
+        {
+          "name": ".debug_info",
+          "address": 0,
+          "size": 133,
+          "offset": 12379,
+          "file_size": 133
+        },
+        {
+          "name": ".debug_abbrev",
+          "address": 0,
+          "size": 108,
+          "offset": 12512,
+          "file_size": 108
+        },
+        {
+          "name": ".debug_line",
+          "address": 0,
+          "size": 88,
+          "offset": 12620,
+          "file_size": 88
+        },
+        {
+          "name": ".debug_str",
+          "address": 0,
+          "size": 75,
+          "offset": 12708,
+          "file_size": 75
+        },
+        {
+          "name": ".debug_line_str",
+          "address": 0,
+          "size": 34,
+          "offset": 12783,
+          "file_size": 34
+        },
+        {
+          "name": ".symtab",
+          "address": 0,
+          "size": 864,
+          "offset": 12824,
+          "file_size": 864
+        },
+        {
+          "name": ".strtab",
+          "address": 0,
+          "size": 478,
+          "offset": 13688,
+          "file_size": 478
+        },
+        {
+          "name": ".shstrtab",
+          "address": 0,
+          "size": 356,
+          "offset": 14166,
+          "file_size": 356
+        }
+      ],
+      "section_entropy": [
+        {
+          "name": ".comment",
+          "entropy": 3.7541634277688813,
+          "class": "structured",
+          "bytes": 27
+        },
+        {
+          "name": ".data",
+          "entropy": 0.6685644431995964,
+          "class": "low",
+          "bytes": 16
+        },
+        {
+          "name": ".debug_abbrev",
+          "entropy": 4.6098450221303695,
+          "class": "structured",
+          "bytes": 108
+        },
+        {
+          "name": ".debug_aranges",
+          "entropy": 0.8666847557897407,
+          "class": "low",
+          "bytes": 48
+        },
+        {
+          "name": ".debug_info",
+          "entropy": 2.6306374740368703,
+          "class": "structured",
+          "bytes": 133
+        },
+        {
+          "name": ".debug_line",
+          "entropy": 3.2470888339577084,
+          "class": "structured",
+          "bytes": 88
+        },
+        {
+          "name": ".debug_line_str",
+          "entropy": 4.101881223476018,
+          "class": "structured",
+          "bytes": 34
+        },
+        {
+          "name": ".debug_str",
+          "entropy": 4.598754111982134,
+          "class": "structured",
+          "bytes": 75
+        },
+        {
+          "name": ".dynamic",
+          "entropy": 1.385954060769362,
+          "class": "structured",
+          "bytes": 416
+        },
+        {
+          "name": ".dynstr",
+          "entropy": 4.591987706737049,
+          "class": "structured",
+          "bytes": 136
+        },
+        {
+          "name": ".dynsym",
+          "entropy": 0.5615163971124166,
+          "class": "low",
+          "bytes": 144
+        },
+        {
+          "name": ".eh_frame",
+          "entropy": 3.5291188994199745,
+          "class": "structured",
+          "bytes": 116
+        },
+        {
+          "name": ".eh_frame_hdr",
+          "entropy": 3.0001157253741253,
+          "class": "structured",
+          "bytes": 36
+        },
+        {
+          "name": ".fini",
+          "entropy": 3.238901256602631,
+          "class": "structured",
+          "bytes": 13
+        },
+        {
+          "name": ".fini_array",
+          "entropy": 1.061278124459133,
+          "class": "structured",
+          "bytes": 8
+        },
+        {
+          "name": ".gnu.hash",
+          "entropy": 0.4912373418243331,
+          "class": "low",
+          "bytes": 28
+        },
+        {
+          "name": ".gnu.version",
+          "entropy": 0.8166890883150209,
+          "class": "low",
+          "bytes": 12
+        },
+        {
+          "name": ".gnu.version_r",
+          "entropy": 2.3020440502629658,
+          "class": "structured",
+          "bytes": 48
+        },
+        {
+          "name": ".got",
+          "entropy": 0,
+          "class": "low",
+          "bytes": 40
+        },
+        {
+          "name": ".got.plt",
+          "entropy": 0.49715018363696706,
+          "class": "low",
+          "bytes": 24
+        },
+        {
+          "name": ".init",
+          "entropy": 4.236368983644952,
+          "class": "structured",
+          "bytes": 27
+        },
+        {
+          "name": ".init_array",
+          "entropy": 1.061278124459133,
+          "class": "structured",
+          "bytes": 8
+        },
+        {
+          "name": ".interp",
+          "entropy": 3.94075983254009,
+          "class": "structured",
+          "bytes": 28
+        },
+        {
+          "name": ".note.ABI-tag",
+          "entropy": 1.4126878900165245,
+          "class": "structured",
+          "bytes": 32
+        },
+        {
+          "name": ".note.gnu.build-id",
+          "entropy": 4.1916116417513765,
+          "class": "structured",
+          "bytes": 36
+        },
+        {
+          "name": ".note.gnu.property",
+          "entropy": 1.8813430162706153,
+          "class": "structured",
+          "bytes": 64
+        },
+        {
+          "name": ".rela.dyn",
+          "entropy": 1.3826746543593884,
+          "class": "structured",
+          "bytes": 192
+        },
+        {
+          "name": ".rodata",
+          "entropy": 1.5,
+          "class": "structured",
+          "bytes": 4
+        },
+        {
+          "name": ".sframe",
+          "entropy": 2.4985032775619214,
+          "class": "structured",
+          "bytes": 54
+        },
+        {
+          "name": ".shstrtab",
+          "entropy": 4.299637444879402,
+          "class": "structured",
+          "bytes": 356
+        },
+        {
+          "name": ".strtab",
+          "entropy": 4.781345280939274,
+          "class": "structured",
+          "bytes": 478
+        },
+        {
+          "name": ".symtab",
+          "entropy": 1.7679096061581512,
+          "class": "structured",
+          "bytes": 864
+        },
+        {
+          "name": ".text",
+          "entropy": 5.146864027161963,
+          "class": "structured",
+          "bytes": 280
+        }
+      ],
+      "segments": [
+        {
+          "name": "PT_LOAD",
+          "address": 0,
+          "size": 1536,
+          "offset": 0,
+          "file_size": 1536
+        },
+        {
+          "name": "PT_LOAD",
+          "address": 4096,
+          "size": 325,
+          "offset": 4096,
+          "file_size": 325
+        },
+        {
+          "name": "PT_LOAD",
+          "address": 8192,
+          "size": 312,
+          "offset": 8192,
+          "file_size": 312
+        },
+        {
+          "name": "PT_LOAD",
+          "address": 15888,
+          "size": 520,
+          "offset": 11792,
+          "file_size": 512
+        }
+      ],
+      "executable_regions": [
+        {
+          "name": ".init",
+          "address": 4096,
+          "size": 27,
+          "offset": 4096,
+          "file_size": 27
+        },
+        {
+          "name": ".text",
+          "address": 4128,
+          "size": 280,
+          "offset": 4128,
+          "file_size": 280
+        },
+        {
+          "name": ".fini",
+          "address": 4408,
+          "size": 13,
+          "offset": 4408,
+          "file_size": 13
+        }
+      ],
+      "dependencies": [
+        "libc.so.6"
+      ],
+      "imports": [
+        {
+          "name": "__libc_start_main",
+          "slot": 16320,
+          "library": "libc.so.6",
+          "relocation": "GLOB_DAT"
+        },
+        {
+          "name": "_ITM_deregisterTMCloneTable",
+          "slot": 16328,
+          "relocation": "GLOB_DAT"
+        },
+        {
+          "name": "__gmon_start__",
+          "slot": 16336,
+          "relocation": "GLOB_DAT"
+        },
+        {
+          "name": "_ITM_registerTMCloneTable",
+          "slot": 16344,
+          "relocation": "GLOB_DAT"
+        },
+        {
+          "name": "__cxa_finalize",
+          "slot": 16352,
+          "library": "libc.so.6",
+          "relocation": "GLOB_DAT"
+        }
+      ],
+      "versions": [
+        {
+          "name": "__libc_start_main",
+          "version": "GLIBC_2.34",
+          "library": "libc.so.6"
+        },
+        {
+          "name": "__cxa_finalize",
+          "version": "GLIBC_2.2.5",
+          "library": "libc.so.6"
+        }
+      ]
+    }
+  ]
+}

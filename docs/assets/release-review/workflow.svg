@@ -1,21 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="948" height="276" viewBox="0 0 948 276" role="img" aria-labelledby="title">
 <title id="title">xt-forge inputs, analysis, and results</title>
-<rect width="100%" height="100%" rx="16" fill="#111827"/>
+<rect width="100%" height="100%" rx="16" fill="#101116"/>
+<path d="M24 20 H98 L91 26 H24Z" fill="#ff5057"/>
 <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8293ad"/></marker></defs>
 <g fill="none" stroke="#8293ad" stroke-width="2" marker-end="url(#arrow)"><path d="M 300 138 H 332"/><path d="M 615 138 H 647"/></g>
 <g font-family="system-ui, sans-serif">
-<rect x="24" y="47" width="270" height="182" rx="12" fill="#1c273a" stroke="#42516a"/>
-<text x="48" y="87" fill="#9be7cc" font-size="22" font-weight="700">Input</text>
+<rect x="24" y="47" width="270" height="182" rx="12" fill="#1b1d25" stroke="#3b3e4b"/>
+<text x="48" y="87" fill="#ff8589" font-size="22" font-weight="700">Input</text>
 <text x="48" y="128" fill="#e4eaf5" font-size="16">ELF, PE, Mach-O</text>
 <text x="48" y="158" fill="#e4eaf5" font-size="16">Source trees</text>
 <text x="48" y="188" fill="#e4eaf5" font-size="16">Package manifests</text>
-<rect x="339" y="47" width="270" height="182" rx="12" fill="#1c273a" stroke="#42516a"/>
-<text x="363" y="87" fill="#9be7cc" font-size="22" font-weight="700">Inspect</text>
+<rect x="339" y="47" width="270" height="182" rx="12" fill="#1b1d25" stroke="#3b3e4b"/>
+<text x="363" y="87" fill="#ff8589" font-size="22" font-weight="700">Inspect</text>
 <text x="363" y="128" fill="#e4eaf5" font-size="16">Map sections and symbols</text>
 <text x="363" y="158" fill="#e4eaf5" font-size="16">Decode instructions and xrefs</text>
 <text x="363" y="188" fill="#e4eaf5" font-size="16">Resolve package versions</text>
-<rect x="654" y="47" width="270" height="182" rx="12" fill="#1c273a" stroke="#42516a"/>
-<text x="678" y="87" fill="#9be7cc" font-size="22" font-weight="700">Results</text>
+<rect x="654" y="47" width="270" height="182" rx="12" fill="#1b1d25" stroke="#3b3e4b"/>
+<text x="678" y="87" fill="#ff8589" font-size="22" font-weight="700">Results</text>
 <text x="678" y="128" fill="#e4eaf5" font-size="16">CLI and JSON</text>
 <text x="678" y="158" fill="#e4eaf5" font-size="16">MCP tool responses</text>
 <text x="678" y="188" fill="#e4eaf5" font-size="16">Saved evidence</text>
