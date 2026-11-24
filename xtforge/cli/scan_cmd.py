@@ -454,6 +454,13 @@ def cmd_re(args):
 
     # 'llvm' routes like 'pe': the subverb is the second positional argument.
     # available/tools need no path, so handle this before the path check.
+    if verb == "xrefs":
+        # `re xrefs <binary> <symbol>` — the symbol arrives in `path`. Capturing it is only half
+        # the job: `path` is still the symbol afterwards, so without the swap below the binary
+        # would be `helper` and the guard would refuse a target that was supplied correctly.
+        xref_target = args.path or (getattr(args, "extra", None) or [None])[0] or ""
+        path = args.value or args.path
+
     if verb == "llvm":
         from ..core.re import llvm
         subverb = args.value or "available"
@@ -1257,8 +1264,19 @@ def cmd_re(args):
             }
         elif verb == "xrefs":
             from ..core.re import analysis
-            target_ref = getattr(args, "target", None) or getattr(args, "symbol", None) or ""
-            res = analysis.find_xrefs(path, target_ref)
+            target_ref = (xref_target or getattr(args, "target", None)
+                          or getattr(args, "symbol", None) or "")
+            if not target_ref:
+                # With no target the engine still returned 98 rows under the heading
+                # "cross-references to :" — a list with no question behind it, which reads as
+                # a successful search. Refuse and say what is missing.
+                res = {"ok": False,
+                       "error": "xrefs needs a target symbol or address",
+                       "usage": "re xrefs <binary> <symbol-or-address>",
+                       "hint": ("use `re symbols` to list candidates, or `re xrefs <binary> "
+                                "0x<sender>` for an address")}
+            else:
+                res = analysis.find_xrefs(path, target_ref)
         elif verb == "checksec":
             res = renative.checksec(path)
             if not res.get("ok"):
@@ -2547,11 +2565,22 @@ def cmd_re(args):
     elif verb == "view":
         human = f"Visual companion generated at {res.get('view_file')} ({res.get('blocks')} blocks)"
     elif verb == "xrefs":
-        xrefs = res.get("xrefs", [])
-        human = f"{len(xrefs)} cross-references to {res.get('target')}:\n" + "\n".join(
-            f"  {x.get('caller')} ({x.get('address')}): {x.get('mnemonic')} {x.get('operands')}"
-            for x in xrefs
-        )
+        if not res.get("ok"):
+            # Dropping the error made a refusal render as "0 cross-references to None", which
+            # reads like a completed search that found nothing.
+            lines = ["xrefs: " + str(res.get("error", "unknown"))]
+            if res.get("usage"):
+                lines.append("  usage: " + str(res["usage"]))
+            if res.get("hint"):
+                lines.append("  hint:  " + str(res["hint"]))
+            human = "\n".join(lines)
+        else:
+            xrefs = res.get("xrefs") or []
+            human = f"{len(xrefs)} cross-references to {res.get('target')}:\n" + "\n".join(
+                f"  {x.get('caller')} ({x.get('address')}): "
+                f"{x.get('mnemonic')} {x.get('operands')}"
+                for x in xrefs
+            )
     elif verb == "checksec":
         mits = res.get("mitigations", {})
         human = f"Checksec for {res.get('path')} ({res.get('format')}):\n" + "\n".join(

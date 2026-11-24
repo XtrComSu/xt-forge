@@ -220,11 +220,25 @@ def parse_blocks_from_disasm(
 def parse_xrefs_from_disasm(disasm_text: str, target_symbol_or_addr: str | int) -> list[dict[str, Any]]:
     """Index callers and references to a specific function or address."""
     target_str = str(target_symbol_or_addr).lower().strip()
+    # objdump prints branch targets with no `0x` prefix (`call 1139 <helper>`), so a
+    # caller passing `0x1139` never matched the operand text: `re xrefs <bin> 0x1139`
+    # reported zero references to an address objdump plainly shows being called.
     target_hex = ""
+    bare_hex = ""
     if isinstance(target_symbol_or_addr, int):
         target_hex = hex(target_symbol_or_addr).lower()
+        bare_hex = f"{target_symbol_or_addr:x}"
     elif target_str.startswith("0x"):
         target_hex = target_str
+        try:
+            bare_hex = f"{int(target_str, 16):x}"
+        except ValueError:
+            bare_hex = target_str[2:]
+    elif target_str:
+        try:
+            bare_hex = f"{int(target_str, 16):x}"
+        except ValueError:
+            bare_hex = ""
 
     xrefs: list[dict[str, Any]] = []
     current_fn = ""
@@ -244,10 +258,15 @@ def parse_xrefs_from_disasm(disasm_text: str, target_symbol_or_addr: str | int) 
         ops = (operands or "").strip()
 
         # Check if line references target
+        ops_lower = ops.lower()
         matched = False
-        if target_str in ops.lower():
+        if target_str and target_str in ops_lower:
             matched = True
-        elif target_hex and target_hex in ops.lower():
+        elif target_hex and target_hex in ops_lower:
+            matched = True
+        elif bare_hex and re.search(rf"(?<![0-9a-f]){re.escape(bare_hex)}(?![0-9a-f])",
+                                    ops_lower):
+            # Word-bounded, so `1139` does not match inside `11139` or `11390`.
             matched = True
 
         if matched:
