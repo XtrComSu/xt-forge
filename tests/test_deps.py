@@ -775,3 +775,135 @@ class XmlCommentRewriteTest(unittest.TestCase):
         self.assertFalse(report["ok"])
         self.assertEqual(path.read_text(), self.BODY, "the file was modified anyway")
         self.assertEqual(report["files_changed"], [])
+
+
+class ConcurrentScanTest(unittest.TestCase):
+    """`scan` queries one dependency per round trip, with bounded concurrency.
+
+    Measured on this host against live OSV, ten packages serially took a median of 16.35s over
+    three interleaved trials — a 200-dependency lockfile therefore takes around five minutes, long
+    enough that a caller runs it once and never again. Twelve requests in flight brought the same
+    ten to a median of 2.34s with identical results.
+
+    These tests stub the network so they assert the *contract* rather than a latency number: every
+    dependency is queried exactly once, results come back in input order regardless of completion
+    order, one failure does not lose the others, and the width is bounded.
+    """
+
+    def _deps(self, count: int) -> list[dict]:
+        return [{"ecosystem": "Go", "name": f"example.com/m{i}", "version": "1.0.0",
+                 "resolved": True, "sources": [{"path": "go.mod", "kind": "go"}]}
+                for i in range(count)]
+
+    def test_every_dependency_is_queried_exactly_once(self) -> None:
+        from unittest import mock
+        calls: list[str] = []
+
+        def fake(name, version, ecosystem, **kwargs):
+            calls.append(name)
+            return {"ok": True, "vulnerabilities": []}
+
+        with mock.patch.object(vulns, "query_one", side_effect=fake):
+            report = vulns.scan(self._deps(25), limit=50)
+        self.assertEqual(sorted(calls), sorted(f"example.com/m{i}" for i in range(25)))
+        self.assertEqual(len(set(calls)), 25, "no dependency may be queried twice")
+        self.assertEqual(report["queried_count"], 25)
+
+    def test_completion_order_does_not_change_the_result(self) -> None:
+        """`pool.map` yields in input order; an `as_completed` loop would not.
+
+        The observable consequence is not the order of `findings` — that is sorted by severity and
+        then name, so `m10` precedes `m2` lexically and a name-order assertion would be testing the
+        sort. What must not vary is *which* dependency each result is attributed to. If the pool
+        handed results back out of order and they were zipped against the input naively, an advisory
+        would be attributed to the wrong package — a security finding filed against the wrong
+        dependency, which is worse than no finding.
+        """
+        from unittest import mock
+        import random
+        import time
+
+        def fake(name, version, ecosystem, **kwargs):
+            # Random delay, so completion order is unrelated to input order.
+            time.sleep(random.random() * 0.01)
+            # `for_name` records which dependency this answer was computed for. A shuffled zip
+            # still pairs the id with the name (both travel inside the answer), so the check that
+            # catches it is comparing against the *finding's* name, which travels alongside.
+            return {"ok": True, "vulnerabilities": [
+                {"id": f"GHSA-{name}", "for_name": name, "severity": "HIGH",
+                 "matched_range": {"type": "SEMVER"}}]}
+
+        with mock.patch.object(vulns, "query_one", side_effect=fake):
+            report = vulns.scan(self._deps(12), limit=50)
+        self.assertEqual(len(report["findings"]), 12)
+        # Each answer records the dependency it was computed for. A zip against the wrong entry
+        # shows up as a finding whose advisory names a different package.
+        #
+        # Note on what this does and does not catch: `findings` is rebuilt from the *paired*
+        # `(item, answer)`, so a shuffle of the pairs renames both sides together and produces
+        # identical output — the mutation is unobservable, which I confirmed by running it. This
+        # test therefore pins that every answer is attributed to the dependency it was asked for,
+        # not that pairs cannot be permuted. A future change that separates result handling from
+        # pairing (an `as_completed` loop appending as answers arrive) is what this catches.
+        for entry in report["findings"]:
+            self.assertEqual(entry["vulnerabilities"][0]["for_name"], entry["name"],
+                             "this advisory was computed for a different dependency")
+
+    def test_one_failure_does_not_lose_the_others(self) -> None:
+        from unittest import mock
+
+        def fake(name, version, ecosystem, **kwargs):
+            if name.endswith("m3"):
+                return {"ok": False, "error": "OSV unreachable"}
+            return {"ok": True, "vulnerabilities": [
+                {"id": f"GHSA-{name}", "severity": "MODERATE", "matched_range": {"type": "SEMVER"}}]}
+
+        with mock.patch.object(vulns, "query_one", side_effect=fake):
+            report = vulns.scan(self._deps(8), limit=50)
+        self.assertEqual(len(report["errors"]), 1)
+        self.assertEqual(report["errors"][0]["name"], "example.com/m3")
+        self.assertEqual(len(report["findings"]), 7, "the other seven must survive")
+        self.assertFalse(report["complete"])
+
+    def test_the_pool_is_never_wider_than_the_work(self) -> None:
+        from unittest import mock
+        seen: list[int] = []
+
+        def fake(name, version, ecosystem, **kwargs):
+            return {"ok": True, "vulnerabilities": []}
+
+        real_executor = vulns.ThreadPoolExecutor
+
+        class Recorder(real_executor):
+            def __init__(self, max_workers=None, **kwargs):
+                seen.append(max_workers)
+                super().__init__(max_workers=max_workers, **kwargs)
+
+        with mock.patch.object(vulns, "query_one", side_effect=fake), \
+                mock.patch.object(vulns, "ThreadPoolExecutor", Recorder):
+            vulns.scan(self._deps(3), limit=50)
+        self.assertEqual(seen, [3], "3 dependencies must not spin up 12 workers")
+
+    def test_a_single_dependency_needs_no_pool(self) -> None:
+        from unittest import mock
+
+        def fake(name, version, ecosystem, **kwargs):
+            return {"ok": True, "vulnerabilities": []}
+
+        with mock.patch.object(vulns, "query_one", side_effect=fake), \
+                mock.patch.object(vulns, "ThreadPoolExecutor", side_effect=AssertionError("no pool")):
+            report = vulns.scan(self._deps(1), limit=50)
+        self.assertEqual(report["queried_count"], 1)
+
+    def test_the_limit_is_respected_before_the_pool_is_sized(self) -> None:
+        from unittest import mock
+        calls: list[str] = []
+
+        def fake(name, version, ecosystem, **kwargs):
+            calls.append(name)
+            return {"ok": True, "vulnerabilities": []}
+
+        with mock.patch.object(vulns, "query_one", side_effect=fake):
+            report = vulns.scan(self._deps(30), limit=5)
+        self.assertEqual(len(calls), 5)
+        self.assertEqual(report["queried_count"], 5)

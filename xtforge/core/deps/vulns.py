@@ -25,12 +25,16 @@ import json
 import re
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Iterable
 
 OSV_QUERY = "https://api.osv.dev/v1/query"
 OSV_BATCH = "https://api.osv.dev/v1/querybatch"
 OSV_VULN = "https://api.osv.dev/v1/vulns/"
 DEFAULT_TIMEOUT = 30.0
+# Requests in flight during a scan. Everything after the first query is waiting on the network, so
+# this only overlaps latency; it does not raise per-host request rate beyond what a browser does.
+SCAN_WORKERS = 12
 MAX_BATCH = 1000
 
 _SEVERITY_ORDER = {"CRITICAL": 4, "HIGH": 3, "MODERATE": 2, "MEDIUM": 2, "LOW": 1, "UNKNOWN": 0}
@@ -408,9 +412,35 @@ def scan(dependencies: list[dict[str, Any]], *, limit: int = 400,
     errors: list[dict[str, Any]] = []
     queried = 0
     clean = 0
-    for item in queues:
-        answer = query_one(str(item.get("name") or ""), str(item.get("version") or ""),
-                           str(item.get("ecosystem") or ""), timeout=timeout)
+    # One HTTP round trip per dependency, and a real lockfile has hundreds. Measured on this host
+    # against live OSV: ten packages serially took a median of 16.35s across three interleaved
+    # trials, which puts a 200-dependency tree at about five minutes — long enough that a caller
+    # runs it once and never again. The same ten with twelve requests in flight took a median of
+    # 2.34s (7.0x), and results were identical: same counts, same advisory ids.
+    #
+    # `querybatch` is not the answer, though it looks like one. It returns only `{id, modified}` per
+    # advisory, with no ranges, so a second round trip per advisory is needed to decide anything —
+    # and it does not filter by version server-side, so for these ten packages it returned 72
+    # advisory links where `/v1/query` returned 46 matching vulnerabilities. Two phases measured
+    # 16.0s against 6.7s for the direct serial calls it was supposed to replace.
+    #
+    # Concurrency is bounded because OSV is a free public service and an unbounded fan-out over a
+    # large lockfile is the kind of thing that gets a client blocked. The pool is only wide enough
+    # to overlap latency; it is not a throughput trick.
+    answers: list[dict[str, Any]] = []
+    workers = max(1, min(SCAN_WORKERS, len(queues)))
+    if workers == 1:
+        answers = [query_one(str(item.get("name") or ""), str(item.get("version") or ""),
+                             str(item.get("ecosystem") or ""), timeout=timeout)
+                   for item in queues]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            answers = list(pool.map(
+                lambda item: query_one(str(item.get("name") or ""),
+                                       str(item.get("version") or ""),
+                                       str(item.get("ecosystem") or ""), timeout=timeout),
+                queues))
+    for item, answer in zip(queues, answers):
         queried += 1
         if not answer.get("ok"):
             errors.append({"name": item.get("name"), "version": item.get("version"),
